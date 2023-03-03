@@ -148,7 +148,7 @@ void handleConfigMessage(Stream& input_source, String message)
         config_save();
     }
     else if (message=="powermid") {
-        cfg.lora_power = 10;
+        cfg.lora_power = 17;
         input_source.println("Set power to 10dBm");
         config_save();
     }
