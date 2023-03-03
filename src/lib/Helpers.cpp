@@ -2,6 +2,7 @@
 #include <math.h>
 #include <cmath>
 #include <Arduino.h>
+#include "main.h"
 
 
 double deg2rad(double deg)
@@ -42,4 +43,63 @@ double gpsCourseTo(double lat1, double long1, double lat2, double long2)
         a2 += TWO_PI;
     }
     return degrees(a2);
+}
+
+
+int count_peers(bool active, config_t *cfg)
+{
+    int j = 0;
+    for (int i = 0; i < cfg->lora_nodes; i++) {
+        if (active == 1) {
+            if ((peers[i].id > 0) && peers[i].lost == 0) {
+                j++;
+            }
+        }
+        else {
+            if (peers[i].id > 0) {
+                j++;
+            }
+        }
+    }
+    return j;
+}
+
+void reset_peers() {
+    sys.now_sec = millis();
+    for (int i = 0; i < cfg.lora_nodes; i++) {
+        peers[i].id = 0;
+        peers[i].host = 0;
+        peers[i].state = 0;
+        peers[i].lost = 0;
+        peers[i].broadcast = 0;
+        peers[i].lq_updated = sys.now_sec;
+        peers[i].lq_tick = 0;
+        peers[i].lq = 0;
+        peers[i].updated = 0;
+        peers[i].rssi = 0;
+        peers[i].distance = 0;
+        peers[i].direction = 0;
+        peers[i].relalt = 0;
+        strcpy(peers[i].name, "");
+    }
+}
+
+
+void pick_id() {
+    curr.id = 0;
+    for (int i = 0; i < cfg.lora_nodes; i++) {
+        if ((peers[i].id == 0) && (curr.id == 0)) {
+            curr.id = i + 1;
+        }
+    }
+}
+
+void resync_tx_slot(int16_t delay) {
+    bool startnow = 0;
+    for (int i = 0; (i < cfg.lora_nodes) && (startnow == 0); i++) {
+        if (peers[i].id > 0) {
+            sys.lora_next_tx = peers[i].updated + (curr.id - peers[i].id) * cfg.lora_slot_spacing + sys.lora_cycle + delay;
+            startnow = 1;
+        }
+    }
 }

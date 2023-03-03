@@ -15,6 +15,7 @@
 #include <lib/Display.h>
 #include <EEPROM.h>
 #include <main.h>
+#include <lib/Helpers.h>
 #include <lib/ConfigHandler.h>
 // Configuration systems (Bluetooth or WiFi)
 #ifdef BT_CONFIG
@@ -22,6 +23,7 @@
 #elif defined(WIFI_CONFIG)
 #include <lib/WiFiConfig.h>
 #endif
+#include <lib/espnow.h>
 
 #if !defined(WIFI_CONFIG) && defined(DEBUG)
 #define DBGLN(x) Serial.println(x);
@@ -39,64 +41,6 @@ msp_radar_pos_t radarPos;
 curr_t curr;
 peer_t peers[LORA_NODES_MAX];
 air_type0_t air_0;
-
-// -------- SYSTEM
-
-int count_peers(bool active = 0) {
-    int j = 0;
-    for (int i = 0; i < cfg.lora_nodes; i++) {
-        if (active == 1) {
-            if ((peers[i].id > 0) && peers[i].lost == 0) {
-                j++;
-            }
-        }
-        else {
-            if (peers[i].id > 0) {
-                j++;
-            }
-        }
-    }
-    return j;
-}
-
-void reset_peers() {
-    sys.now_sec = millis();
-    for (int i = 0; i < cfg.lora_nodes; i++) {
-        peers[i].id = 0;
-        peers[i].host = 0;
-        peers[i].state = 0;
-        peers[i].lost = 0;
-        peers[i].broadcast = 0;
-        peers[i].lq_updated = sys.now_sec;
-        peers[i].lq_tick = 0;
-        peers[i].lq = 0;
-        peers[i].updated = 0;
-        peers[i].rssi = 0;
-        peers[i].distance = 0;
-        peers[i].direction = 0;
-        peers[i].relalt = 0;
-        strcpy(peers[i].name, "");
-    }
-}
-
-void pick_id() {
-    curr.id = 0;
-    for (int i = 0; i < cfg.lora_nodes; i++) {
-        if ((peers[i].id == 0) && (curr.id == 0)) {
-            curr.id = i + 1;
-        }
-    }
-}
-
-void resync_tx_slot(int16_t delay) {
-    bool startnow = 0;
-    for (int i = 0; (i < cfg.lora_nodes) && (startnow == 0); i++) {
-        if (peers[i].id > 0) {
-            sys.lora_next_tx = peers[i].updated + (curr.id - peers[i].id) * cfg.lora_slot_spacing + sys.lora_cycle + delay;
-            startnow = 1;
-        }
-    }
-}
 
 // -------- LoRa
 
@@ -136,8 +80,6 @@ void lora_send() {
 }
 
 void lora_receive(int packetSize) {
-    DBGLN("Receive LoRa");
-
     if (packetSize == 0) return;
 
     sys.lora_last_rx = millis();
@@ -198,7 +140,7 @@ void lora_receive(int packetSize) {
         peers[id].gps_rec.groundSpeed = peers[id].gps.groundSpeed;
     }
 
-    sys.num_peers = count_peers();
+    sys.num_peers = count_peers(0, &cfg);
 
     if (sys.io_bt_enabled && sys.debug) {
         debugPrintln((String)"[" + char(id+65) + "] " + peers[id].name + " N" + peers[id].gps.lat + " E"+peers[id].gps.lon+ " "+ peers[id].gps.alt + "m " + String(peers[id].gps.groundSpeed / 100) + "m/s " + String(peers[id].gps.groundCourse / 10) + "° " + String(peers[id].rssi) + "db");
@@ -374,8 +316,11 @@ void setup() {
     #endif
     
     reset_peers();
+    #ifdef HAS_LORA
     DBGLN("Begin init LoRa");
     lora_init();
+    #endif
+    espnow_setup();
     DBGLN("Begin display");
 
     if (cfg.display_enable) {
@@ -462,16 +407,15 @@ if (sys.phase == MODE_LORA_SCAN) {
 
     if (sys.now > (sys.cycle_scan_begin + LORA_CYCLE_SCAN)) {  // End of the scan, set the ID then sync
 
-        #ifdef PLATFORM_ESP32
         if (sys.io_bt_enabled) {
             initConfigInterface();
         }
-        #elif !defined(PIN_BUTTON)
+        #if !defined(PIN_BUTTON)
         // Enable WiFi / Bluetooth if there's no button to do so
         initConfigInterface();
         #endif
 
-        sys.num_peers = count_peers();
+        sys.num_peers = count_peers(0, &cfg);
         if (sys.num_peers >= cfg.lora_nodes || curr.host == HOST_GCS) { // Too many nodes already, or connected to a ground station : go silent mode
             sys.lora_no_tx = 1;
         }
@@ -553,7 +497,10 @@ if (sys.phase == MODE_LORA_TX) {
     }
 
     sys.lora_last_tx = millis();
+    #ifdef HAS_LORA
     lora_send();
+    #endif
+    espnow_send(&air_0);
     stats.last_tx_duration = millis() - sys.lora_last_tx;
 
     // Drift correction
@@ -677,7 +624,7 @@ if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_LORA_
         }
     }
 
-    sys.num_peers_active = count_peers(1);
+    sys.num_peers_active = count_peers(1, &cfg);
     stats.packets_total += sys.num_peers_active * sys.cycle_stats / sys.lora_cycle;
     stats.packets_received += sys.pps;
     stats.percent_received = (stats.packets_received > 0) ? constrain(100 * stats.packets_received / stats.packets_total, 0 ,100) : 0;

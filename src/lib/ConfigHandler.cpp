@@ -30,9 +30,11 @@ void config_init(bool forcedefault) {
         {
         cfg.version = VERSION_CONFIG;
         strcpy(cfg.target_name, CFG_TARGET_NAME);
+        #ifdef HAS_LORA
         cfg.lora_power = LORA_POWER;
         cfg.lora_band = LORA_BAND;
         cfg.lora_frequency = LORA_FREQUENCY;
+        #endif
         cfg.lora_mode = LORA_MODE;
         cfg.force_gs = LORA_FORCE_GS;
         cfg.lora_bandwidth = LORA_M0_BANDWIDTH;
