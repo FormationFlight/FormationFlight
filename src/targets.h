@@ -73,3 +73,17 @@
     #define OLED_SDA 4
     #define OLED_SCL 15
 #endif
+
+#ifdef TARGET_ELRS_RX_900
+    #define PLATFORM_ESP8266
+    #define SERIAL_PIN_TX 1
+    #define SERIAL_PIN_RX 3
+    #define IO_LED_PIN 16
+    #define LORA_SCK 14
+    #define LORA_MISO 12
+    #define LORA_MOSI 13
+    #define LORA_CS 15
+    #define LORA_RST 2
+    #define LORA_IRQ 4
+    #define LORA_POWER 10
+#endif

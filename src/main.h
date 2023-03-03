@@ -1,3 +1,5 @@
+#ifndef MAIN_H
+#define MAIN_H
 //
 // ESP32 Radar
 // Github : https://github.com/OlivierC-FR/ESP32-INAV-Radar
@@ -5,6 +7,7 @@
 //
 // -------------------------------------------------------------------------------------------
 
+#include "lib/MSP.h"
 
 // -------- GENERAL
 
@@ -17,7 +20,6 @@
 // #define CFG_TARGET_FULLNAME < (platformio.ini)
 
 // -------- LORA DEFAULTS
-
 #define LORA_POWER 20
 #define LORA_MODE 0
 #define LORA_AUTOMODE 0
@@ -240,3 +242,4 @@ extern system_t sys;
 extern stats_t stats;
 extern curr_t curr;
 extern peer_t peers[LORA_NODES_MAX];
+#endif

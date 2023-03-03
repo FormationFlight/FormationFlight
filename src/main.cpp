@@ -7,17 +7,26 @@
 
 
 #include <Arduino.h>
+#ifdef PLATFORM_ESP32
 #include <esp_system.h>
+#endif
 #include <lib/MSP.h>
 #include <lib/LoRa.h>
+#ifdef OLED_ADDRESS
 #include <SSD1306.h>
+#endif
 #include <EEPROM.h>
 #include <main.h>
 #include <targets.h>
 #include <pixel.h>
 #include <math.h>
 #include <cmath>
+#include <lib/ConfigHandler.h>
+#ifdef PLATFORM_ESP32
 #include "BluetoothSerial.h"
+#elif defined(PLATFORM_ESP8266)
+#include <lib/WiFiConfig.h>
+#endif
 
 #define M_PI 3.14159265358979323846
 
@@ -32,63 +41,27 @@ curr_t curr;
 peer_t peers[LORA_NODES_MAX];
 air_type0_t air_0;
 
-char host_name[3][5] = {"NoFC", "GCS", "INAV"};
-char host_state[2][4] = {"", "ARM"};
-char peer_slotname[9][2] = {"X", "A", "B", "C", "D", "E", "F", "G", "H"};
-char loramode_name[3][11] = {"Standard", "Long range", "Fast"};
-char onoff[2][4]= {"Off", "On"};
+
 String bt_message = "";
 char bt_incoming;
 
+#ifdef OLED_ADDRESS
 SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);
+#endif
+#ifdef PLATFORM_ESP32
 BluetoothSerial SerialBT;
+#endif
 
 // -------- EEPROM / CONFIG
 
-void config_save() {
-    for(size_t i = 0; i < sizeof(cfg); i++) {
-        char data = ((char *)&cfg)[i];
-        EEPROM.write(i, data);
-    }
-    EEPROM.commit();
-}
+
 
 void config_clear() {
     for (int i = 0; i < 512; i++) { EEPROM.write(i, 0); }
     EEPROM.commit();
 }
 
-void config_init(bool forcedefault = 0) {
 
-    size_t size = sizeof(cfg);
-    EEPROM.begin(size * 2);
-
-    for(size_t i = 0; i < size; i++)  {
-        char data = EEPROM.read(i);
-        ((char *)&cfg)[i] = data;
-    }
-
-    if (cfg.version != VERSION_CONFIG || FORCE_DEFAULT_CONFIG || forcedefault)
-        {
-        cfg.version = VERSION_CONFIG;
-        strcpy(cfg.target_name, CFG_TARGET_NAME);
-        cfg.lora_power = LORA_POWER;
-        cfg.lora_band = LORA_BAND;
-        cfg.lora_frequency = LORA_FREQUENCY;
-        cfg.lora_mode = LORA_MODE;
-        cfg.force_gs = LORA_FORCE_GS;
-        cfg.lora_bandwidth = LORA_M0_BANDWIDTH;
-        cfg.lora_coding_rate = LORA_M0_CODING_RATE;
-        cfg.lora_spreading_factor = LORA_M0_SPREADING_FACTOR;
-        cfg.lora_nodes = LORA_M0_NODES;
-        cfg.lora_slot_spacing = LORA_M0_SLOT_SPACING;
-        cfg.lora_timing_delay = LORA_M0_TIMING_DELAY;
-        cfg.msp_after_tx_delay = LORA_M0_MSP_AFTER_TX_DELAY;
-
-        cfg.display_enable = 1;
-        config_save();
-    }
-}
 
 // -------- SYSTEM
 
@@ -286,7 +259,9 @@ void lora_receive(int packetSize) {
     sys.num_peers = count_peers();
 
     if (sys.io_bt_enabled && sys.debug) {
+        #ifdef PLATFORM_ESP32
         SerialBT.println((String)"[" + char(id+65) + "] " + peers[id].name + " N" + peers[id].gps.lat + " E"+peers[id].gps.lon+ " "+ peers[id].gps.alt + "m " + String(peers[id].gps.groundSpeed / 100) + "m/s " + String(peers[id].gps.groundCourse / 10) + "° " + String(peers[id].rssi) + "db");
+        #endif
         // SerialBT.println("SNR: " + String(sys.last_snr)+"dB / Freq.err: " + String(sys.last_freqerror)+"Hz");
         // SerialBT.println("Packet size: " + String(packetSize));
     }
@@ -304,7 +279,14 @@ void lora_receive(int packetSize) {
 
 void lora_init() {
 
+    #ifdef PLATFORM_ESP32
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+    #elif defined(PLATFORM_ESP8266)
+    SPI.begin();
+    SPI.setBitOrder(MSBFIRST);
+    SPI.setDataMode(SPI_MODE0);
+    SPI.setFrequency(10000000);
+    #endif
     LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 
     if (!LoRa.begin(cfg.lora_frequency)) { while (1); }
@@ -313,7 +295,11 @@ void lora_init() {
     LoRa.setSignalBandwidth(cfg.lora_bandwidth);
     LoRa.setCodingRate4(cfg.lora_coding_rate);
     LoRa.setSpreadingFactor(cfg.lora_spreading_factor);
+    #if LORA_POWER < 18
+    LoRa.setTxPower(cfg.lora_power, 0);
+    #else
     LoRa.setTxPower(cfg.lora_power, 1);
+    #endif
     LoRa.setOCP(250);
     LoRa.idle();
     LoRa.onReceive(lora_receive);
@@ -323,6 +309,7 @@ void lora_init() {
 // ----------------------------------------------------------------------------- Display
 
 void display_init() {
+    #ifdef OLED_ADDRESS
     pinMode(16, OUTPUT);
     pinMode(2, OUTPUT);
     digitalWrite(16, LOW);
@@ -332,9 +319,11 @@ void display_init() {
     display.flipScreenVertically();
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_LEFT);
+    #endif
 }
 
 void display_draw() {
+    #ifdef OLED_ADDRESS
     display.clear();
     int j = 0;
     int line;
@@ -564,6 +553,7 @@ void display_draw() {
         }
     }
     display.display();
+    #endif
 }
 
 // -------- MSP and FC
@@ -626,10 +616,14 @@ const byte interruptPin = 0;
 volatile int interruptCounter = 0;
 int numberOfInterrupts = 0;
 
+#ifdef PLATFORM_ESP32
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+#endif
 
 void IRAM_ATTR handleInterrupt() {
+    #ifdef PLATFORM_ESP32
     portENTER_CRITICAL_ISR(&mux);
+    #endif
 
     if (sys.io_button_pressed == 0) {
         sys.io_button_pressed = 1;
@@ -645,8 +639,11 @@ void IRAM_ATTR handleInterrupt() {
         }
         sys.io_button_released = millis();
     }
+    #ifdef PLATFORM_ESP32
     portEXIT_CRITICAL_ISR(&mux);
+    #endif
 }
+
 
 // ----------------------------- setup
 
@@ -658,6 +655,9 @@ void setup() {
     sys.debug = 0;
 
     config_init();
+    #ifdef PLATFORM_ESP8266
+    initWiFiConfig();
+    #endif
 
     sys.lora_cycle = cfg.lora_nodes * cfg.lora_slot_spacing;
     sys.cycle_stats = sys.lora_cycle * 2;
@@ -668,7 +668,9 @@ void setup() {
     pinMode(interruptPin, INPUT);
     sys.io_button_pressed = 0;
     attachInterrupt(digitalPinToInterrupt(interruptPin), handleInterrupt, RISING);
-
+    #ifndef OLED_ADDRESS
+    cfg.display_enable = false;    
+    #else
     if (cfg.display_enable) {
         display_init();
         display.clear();
@@ -683,15 +685,22 @@ void setup() {
         display.drawString (0, 52, "Press for full reset");
         display.display();
     }
+    #endif
 
     delay(START_DELAY);
 
+    #ifdef PLATFORM_ESP32
     msp.begin(Serial1);
     Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX , SERIAL_PIN_TX);
+    #elif defined(PLATFORM_ESP8266)
+    msp.begin(Serial);
+    Serial.begin(SERIAL_SPEED, SERIAL_8N1);
+    #endif
     reset_peers();
 
     lora_init();
 
+    #ifdef OLED_ADDRESS
     if (cfg.display_enable) {
         display.clear();
         display.setFont(ArialMT_Plain_10);
@@ -705,6 +714,7 @@ void setup() {
         display.drawString(0, 29, "HOST:");
         display.display();
     }
+    #endif
 
     sys.cycle_scan_begin = millis();
     sys.now = millis();
@@ -728,12 +738,14 @@ if ((sys.now > sys.io_button_released + 150) && (sys.io_button_pressed == 1)) {
 if (sys.phase == MODE_START) {
 
     if (sys.forcereset) {
+        #ifdef OLED_ADDRESS
         display.clear();
         display.setFont(ArialMT_Plain_10);
         display.setTextAlignment(TEXT_ALIGN_LEFT);
         display.drawString (0, 0, "FULL RESET");
         display.drawString (0, 12, "Rebooting...");
         display.display();
+        #endif
         config_clear();
         delay(3000);
         ESP.restart();
@@ -765,7 +777,7 @@ if (sys.phase == MODE_HOST_SCAN) {
 
         LoRa.sleep();
         LoRa.receive();
-
+        #ifdef OLED_ADDRESS
         if (cfg.display_enable) {
             if (curr.host != HOST_NONE) {
                 display.drawString (35, 29, String(host_name[curr.host]) + " " + String(curr.fcversion.versionMajor) + "."  + String(curr.fcversion.versionMinor) + "." + String(curr.fcversion.versionPatchLevel));
@@ -779,6 +791,7 @@ if (sys.phase == MODE_HOST_SCAN) {
             display.drawString (0, 39, "SCAN:");
             display.display();
         }
+        #endif
 
         sys.cycle_scan_begin = millis();
         sys.phase = MODE_LORA_SCAN;
@@ -789,11 +802,12 @@ if (sys.phase == MODE_HOST_SCAN) {
             delay(100);
             msp_set_fc();
             if (cfg.force_gs) { curr.host = HOST_GCS; }
-
+            #ifdef OLED_ADDRESS
             if (cfg.display_enable) {
                 display.drawProgressBar(0, 0, 63, 6, 100 * (millis() - sys.cycle_scan_begin) / HOST_MSP_TIMEOUT);
                 display.display();
             }
+            #endif
             sys.display_updated = millis();
         }
     }
@@ -806,7 +820,9 @@ if (sys.phase == MODE_LORA_SCAN) {
     if (sys.now > (sys.cycle_scan_begin + LORA_CYCLE_SCAN)) {  // End of the scan, set the ID then sync
 
         if(sys.io_bt_enabled) {
+            #ifdef PLATFORM_ESP32
             SerialBT.begin((String)"ESP32");
+            #endif
         }
 
         sys.num_peers = count_peers();
@@ -821,7 +837,7 @@ if (sys.phase == MODE_LORA_SCAN) {
         sys.phase = MODE_LORA_SYNC;
     }
     else { // Still scanning
-
+        #ifdef OLED_ADDRESS
         if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2 && cfg.display_enable) {
             for (int i = 0; i < cfg.lora_nodes; i++) {
                 if (peers[i].id > 0) {
@@ -832,6 +848,7 @@ if (sys.phase == MODE_LORA_SCAN) {
             display.display();
             sys.display_updated = millis();
         }
+        #endif
     delay(20);
     }
 }
@@ -988,7 +1005,7 @@ if (sys.now > sys.msp_next_cycle && curr.host != HOST_NONE && sys.phase > MODE_L
 }
 
 // ---------------------- SERIAL BLUETOOTH
-
+#ifdef PLATFORM_ESP32
 if (sys.io_bt_enabled) {
     if (SerialBT.available()) {
         bt_incoming = SerialBT.read();
@@ -1002,137 +1019,15 @@ if (sys.io_bt_enabled) {
 
         Serial.write(bt_incoming);
     }
-
     if (bt_message) {
-        if (bt_message=="reboot") {
-            SerialBT.println("Rebooting");
-            delay(1000);
-            ESP.restart();
-        }
-        else if (bt_message=="reset") {
-            SerialBT.println("Resetting to default values");
-            config_init(1);
-            SerialBT.println("Rebooting");
-            delay(1000);
-            ESP.restart();
-        }
-        else if (bt_message=="cmd") {
-            SerialBT.println("------------");
-            SerialBT.println("info : Configuration infos");
-            SerialBT.println("band433 : Radio module is 433MHz");
-            SerialBT.println("band868 : Radio module is 868MHz");
-            SerialBT.println("band915 : Radio module is 915MHz");
-            SerialBT.println("mode0 : Lora mode " + (String)loramode_name[0]);
-            SerialBT.println("mode1 : Lora mode " + (String)loramode_name[1]);
-            SerialBT.println("mode2 : Lora mode " + (String)loramode_name[2]);
-            SerialBT.println("debug : Toggle debug mode");
-            SerialBT.println("gs : Toggle ground station mode");
-            SerialBT.println("list : List active nodes");
-            SerialBT.println("reset : Reset all values to default");
-            SerialBT.println("reboot : Restarts the ESP");
-            SerialBT.println("------------");
-        }
-        else if (bt_message=="band433") {
-            SerialBT.println("Setting band : 433MHz");
-            SerialBT.println("Active after reboot");
-            cfg.lora_band = 433;
-            cfg.lora_frequency = LORA_FREQUENCY_433;
-            config_save();
-        }
-        else if (bt_message=="band868") {
-            SerialBT.println("Setting band : 868MHz");
-            SerialBT.println("Active after reboot");
-            cfg.lora_band = 868;
-            cfg.lora_frequency = LORA_FREQUENCY_868;
-            config_save();
-        }
-        else if (bt_message=="band915") {
-            SerialBT.println("Setting band : 915MHz");
-            SerialBT.println("Active after reboot");
-            cfg.lora_band = 915;
-            cfg.lora_frequency = LORA_FREQUENCY_915;
-            config_save();
-        }
-        else if (bt_message=="mode0") {
-            SerialBT.println("Setting radio mode : " + (String)loramode_name[0]);
-            cfg.lora_mode = 0;
-            cfg.lora_bandwidth = LORA_M0_BANDWIDTH;
-            cfg.lora_coding_rate = LORA_M0_CODING_RATE;
-            cfg.lora_spreading_factor = LORA_M0_SPREADING_FACTOR;
-            cfg.lora_nodes = LORA_M0_NODES;
-            cfg.lora_slot_spacing = LORA_M0_SLOT_SPACING;
-            cfg.lora_timing_delay = LORA_M0_TIMING_DELAY;
-            cfg.msp_after_tx_delay = LORA_M0_MSP_AFTER_TX_DELAY;
-            SerialBT.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
-            SerialBT.println("Active after reboot");
-            config_save();
-        }
-        else if (bt_message=="mode1") {
-            SerialBT.println("Setting radio mode : " + (String)loramode_name[1]);
-            cfg.lora_mode = 1;
-            cfg.lora_bandwidth = LORA_M1_BANDWIDTH;
-            cfg.lora_coding_rate = LORA_M1_CODING_RATE;
-            cfg.lora_spreading_factor = LORA_M1_SPREADING_FACTOR;
-            cfg.lora_nodes = LORA_M1_NODES;
-            cfg.lora_slot_spacing = LORA_M1_SLOT_SPACING;
-            cfg.lora_timing_delay = LORA_M1_TIMING_DELAY;
-            cfg.msp_after_tx_delay = LORA_M1_MSP_AFTER_TX_DELAY;
-            SerialBT.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
-            SerialBT.println("Active after reboot");
-            config_save();
-        }
-        else if (bt_message=="mode2") {
-            SerialBT.println("Setting radio mode : " + (String)loramode_name[2]);
-            cfg.lora_mode = 2;
-            cfg.lora_bandwidth = LORA_M2_BANDWIDTH;
-            cfg.lora_coding_rate = LORA_M2_CODING_RATE;
-            cfg.lora_spreading_factor = LORA_M2_SPREADING_FACTOR;
-            cfg.lora_nodes = LORA_M2_NODES;
-            cfg.lora_slot_spacing = LORA_M2_SLOT_SPACING;
-            cfg.lora_timing_delay = LORA_M2_TIMING_DELAY;
-            cfg.msp_after_tx_delay = LORA_M2_MSP_AFTER_TX_DELAY;
-            SerialBT.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
-            SerialBT.println("Active after reboot");
-            config_save();
-        }
-        else if (bt_message=="debug") {
-            if (sys.debug) { sys.debug = 0; }
-            else { sys.debug = 1;}
-        }
-        else if (bt_message=="gs") {
-            if (cfg.force_gs) { cfg.force_gs = 0; }
-            else { cfg.force_gs = 1; }
-            SerialBT.println("Ground station mode: " + (String)onoff[cfg.force_gs]);
-            SerialBT.println("Active after reboot");
-            config_save();
-        }
-        else if (bt_message=="6nodes") {
-            SerialBT.println("Setting 6 nodes max");
-            SerialBT.println("Active after reboot");
-            cfg.lora_nodes = 6;
-            config_save();
-        }
-        else if (bt_message=="info") {
-            SerialBT.println("ESP32 Radar version: " + String(cfg.version));
-            SerialBT.println("Target: " + String(cfg.target_name) + " " + String(CFG_TARGET_FULLNAME));
-            SerialBT.println("Band: " + String(cfg.lora_band)+ "MHz / Mode: " + String(loramode_name[cfg.lora_mode]));
-            SerialBT.println("Freq: " + String((float)cfg.lora_frequency / 1000000, 3)+ "MHz / Power: " + String(cfg.lora_power));
-            SerialBT.println("BW: " + String((float)cfg.lora_bandwidth / 1000, 0)+ "KHz / CR: " + String(cfg.lora_coding_rate) + " / SF: " +String(cfg.lora_spreading_factor));
-            SerialBT.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
-            SerialBT.println("Ground station mode: " + (String)onoff[cfg.force_gs]);
-        }
-        else if (bt_message=="list") {
-            for (int i = 0; i < cfg.lora_nodes; i++) {
-                if (peers[i].id > 0) {
-                    SerialBT.println((String)"[" + char(i+65) + "] " + peers[i].name + " N" + String((float)peers[i].gps_rec.lat / 10000000, 5) + " E" + String((float)peers[i].gps_rec.lon / 10000000, 5) + " " + peers[i].gps_rec.alt + "m " + String(peers[i].gps.groundSpeed / 100) + "m/s " + String(peers[i].gps.groundCourse / 10) + "° " + String((int)((sys.lora_last_tx - peers[i].updated) / 1000)) + "s " + String(peers[i].rssi) + "db");
-                }
-                if (i + 1 == curr.id) {
-                    SerialBT.println((String)"[" + char(i+65) + "] " + String(host_name[curr.host]) + " (host) N" + String((float)curr.gps.lat / 10000000, 5) + " E" + String((float)curr.gps.lon / 10000000, 5) + " " + String(curr.gps.alt) + "m Eff:" + String(stats.percent_received) + "%" );
-                }
-            }
-        }
+        handleConfigMessage(SerialBT, bt_message);
     }
 }
+#elif defined(PLATFORM_ESP8266)
+telnetLoop();
+handleTelnet();
+#endif
+
 
 // ---------------------- STATISTICS & IO
 
@@ -1165,7 +1060,7 @@ if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_LORA_
     stats.percent_received = (stats.packets_received > 0) ? constrain(100 * stats.packets_received / stats.packets_total, 0 ,100) : 0;
 
     // Screen management
-
+    #ifdef OLED_ADDRESS
     if (!curr.state && !sys.display_enable) { // Aircraft is disarmed = Turning on the OLED
         display.displayOn();
         sys.display_enable = 1;
@@ -1174,6 +1069,7 @@ if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_LORA_
         display.displayOff();
         sys.display_enable = 0;
     }
+    #endif
     sys.stats_updated = sys.now;
 }
 
