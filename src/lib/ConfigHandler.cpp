@@ -3,6 +3,11 @@
 #include <EEPROM.h>
 #include "ConfigStrings.h"
 
+void config_clear() {
+    for (int i = 0; i < 512; i++) { EEPROM.write(i, 0); }
+    EEPROM.commit();
+}
+
 void config_save() {
     for(size_t i = 0; i < sizeof(cfg); i++) {
         char data = ((char *)&cfg)[i];

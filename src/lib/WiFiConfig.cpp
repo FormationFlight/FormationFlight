@@ -1,7 +1,8 @@
+#ifdef WIFI_CONFIG
 #include <Arduino.h>
 #include "WiFiConfig.h"
 #include "ESP8266WiFi.h"
-#include "ESPTelnetStream.h"
+#include "ESPTelnet/ESPTelnetStream.h"
 
 ESPTelnetStream telnet;
 
@@ -13,19 +14,15 @@ void setupNetwork()
     WiFi.softAP(ssid, "inavradar");
 }
 
-void initWiFiConfig()
+void initConfigInterface()
 {
     setupNetwork();
     telnet.begin();
 }
 
-void telnetLoop()
+void handleConfig()
 {
     telnet.loop();
-}
-
-void handleTelnet()
-{
     char incoming;
     static String message;
     if (telnet.available())
@@ -43,3 +40,9 @@ void handleTelnet()
         }
     }
 }
+
+void debugPrintln(String input)
+{
+    telnet.println(input);
+}
+#endif

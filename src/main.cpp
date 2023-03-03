@@ -5,30 +5,29 @@
 //
 // -------------------------------------------------------------------------------------------
 
-
+#include <targets.h>
 #include <Arduino.h>
 #ifdef PLATFORM_ESP32
 #include <esp_system.h>
 #endif
 #include <lib/MSP.h>
 #include <lib/LoRa.h>
-#ifdef OLED_ADDRESS
-#include <SSD1306.h>
-#endif
+#include <lib/Display.h>
 #include <EEPROM.h>
 #include <main.h>
-#include <targets.h>
-#include <pixel.h>
-#include <math.h>
-#include <cmath>
 #include <lib/ConfigHandler.h>
-#ifdef PLATFORM_ESP32
-#include "BluetoothSerial.h"
-#elif defined(PLATFORM_ESP8266)
+// Configuration systems (Bluetooth or WiFi)
+#ifdef BT_CONFIG
+#include <lib/BTConfig.h>
+#elif defined(WIFI_CONFIG)
 #include <lib/WiFiConfig.h>
 #endif
 
-#define M_PI 3.14159265358979323846
+#if !defined(WIFI_CONFIG) && defined(DEBUG)
+#define DBGLN(x) Serial.println(x);
+#else
+#define DBGLN(x) debugPrintln(x);
+#endif
 
 // -------- VARS
 
@@ -40,28 +39,6 @@ msp_radar_pos_t radarPos;
 curr_t curr;
 peer_t peers[LORA_NODES_MAX];
 air_type0_t air_0;
-
-
-String bt_message = "";
-char bt_incoming;
-
-#ifdef OLED_ADDRESS
-SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);
-#endif
-#ifdef PLATFORM_ESP32
-BluetoothSerial SerialBT;
-#endif
-
-// -------- EEPROM / CONFIG
-
-
-
-void config_clear() {
-    for (int i = 0; i < 512; i++) { EEPROM.write(i, 0); }
-    EEPROM.commit();
-}
-
-
 
 // -------- SYSTEM
 
@@ -121,43 +98,6 @@ void resync_tx_slot(int16_t delay) {
     }
 }
 
-// ----------------------------------------------------------------------------- calc gps distance
-
-double deg2rad(double deg) {
-    return (deg * M_PI / 180);
-}
-
-double rad2deg(double rad) {
-    return (rad * 180 / M_PI);
-}
-
-double gpsDistanceBetween(double lat1d, double lon1d, double lat2d, double lon2d) {
-    double lat1r, lon1r, lat2r, lon2r, u, v;
-    lat1r = deg2rad(lat1d);
-    lon1r = deg2rad(lon1d);
-    lat2r = deg2rad(lat2d);
-    lon2r = deg2rad(lon2d);
-    u = sin((lat2r - lat1r)/2);
-    v = sin((lon2r - lon1r)/2);
-    return 2.0 * 6371000 * asin(sqrt(u * u + cos(lat1r) * cos(lat2r) * v * v));
-}
-
-double gpsCourseTo(double lat1, double long1, double lat2, double long2) {
-    // returns course in degrees (North=0, West=270) from position 1 to position 2,
-    // both specified as signed decimal-degrees latitude and longitude.
-    double dlon = radians(long2-long1);
-    lat1 = radians(lat1);
-    lat2 = radians(lat2);
-    double a1 = sin(dlon) * cos(lat2);
-    double a2 = sin(lat1) * cos(lat2) * cos(dlon);
-    a2 = cos(lat1) * sin(lat2) - a2;
-    a2 = atan2(a1, a2);
-    if (a2 < 0.0) {
-        a2 += TWO_PI;
-    }
-return degrees(a2);
-}
-
 // -------- LoRa
 
 void lora_send() {
@@ -190,11 +130,13 @@ void lora_send() {
         }
 
     while (!LoRa.beginPacket()) {  } // --------------------------- Implicit len
+    DBGLN("Sending LoRa");
     LoRa.write((uint8_t*)&air_0, sizeof(air_0));
     LoRa.endPacket(false);
 }
 
 void lora_receive(int packetSize) {
+    DBGLN("Receive LoRa");
 
     if (packetSize == 0) return;
 
@@ -259,11 +201,9 @@ void lora_receive(int packetSize) {
     sys.num_peers = count_peers();
 
     if (sys.io_bt_enabled && sys.debug) {
-        #ifdef PLATFORM_ESP32
-        SerialBT.println((String)"[" + char(id+65) + "] " + peers[id].name + " N" + peers[id].gps.lat + " E"+peers[id].gps.lon+ " "+ peers[id].gps.alt + "m " + String(peers[id].gps.groundSpeed / 100) + "m/s " + String(peers[id].gps.groundCourse / 10) + "° " + String(peers[id].rssi) + "db");
-        #endif
-        // SerialBT.println("SNR: " + String(sys.last_snr)+"dB / Freq.err: " + String(sys.last_freqerror)+"Hz");
-        // SerialBT.println("Packet size: " + String(packetSize));
+        debugPrintln((String)"[" + char(id+65) + "] " + peers[id].name + " N" + peers[id].gps.lat + " E"+peers[id].gps.lon+ " "+ peers[id].gps.alt + "m " + String(peers[id].gps.groundSpeed / 100) + "m/s " + String(peers[id].gps.groundCourse / 10) + "° " + String(peers[id].rssi) + "db");
+        //debugPrintln("SNR: " + String(sys.last_snr)+"dB / Freq.err: " + String(sys.last_freqerror)+"Hz");
+        //debugPrintln("Packet size: " + String(packetSize));
     }
 
     if ((sys.air_last_received_id == curr.id) && (sys.phase > MODE_LORA_SYNC) && !sys.lora_no_tx) { // Slot conflict
@@ -289,271 +229,24 @@ void lora_init() {
     #endif
     LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 
-    if (!LoRa.begin(cfg.lora_frequency)) { while (1); }
+    if (!LoRa.begin(cfg.lora_frequency)) { 
+        DBGLN("failed to init LoRa");
+        while (1);
+    }
 
     LoRa.sleep();
     LoRa.setSignalBandwidth(cfg.lora_bandwidth);
     LoRa.setCodingRate4(cfg.lora_coding_rate);
     LoRa.setSpreadingFactor(cfg.lora_spreading_factor);
-    #if LORA_POWER < 18
-    LoRa.setTxPower(cfg.lora_power, 0);
-    #else
+    //#if LORA_POWER < 18
+    //LoRa.setTxPower(cfg.lora_power, 0);
+   // #else
     LoRa.setTxPower(cfg.lora_power, 1);
-    #endif
+    //#endif
     LoRa.setOCP(250);
     LoRa.idle();
     LoRa.onReceive(lora_receive);
     LoRa.enableCrc();
-}
-
-// ----------------------------------------------------------------------------- Display
-
-void display_init() {
-    #ifdef OLED_ADDRESS
-    pinMode(16, OUTPUT);
-    pinMode(2, OUTPUT);
-    digitalWrite(16, LOW);
-    delay(50);
-    digitalWrite(16, HIGH);
-    display.init();
-    display.flipScreenVertically();
-    display.setFont(ArialMT_Plain_10);
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
-    #endif
-}
-
-void display_draw() {
-    #ifdef OLED_ADDRESS
-    display.clear();
-    int j = 0;
-    int line;
-
-    if (sys.display_page == 0) {
-
-        if (sys.io_bt_enabled) {
-            display.setFont(ArialMT_Plain_10);
-            display.setTextAlignment(TEXT_ALIGN_LEFT);
-            display.drawString (18, 0, "CONFIGURATION");
-            display.drawString (0, 20, "Connect to the ESP32 AP");
-            display.drawString (0, 30, "with a Bluetooth terminal");
-            display.drawString (0, 40, "type CMD for commands");
-        }
-        else
-        {
-            display.setFont(ArialMT_Plain_24);
-            display.setTextAlignment(TEXT_ALIGN_RIGHT);
-            display.drawString(26, 11, String(curr.gps.numSat));
-            display.drawString(13, 42, String(sys.num_peers_active + 1 - sys.lora_no_tx));
-            display.drawString (125, 11, String(peer_slotname[curr.id]));
-            display.setFont(ArialMT_Plain_10);
-            display.drawString (126, 29, "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ ");
-            display.drawString (107, 44, String(stats.percent_received));
-            display.drawString(107, 54, String(sys.last_rssi));
-            display.setTextAlignment (TEXT_ALIGN_CENTER);
-            display.drawString (64, 0, String(sys.message));
-            display.setTextAlignment (TEXT_ALIGN_LEFT);
-            display.drawString (55, 12, String(curr.name));
-            display.drawString (27, 23, "SAT");
-            display.drawString (108, 44, "%E");
-            display.drawString(35, 44, String(sys.pps) + "p/s");
-            display.drawString (109, 54, "dB");
-            display.drawString (55, 23, String(host_name[curr.host]));
-            display.drawString(15, 44, "/" + String(cfg.lora_nodes));
-            display.drawString(15, 54, String(loramode_name[cfg.lora_mode]));
-
-            if (curr.gps.fixType == 1) display.drawString (27, 12, "2D");
-            if (curr.gps.fixType == 2) display.drawString (27, 12, "3D");
-        }
-    }
-
-    else if (sys.display_page == 1) {
-
-        long pos[LORA_NODES_MAX];
-        long diff;
-
-        display.setFont (ArialMT_Plain_10);
-        display.setTextAlignment (TEXT_ALIGN_LEFT);
-        display.drawHorizontalLine(0, 11, 128);
-
-        for (int i = 0; i < cfg.lora_nodes ; i++) {
-            if (peers[i].id > 0 && peers[i].lost == 0) {
-                diff = sys.lora_last_tx - peers[i].updated;
-                if (diff > 0 && diff < sys.lora_cycle) {
-                    pos[i] = 128 - round(128 * diff / sys.lora_cycle);
-                }
-            }
-            else {
-                pos[i] = -1;
-            }
-        }
-
-        int rect_l = stats.last_tx_duration * 128 / sys.lora_cycle;
-
-        for (int i = 0; i < cfg.lora_nodes; i++) {
-
-            display.setTextAlignment (TEXT_ALIGN_LEFT);
-
-            if (pos[i] > -1) {
-                display.drawRect(pos[i], 0, rect_l, 12);
-                display.drawString (pos[i] + 2, 0, String(peer_slotname[peers[i].id]));
-            }
-
-            if (peers[i].id > 0 && j < 4) {
-                line = j * 9 + 14;
-
-                display.drawString (0, line, String(peer_slotname[peers[i].id]));
-                display.drawString (12, line, String(peers[i].name));
-                display.setTextAlignment (TEXT_ALIGN_RIGHT);
-
-                if (peers[i].lost == 1) { // Peer timed out, short
-                    display.drawString (127, line, "x:" + String((int)((sys.lora_last_tx - peers[i].updated) / 1000)) + "s" );
-                }
-                else if (peers[i].lost == 2) { // Peer timed out, long
-                    display.drawString (127, line, "L:" + String((int)((sys.lora_last_tx - peers[i].updated) / 1000)) + "s" );
-                }
-                else {
-                    if (sys.lora_last_tx > peers[i].updated) {
-                        display.drawString (119, line, String(sys.lora_last_tx - peers[i].updated));
-                        display.drawString (127, line, "-");
-                    }
-                    else {
-                        display.drawString (119, line, String(sys.lora_cycle + sys.lora_last_tx - peers[i].updated));
-                        display.drawString (127, line, "+");
-
-                    }
-                }
-            j++;
-            }
-        }
-    }
-
-    else if (sys.display_page == 2) {
-
-        display.setFont (ArialMT_Plain_10);
-        display.setTextAlignment (TEXT_ALIGN_LEFT);
-        display.drawString(0, 0, "LORA TX");
-        display.drawString(0, 10, "MSP");
-        display.drawString(0, 20, "OLED");
-        display.drawString(0, 30, "CYCLE");
-        display.drawString(0, 40, "SLOTS");
-        display.drawString(0, 50, "UPTIME");
-
-        display.drawString(112, 0, "ms");
-        display.drawString(112, 10, "ms");
-        display.drawString(112, 20, "ms");
-        display.drawString(112, 30, "ms");
-        display.drawString(112, 40, "ms");
-        display.drawString(112, 50, "s");
-
-        display.setTextAlignment(TEXT_ALIGN_RIGHT);
-        display.drawString (111, 0, String(stats.last_tx_duration));
-        display.drawString (111, 10, String(stats.last_msp_duration[0]) + " / " + String(stats.last_msp_duration[1]));
-        display.drawString (111, 20, String(stats.last_oled_duration));
-        display.drawString (111, 30, String(sys.lora_cycle));
-        display.drawString (111, 40, String(cfg.lora_nodes) + " x " + String(cfg.lora_slot_spacing));
-        display.drawString (111, 50, String((int)millis() / 1000));
-    }
-    else if (sys.display_page >= 3) {
-
-        int i = constrain(sys.display_page - 3, 0, cfg.lora_nodes - 1);
-        bool iscurrent = (i + 1 == curr.id);
-
-        display.setFont(ArialMT_Plain_24);
-        display.setTextAlignment (TEXT_ALIGN_LEFT);
-        display.drawString (0, 0, String(peer_slotname[i + 1]));
-        display.setFont(ArialMT_Plain_16);
-        display.setTextAlignment(TEXT_ALIGN_RIGHT);
-
-        if (iscurrent) {
-           display.drawString (128, 0, String(curr.name));
-        }
-        else {
-            display.drawString (128, 0, String(peers[i].name));
-        }
-
-        display.setTextAlignment (TEXT_ALIGN_LEFT);
-        display.setFont (ArialMT_Plain_10);
-
-        if (peers[i].id > 0 || iscurrent) {
-
-            if (peers[i].lost > 0 && !iscurrent) { display.drawString (19, 0, "LOST"); }
-                else if (peers[i].lq == 0 && !iscurrent) { display.drawString (19, 0, "x"); }
-                else if (peers[i].lq == 1) { display.drawXbm(19, 2, 8, 8, icon_lq_1); }
-                else if (peers[i].lq == 2) { display.drawXbm(19, 2, 8, 8, icon_lq_2); }
-                else if (peers[i].lq == 3) { display.drawXbm(19, 2, 8, 8, icon_lq_3); }
-                else if (peers[i].lq == 4) { display.drawXbm(19, 2, 8, 8, icon_lq_4); }
-
-                if (iscurrent) {
-                    display.drawString (19, 0, "HOST");
-                    display.drawString (19, 12, String(host_name[curr.host]));
-                }
-                else {
-                    if (peers[i].lost == 0) {
-                        display.drawString (28, 0, String(peers[i].rssi) + "db");
-                    }
-                }
-
-                if (iscurrent) {
-                    display.drawString (50, 12, String(host_state[curr.state]));
-                }
-
-                display.setTextAlignment (TEXT_ALIGN_RIGHT);
-
-                if (iscurrent) {
-                    display.drawString (128, 24, "LA " + String((float)curr.gps.lat / 10000000, 5));
-                    display.drawString (128, 34, "LO "+ String((float)curr.gps.lon / 10000000, 5));
-                }
-                else {
-                    display.drawString (128, 24, "LA " + String((float)peers[i].gps_rec.lat / 10000000, 5));
-                    display.drawString (128, 34, "LO "+ String((float)peers[i].gps_rec.lon / 10000000, 5));
-                }
-
-                display.setTextAlignment (TEXT_ALIGN_LEFT);
-
-                if (iscurrent) {
-                    display.drawString (0, 24, "A " + String(curr.gps.alt) + "m");
-                    display.drawString (0, 34, "S " + String(curr.gps.groundSpeed / 100) + "m/s");
-                    display.drawString (0, 44, "C " + String(curr.gps.groundCourse / 10) + "°");
-                }
-                else {
-                    display.drawString (0, 24, "A " + String(peers[i].gps_rec.alt) + "m");
-                    display.drawString (0, 34, "S " + String(peers[i].gps_rec.groundSpeed / 100) + "m/s");
-                    display.drawString (0, 44, "C " + String(peers[i].gps_rec.groundCourse / 10) + "°");
-                }
-
-                if (peers[i].gps.lat != 0 && peers[i].gps.lon != 0 && curr.gps.lat != 0 && curr.gps.lon != 0 && !iscurrent) {
-
-                    double lat1 = (double)curr.gps.lat / 10000000;
-                    double lon1 = (double)curr.gps.lon / 10000000;
-                    double lat2 = (double)peers[i].gps_rec.lat / 10000000;
-                    double lon2 = (double)peers[i].gps_rec.lon / 10000000;
-
-                    peers[i].distance = gpsDistanceBetween(lat1, lon1, lat2, lon2);
-                    peers[i].direction = gpsCourseTo(lat1, lon1, lat2, lon2);
-                    peers[i].relalt = peers[i].gps_rec.alt - curr.gps.alt;
-
-                    display.drawString (0, 54, "R " + String(peers[i].relalt) + "m");
-                    display.drawString (50, 54, "B " + String(peers[i].direction) + "°");
-                    display.setTextAlignment (TEXT_ALIGN_RIGHT);
-                    display.drawString (128, 44, "D " + String((int)peers[i].distance) + "m");
-                    display.setTextAlignment (TEXT_ALIGN_LEFT);
-                }
-
-                if (iscurrent) {
-                    display.drawString (0, 54, String((float)curr.fcanalog.vbat / 10) + "v");
-                    display.drawString (50, 54, String((int)curr.fcanalog.mAhDrawn) + "mah");
-                }
-
-            display.setTextAlignment (TEXT_ALIGN_RIGHT);
-
-        }
-        else {
-            display.drawString (35, 7, "SLOT IS EMPTY");
-            sys.display_page++;
-        }
-    }
-    display.display();
-    #endif
 }
 
 // -------- MSP and FC
@@ -612,7 +305,6 @@ void msp_send_peer(uint8_t peer_id) {
 
 // -------- INTERRUPTS
 
-const byte interruptPin = 0;
 volatile int interruptCounter = 0;
 int numberOfInterrupts = 0;
 
@@ -655,66 +347,40 @@ void setup() {
     sys.debug = 0;
 
     config_init();
-    #ifdef PLATFORM_ESP8266
-    initWiFiConfig();
-    #endif
 
     sys.lora_cycle = cfg.lora_nodes * cfg.lora_slot_spacing;
     sys.cycle_stats = sys.lora_cycle * 2;
 
     pinMode(IO_LED_PIN, OUTPUT);
     sys.io_led_blink = 0;
-
-    pinMode(interruptPin, INPUT);
-    sys.io_button_pressed = 0;
-    attachInterrupt(digitalPinToInterrupt(interruptPin), handleInterrupt, RISING);
-    #ifndef OLED_ADDRESS
-    cfg.display_enable = false;    
-    #else
-    if (cfg.display_enable) {
-        display_init();
-        display.clear();
-        display.setFont(ArialMT_Plain_16);
-        display.setTextAlignment(TEXT_ALIGN_LEFT);
-        display.drawString(0,0, "ESP32");
-        display.drawString(0,17, "RADAR");
-        display.setTextAlignment(TEXT_ALIGN_RIGHT);
-        display.drawString(127, 0, String(VERSION));
-        display.setTextAlignment(TEXT_ALIGN_LEFT);
-        display.setFont(ArialMT_Plain_10);
-        display.drawString (0, 52, "Press for full reset");
-        display.display();
-    }
+    #ifdef PIN_BUTTON
+    pinMode(PIN_BUTTON, INPUT);
+    attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), handleInterrupt, RISING);
     #endif
+    sys.io_button_pressed = 0;
+    if (cfg.display_enable) {
+        display_draw_intro();
+    }
 
     delay(START_DELAY);
 
     #ifdef PLATFORM_ESP32
     msp.begin(Serial1);
     Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX , SERIAL_PIN_TX);
+    Serial.begin(115200);
     #elif defined(PLATFORM_ESP8266)
     msp.begin(Serial);
     Serial.begin(SERIAL_SPEED, SERIAL_8N1);
     #endif
+    
     reset_peers();
-
+    DBGLN("Begin init LoRa");
     lora_init();
+    DBGLN("Begin display");
 
-    #ifdef OLED_ADDRESS
     if (cfg.display_enable) {
-        display.clear();
-        display.setFont(ArialMT_Plain_10);
-        display.drawString(0, 52, "Press to start BT config");
-        display.setTextAlignment(TEXT_ALIGN_RIGHT);
-        display.setTextAlignment(TEXT_ALIGN_LEFT);
-        display.drawString(0, 9, String(cfg.target_name));
-        display.drawString(35, 9, String(cfg.lora_band) + "MHz");
-        display.drawString(0, 19, "MODE:");
-        display.drawString(35, 19, String(loramode_name[cfg.lora_mode]));
-        display.drawString(0, 29, "HOST:");
-        display.display();
+        display_draw_startup();
     }
-    #endif
 
     sys.cycle_scan_begin = millis();
     sys.now = millis();
@@ -724,7 +390,6 @@ void setup() {
 // ----------------------------------------------------------------------------- MAIN LOOP
 
 void loop() {
-
 sys.now = millis();
 
 // ---------------------- IO BUTTON
@@ -738,14 +403,7 @@ if ((sys.now > sys.io_button_released + 150) && (sys.io_button_pressed == 1)) {
 if (sys.phase == MODE_START) {
 
     if (sys.forcereset) {
-        #ifdef OLED_ADDRESS
-        display.clear();
-        display.setFont(ArialMT_Plain_10);
-        display.setTextAlignment(TEXT_ALIGN_LEFT);
-        display.drawString (0, 0, "FULL RESET");
-        display.drawString (0, 12, "Rebooting...");
-        display.display();
-        #endif
+        display_draw_clearconfig();
         config_clear();
         delay(3000);
         ESP.restart();
@@ -777,21 +435,9 @@ if (sys.phase == MODE_HOST_SCAN) {
 
         LoRa.sleep();
         LoRa.receive();
-        #ifdef OLED_ADDRESS
         if (cfg.display_enable) {
-            if (curr.host != HOST_NONE) {
-                display.drawString (35, 29, String(host_name[curr.host]) + " " + String(curr.fcversion.versionMajor) + "."  + String(curr.fcversion.versionMinor) + "." + String(curr.fcversion.versionPatchLevel));
-            } else {
-                display.drawString (35, 29, String(host_name[curr.host]));
-            }
-            if (sys.io_bt_enabled) {
-                display.drawString (105, 29, "+BT");
-            }
-            display.drawProgressBar(0, 0, 63, 6, 100);
-            display.drawString (0, 39, "SCAN:");
-            display.display();
+            display_draw_scan(&sys);
         }
-        #endif
 
         sys.cycle_scan_begin = millis();
         sys.phase = MODE_LORA_SCAN;
@@ -802,12 +448,9 @@ if (sys.phase == MODE_HOST_SCAN) {
             delay(100);
             msp_set_fc();
             if (cfg.force_gs) { curr.host = HOST_GCS; }
-            #ifdef OLED_ADDRESS
             if (cfg.display_enable) {
-                display.drawProgressBar(0, 0, 63, 6, 100 * (millis() - sys.cycle_scan_begin) / HOST_MSP_TIMEOUT);
-                display.display();
+                display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / HOST_MSP_TIMEOUT);
             }
-            #endif
             sys.display_updated = millis();
         }
     }
@@ -819,11 +462,14 @@ if (sys.phase == MODE_LORA_SCAN) {
 
     if (sys.now > (sys.cycle_scan_begin + LORA_CYCLE_SCAN)) {  // End of the scan, set the ID then sync
 
-        if(sys.io_bt_enabled) {
-            #ifdef PLATFORM_ESP32
-            SerialBT.begin((String)"ESP32");
-            #endif
+        #ifdef PLATFORM_ESP32
+        if (sys.io_bt_enabled) {
+            initConfigInterface();
         }
+        #elif !defined(PIN_BUTTON)
+        // Enable WiFi / Bluetooth if there's no button to do so
+        initConfigInterface();
+        #endif
 
         sys.num_peers = count_peers();
         if (sys.num_peers >= cfg.lora_nodes || curr.host == HOST_GCS) { // Too many nodes already, or connected to a ground station : go silent mode
@@ -837,15 +483,14 @@ if (sys.phase == MODE_LORA_SCAN) {
         sys.phase = MODE_LORA_SYNC;
     }
     else { // Still scanning
-        #ifdef OLED_ADDRESS
+        #ifdef HAS_OLED
         if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2 && cfg.display_enable) {
             for (int i = 0; i < cfg.lora_nodes; i++) {
                 if (peers[i].id > 0) {
-                    display.drawString(28 + peers[i].id * 8, 39, String(peer_slotname[peers[i].id]));
+                    display_draw_peername(peers[i].id);
                 }
             }
-            display.drawProgressBar(64, 0, 63, 6, 100 * (millis() - sys.cycle_scan_begin) / LORA_CYCLE_SCAN);
-            display.display();
+            display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / LORA_CYCLE_SCAN);
             sys.display_updated = millis();
         }
         #endif
@@ -949,7 +594,7 @@ if ((sys.now > sys.display_updated + DISPLAY_CYCLE) && sys.display_enable && (sy
         sys.display_page = 0;
     }
 
-    display_draw();
+    display_draw_status(&sys);
     sys.message[0] = 0;
     stats.last_oled_duration = millis() - stats.timer_begin;
     sys.display_updated = sys.now;
@@ -1004,30 +649,8 @@ if (sys.now > sys.msp_next_cycle && curr.host != HOST_NONE && sys.phase > MODE_L
     sys.lora_slot++;
 }
 
-// ---------------------- SERIAL BLUETOOTH
-#ifdef PLATFORM_ESP32
-if (sys.io_bt_enabled) {
-    if (SerialBT.available()) {
-        bt_incoming = SerialBT.read();
-
-        if (bt_incoming != '\n') {
-            bt_message += String(bt_incoming);
-        }
-        else {
-            bt_message = "";
-        }
-
-        Serial.write(bt_incoming);
-    }
-    if (bt_message) {
-        handleConfigMessage(SerialBT, bt_message);
-    }
-}
-#elif defined(PLATFORM_ESP8266)
-telnetLoop();
-handleTelnet();
-#endif
-
+// ---------------------- SERIAL CONFIG CHANNEL
+handleConfig();
 
 // ---------------------- STATISTICS & IO
 
@@ -1060,13 +683,13 @@ if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_LORA_
     stats.percent_received = (stats.packets_received > 0) ? constrain(100 * stats.packets_received / stats.packets_total, 0 ,100) : 0;
 
     // Screen management
-    #ifdef OLED_ADDRESS
+    #ifdef HAS_OLED
     if (!curr.state && !sys.display_enable) { // Aircraft is disarmed = Turning on the OLED
-        display.displayOn();
+        display_off();
         sys.display_enable = 1;
     }
     else if (curr.state && sys.display_enable) { // Aircraft is armed = Turning off the OLED
-        display.displayOff();
+        display_on;
         sys.display_enable = 0;
     }
     #endif

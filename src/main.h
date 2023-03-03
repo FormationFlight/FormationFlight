@@ -20,7 +20,6 @@
 // #define CFG_TARGET_FULLNAME < (platformio.ini)
 
 // -------- LORA DEFAULTS
-#define LORA_POWER 20
 #define LORA_MODE 0
 #define LORA_AUTOMODE 0
 #define LORA_FORCE_GS 0
