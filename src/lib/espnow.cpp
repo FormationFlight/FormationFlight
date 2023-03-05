@@ -13,6 +13,8 @@ void espnow_receive(uint8_t * mac, uint8_t *incomingData, uint8_t packetSize) {
     air_type0_t air_0;
     if (packetSize == sizeof(air_type0_t)) {
         memcpy_P(&air_0, incomingData, packetSize);
+    } else {
+        return;
     }
 
     uint8_t id = air_0.id - 1;
@@ -35,7 +37,7 @@ void espnow_receive(uint8_t * mac, uint8_t *incomingData, uint8_t packetSize) {
     peers[id].gps.lat = air_0.lat * 100;
     peers[id].gps.lon = air_0.lon * 100;
     peers[id].gps.alt = air_0.alt; // m
-
+    
     switch (air_0.extra_type)
         {
         case 0 : peers[id].gps.groundCourse = air_0.extra_value * 10;

@@ -44,8 +44,8 @@ air_type0_t air_0;
 
 // -------- LoRa
 
-void lora_send() {
-
+void packet_prep()
+{
     air_0.id = curr.id;
     air_0.lat = curr.gps.lat / 100;
     air_0.lon = curr.gps.lon / 100;
@@ -53,28 +53,34 @@ void lora_send() {
     air_0.extra_type = sys.lora_tick % 5;
 
     switch (air_0.extra_type)
-        {
-        case 0 : air_0.extra_value = curr.gps.groundCourse / 10;
+    {
+    case 0:
+        air_0.extra_value = curr.gps.groundCourse / 10;
         break;
 
-        case 1 : air_0.extra_value = curr.gps.groundSpeed / 20;
+    case 1:
+        air_0.extra_value = curr.gps.groundSpeed / 20;
         break;
 
-        case 2 : air_0.extra_value = curr.name[0];
+    case 2:
+        air_0.extra_value = curr.name[0];
         break;
 
-        case 3 : air_0.extra_value = curr.name[1];
+    case 3:
+        air_0.extra_value = curr.name[1];
         break;
 
-        case 4 : air_0.extra_value = curr.name[2];
+    case 4:
+        air_0.extra_value = curr.name[2];
         break;
 
-        default:
+    default:
         break;
-        }
+    }
+}
 
+void lora_send() {
     while (!LoRa.beginPacket()) {  } // --------------------------- Implicit len
-    DBGLN("Sending LoRa");
     LoRa.write((uint8_t*)&air_0, sizeof(air_0));
     LoRa.endPacket(false);
 }
@@ -213,7 +219,7 @@ void msp_set_fc() {
     curr.host = HOST_NONE;
     msp.request(MSP_FC_VARIANT, &j, sizeof(j));
 
-    if (strncmp(j, "INAV", 4) == 0) {
+    if (strncmp(j, "INAV", 4) == 0 || strncmp(j, "ARDU", 4) == 0) {
         curr.host = HOST_INAV;
         msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
     }
@@ -497,6 +503,7 @@ if (sys.phase == MODE_LORA_TX) {
     }
 
     sys.lora_last_tx = millis();
+    packet_prep();
     #ifdef HAS_LORA
     lora_send();
     #endif
@@ -670,5 +677,3 @@ if (sys.io_led_blink && millis() > sys.io_led_changestate) {
     }
 
 }
-
-} // -----
