@@ -79,17 +79,22 @@ void packet_prep()
     }
 }
 
-void lora_send() {
-    while (!LoRa.beginPacket()) {  } // --------------------------- Implicit len
-    LoRa.write((uint8_t*)&air_0, sizeof(air_0));
+void lora_send()
+{
+    while (!LoRa.beginPacket())
+    {
+    } // --------------------------- Implicit len
+    LoRa.write((uint8_t *)&air_0, sizeof(air_0));
     LoRa.endPacket(false);
 }
 
-void lora_receive(int packetSize) {
-    if (packetSize == 0) return;
+void lora_receive(int packetSize)
+{
+    if (packetSize == 0)
+        return;
 
     sys.lora_last_rx = millis();
-    sys.lora_last_rx -= (stats.last_tx_duration > 0 ) ? stats.last_tx_duration : 0; // RX time is the same as TX time
+    sys.lora_last_rx -= (stats.last_tx_duration > 0) ? stats.last_tx_duration : 0; // RX time is the same as TX time
     sys.last_rssi = LoRa.packetRssi();
     sys.ppsc++;
 
@@ -117,28 +122,34 @@ void lora_receive(int packetSize) {
     peers[id].gps.alt = air_0.alt; // m
 
     switch (air_0.extra_type)
-        {
-        case 0 : peers[id].gps.groundCourse = air_0.extra_value * 10;
+    {
+    case 0:
+        peers[id].gps.groundCourse = air_0.extra_value * 10;
         break;
 
-        case 1 : peers[id].gps.groundSpeed = air_0.extra_value * 20;
+    case 1:
+        peers[id].gps.groundSpeed = air_0.extra_value * 20;
         break;
 
-        case 2 : peers[id].name[0] = air_0.extra_value;
+    case 2:
+        peers[id].name[0] = air_0.extra_value;
         break;
 
-        case 3 : peers[id].name[1] = air_0.extra_value;
+    case 3:
+        peers[id].name[1] = air_0.extra_value;
         break;
 
-        case 4 : peers[id].name[2] = air_0.extra_value;
-                 peers[id].name[3] = 0;
+    case 4:
+        peers[id].name[2] = air_0.extra_value;
+        peers[id].name[3] = 0;
         break;
 
-        default:
+    default:
         break;
-        }
+    }
 
-    if (peers[id].gps.lat != 0 && peers[id].gps.lon != 0) {  // Save the last known coordinates
+    if (peers[id].gps.lat != 0 && peers[id].gps.lon != 0)
+    { // Save the last known coordinates
         peers[id].gps_rec.lat = peers[id].gps.lat;
         peers[id].gps_rec.lon = peers[id].gps.lon;
         peers[id].gps_rec.alt = peers[id].gps.alt;
@@ -148,16 +159,19 @@ void lora_receive(int packetSize) {
 
     sys.num_peers = count_peers(0, &cfg);
 
-    if (sys.io_bt_enabled && sys.debug) {
-        debugPrintln((String)"[" + char(id+65) + "] " + peers[id].name + " N" + peers[id].gps.lat + " E"+peers[id].gps.lon+ " "+ peers[id].gps.alt + "m " + String(peers[id].gps.groundSpeed / 100) + "m/s " + String(peers[id].gps.groundCourse / 10) + "° " + String(peers[id].rssi) + "db");
-        //debugPrintln("SNR: " + String(sys.last_snr)+"dB / Freq.err: " + String(sys.last_freqerror)+"Hz");
-        //debugPrintln("Packet size: " + String(packetSize));
+    if (sys.io_bt_enabled && sys.debug)
+    {
+        debugPrintln((String) "[" + char(id + 65) + "] " + peers[id].name + " N" + peers[id].gps.lat + " E" + peers[id].gps.lon + " " + peers[id].gps.alt + "m " + String(peers[id].gps.groundSpeed / 100) + "m/s " + String(peers[id].gps.groundCourse / 10) + "° " + String(peers[id].rssi) + "db");
+        // debugPrintln("SNR: " + String(sys.last_snr)+"dB / Freq.err: " + String(sys.last_freqerror)+"Hz");
+        // debugPrintln("Packet size: " + String(packetSize));
     }
 
-    if ((sys.air_last_received_id == curr.id) && (sys.phase > MODE_LORA_SYNC) && !sys.lora_no_tx) { // Slot conflict
-        uint32_t cs1 = peers[id].name[0] + peers[id].name[1] * 26 + peers[id].name[2] * 26 * 26 ;
+    if ((sys.air_last_received_id == curr.id) && (sys.phase > MODE_LORA_SYNC) && !sys.lora_no_tx)
+    { // Slot conflict
+        uint32_t cs1 = peers[id].name[0] + peers[id].name[1] * 26 + peers[id].name[2] * 26 * 26;
         uint32_t cs2 = curr.name[0] + curr.name[1] * 26 + curr.name[2] * 26 * 26 + 1;
-        if (cs1 < cs2) { // Pick another slot
+        if (cs1 < cs2)
+        { // Pick another slot
             sprintf(sys.message, "%s", "ID CONFLICT");
             pick_id();
             resync_tx_slot(cfg.lora_timing_delay);
@@ -165,32 +179,35 @@ void lora_receive(int packetSize) {
     }
 }
 
-void lora_init() {
+void lora_init()
+{
 
-    #ifdef PLATFORM_ESP32
+#ifdef PLATFORM_ESP32
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-    #elif defined(PLATFORM_ESP8266)
+#elif defined(PLATFORM_ESP8266)
     SPI.begin();
     SPI.setBitOrder(MSBFIRST);
     SPI.setDataMode(SPI_MODE0);
     SPI.setFrequency(10000000);
-    #endif
+#endif
     LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 
-    if (!LoRa.begin(cfg.lora_frequency)) { 
+    if (!LoRa.begin(cfg.lora_frequency))
+    {
         DBGLN("failed to init LoRa");
-        while (1);
+        while (1)
+            ;
     }
 
     LoRa.sleep();
     LoRa.setSignalBandwidth(cfg.lora_bandwidth);
     LoRa.setCodingRate4(cfg.lora_coding_rate);
     LoRa.setSpreadingFactor(cfg.lora_spreading_factor);
-    //#if LORA_POWER < 18
-    //LoRa.setTxPower(cfg.lora_power, 0);
-   // #else
+    // #if LORA_POWER < 18
+    // LoRa.setTxPower(cfg.lora_power, 0);
+    // #else
     LoRa.setTxPower(cfg.lora_power, 1);
-    //#endif
+    // #endif
     LoRa.setOCP(250);
     LoRa.idle();
     LoRa.onReceive(lora_receive);
@@ -199,54 +216,64 @@ void lora_init() {
 
 // -------- MSP and FC
 
-void msp_get_state() {
+void msp_get_state()
+{
     uint32_t modes;
     msp.getActiveModes(&modes);
     curr.state = bitRead(modes, 0);
 }
 
-void msp_get_name() {
+void msp_get_name()
+{
     msp.request(MSP_NAME, &curr.name, sizeof(curr.name));
     curr.name[7] = '\0';
 }
 
-void msp_get_gps() {
+void msp_get_gps()
+{
     msp.request(MSP_RAW_GPS, &curr.gps, sizeof(curr.gps));
 }
 
-void msp_set_fc() {
+void msp_set_fc()
+{
     char j[5];
     curr.host = HOST_NONE;
     msp.request(MSP_FC_VARIANT, &j, sizeof(j));
 
-    if (strncmp(j, "INAV", 4) == 0 || strncmp(j, "ARDU", 4) == 0) {
+    if (strncmp(j, "INAV", 4) == 0 || strncmp(j, "ARDU", 4) == 0)
+    {
         curr.host = HOST_INAV;
         msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
     }
-    else if (strncmp(j, "GCS", 3) == 0) {
+    else if (strncmp(j, "GCS", 3) == 0)
+    {
         curr.host = HOST_GCS;
         msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
     }
 }
 
- void msp_get_fcanalog() {
+void msp_get_fcanalog()
+{
     msp.request(MSP_ANALOG, &curr.fcanalog, sizeof(curr.fcanalog));
 }
 
-void msp_send_radar(uint8_t i) {
+void msp_send_radar(uint8_t i)
+{
     radarPos.id = i;
     radarPos.state = (peers[i].lost == 2) ? 2 : peers[i].state;
-    radarPos.lat = peers[i].gps_comp.lat; // x 10E7
-    radarPos.lon = peers[i].gps_comp.lon; // x 10E7
-    radarPos.alt = peers[i].gps_comp.alt * 100; // cm
+    radarPos.lat = peers[i].gps_comp.lat;              // x 10E7
+    radarPos.lon = peers[i].gps_comp.lon;              // x 10E7
+    radarPos.alt = peers[i].gps_comp.alt * 100;        // cm
     radarPos.heading = peers[i].gps.groundCourse / 10; // From ° x 10 to °
-    radarPos.speed = peers[i].gps.groundSpeed; // cm/s
+    radarPos.speed = peers[i].gps.groundSpeed;         // cm/s
     radarPos.lq = peers[i].lq;
-    msp.command2(MSP2_COMMON_SET_RADAR_POS , &radarPos, sizeof(radarPos), 0);
+    msp.command2(MSP2_COMMON_SET_RADAR_POS, &radarPos, sizeof(radarPos), 0);
 }
 
-void msp_send_peer(uint8_t peer_id) {
-    if (peers[peer_id].id > 0) {
+void msp_send_peer(uint8_t peer_id)
+{
+    if (peers[peer_id].id > 0)
+    {
         msp_send_radar(peer_id);
     }
 }
@@ -260,34 +287,39 @@ int numberOfInterrupts = 0;
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 #endif
 
-void IRAM_ATTR handleInterrupt() {
-    #ifdef PLATFORM_ESP32
+void IRAM_ATTR handleInterrupt()
+{
+#ifdef PLATFORM_ESP32
     portENTER_CRITICAL_ISR(&mux);
-    #endif
+#endif
 
-    if (sys.io_button_pressed == 0) {
+    if (sys.io_button_pressed == 0)
+    {
         sys.io_button_pressed = 1;
 
-        if (sys.phase > MODE_LORA_SYNC) {
+        if (sys.phase > MODE_LORA_SYNC)
+        {
             sys.display_page++;
         }
-        else if (sys.phase == MODE_HOST_SCAN || sys.phase == MODE_LORA_SCAN)  {
+        else if (sys.phase == MODE_HOST_SCAN || sys.phase == MODE_LORA_SCAN)
+        {
             sys.io_bt_enabled = 1; // Enable the Bluetooth if button pressed during host scan or lora scan
         }
-        else if (sys.phase == MODE_START) {
+        else if (sys.phase == MODE_START)
+        {
             sys.forcereset = 1;
         }
         sys.io_button_released = millis();
     }
-    #ifdef PLATFORM_ESP32
+#ifdef PLATFORM_ESP32
     portEXIT_CRITICAL_ISR(&mux);
-    #endif
+#endif
 }
-
 
 // ----------------------------- setup
 
-void setup() {
+void setup()
+{
 
     sys.phase = MODE_START;
     sys.forcereset = 0;
@@ -301,35 +333,37 @@ void setup() {
 
     pinMode(IO_LED_PIN, OUTPUT);
     sys.io_led_blink = 0;
-    #ifdef PIN_BUTTON
+#ifdef PIN_BUTTON
     pinMode(PIN_BUTTON, INPUT);
     attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), handleInterrupt, RISING);
-    #endif
+#endif
     sys.io_button_pressed = 0;
-    if (cfg.display_enable) {
+    if (cfg.display_enable)
+    {
         display_draw_intro();
     }
 
     delay(START_DELAY);
 
-    #ifdef PLATFORM_ESP32
+#ifdef PLATFORM_ESP32
     msp.begin(Serial1);
-    Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX , SERIAL_PIN_TX);
+    Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
     Serial.begin(115200);
-    #elif defined(PLATFORM_ESP8266)
+#elif defined(PLATFORM_ESP8266)
     msp.begin(Serial);
     Serial.begin(SERIAL_SPEED, SERIAL_8N1);
-    #endif
-    
+#endif
+
     reset_peers();
-    #ifdef HAS_LORA
+#ifdef HAS_LORA
     DBGLN("Begin init LoRa");
     lora_init();
-    #endif
+#endif
     espnow_setup();
     DBGLN("Begin display");
 
-    if (cfg.display_enable) {
+    if (cfg.display_enable)
+    {
         display_draw_startup();
     }
 
@@ -340,248 +374,294 @@ void setup() {
 
 // ----------------------------------------------------------------------------- MAIN LOOP
 
-void loop() {
-sys.now = millis();
+void loop()
+{
+    sys.now = millis();
 
-// ---------------------- IO BUTTON
+    // ---------------------- IO BUTTON
 
-if ((sys.now > sys.io_button_released + 150) && (sys.io_button_pressed == 1)) {
-    sys.io_button_pressed = 0;
-}
-
-// ---------------------- HOST SCAN
-
-if (sys.phase == MODE_START) {
-
-    if (sys.forcereset) {
-        display_draw_clearconfig();
-        config_clear();
-        delay(3000);
-        ESP.restart();
+    if ((sys.now > sys.io_button_released + 150) && (sys.io_button_pressed == 1))
+    {
+        sys.io_button_pressed = 0;
     }
-    sys.phase = MODE_HOST_SCAN;
-}
 
-// ---------------------- HOST SCAN
+    // ---------------------- HOST SCAN
 
-if (sys.phase == MODE_HOST_SCAN) {
+    if (sys.phase == MODE_START)
+    {
 
-    if ((sys.now > (sys.cycle_scan_begin + HOST_MSP_TIMEOUT)) || (curr.host != HOST_NONE)) {  // End of the host scan
-        if (curr.host != HOST_NONE) {
-            msp_get_name();
+        if (sys.forcereset)
+        {
+            display_draw_clearconfig();
+            config_clear();
+            delay(3000);
+            ESP.restart();
         }
+        sys.phase = MODE_HOST_SCAN;
+    }
 
-        if (curr.name[0] == '\0') {
-            for (int i = 0; i < 3; i++) {
-                curr.name[i] = (char) random(65, 90);
+    // ---------------------- HOST SCAN
+
+    if (sys.phase == MODE_HOST_SCAN)
+    {
+
+        if ((sys.now > (sys.cycle_scan_begin + HOST_MSP_TIMEOUT)) || (curr.host != HOST_NONE))
+        { // End of the host scan
+            if (curr.host != HOST_NONE)
+            {
+                msp_get_name();
             }
-        curr.name[3] = 0;
+
+            if (curr.name[0] == '\0')
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    curr.name[i] = (char)random(65, 90);
+                }
+                curr.name[3] = 0;
+            }
+
+            curr.gps.fixType = 0;
+            curr.gps.lat = 0;
+            curr.gps.lon = 0;
+            curr.gps.alt = 0;
+            curr.id = 0;
+
+            LoRa.sleep();
+            LoRa.receive();
+            if (cfg.display_enable)
+            {
+                display_draw_scan(&sys);
+            }
+
+            sys.cycle_scan_begin = millis();
+            sys.phase = MODE_LORA_SCAN;
+        }
+        else
+        { // Still scanning
+            if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2)
+            {
+                delay(100);
+                msp_set_fc();
+                if (cfg.force_gs)
+                {
+                    curr.host = HOST_GCS;
+                }
+                if (cfg.display_enable)
+                {
+                    display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / HOST_MSP_TIMEOUT);
+                }
+                sys.display_updated = millis();
+            }
+        }
+    }
+
+    // ---------------------- LORA INIT
+
+    if (sys.phase == MODE_LORA_SCAN)
+    {
+
+        if (sys.now > (sys.cycle_scan_begin + LORA_CYCLE_SCAN))
+        { // End of the scan, set the ID then sync
+
+            if (sys.io_bt_enabled)
+            {
+                initConfigInterface();
+            }
+#if !defined(PIN_BUTTON)
+            // Enable WiFi / Bluetooth if there's no button to do so
+            initConfigInterface();
+#endif
+
+            sys.num_peers = count_peers(0, &cfg);
+            if (sys.num_peers >= cfg.lora_nodes || curr.host == HOST_GCS)
+            { // Too many nodes already, or connected to a ground station : go silent mode
+                sys.lora_no_tx = 1;
+            }
+            else
+            {
+                sys.lora_no_tx = 0;
+                pick_id();
+            }
+            sys.display_page = 0;
+            sys.phase = MODE_LORA_SYNC;
+        }
+        else
+        { // Still scanning
+#ifdef HAS_OLED
+            if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2 && cfg.display_enable)
+            {
+                for (int i = 0; i < cfg.lora_nodes; i++)
+                {
+                    if (peers[i].id > 0)
+                    {
+                        display_draw_peername(peers[i].id);
+                    }
+                }
+                display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / LORA_CYCLE_SCAN);
+                sys.display_updated = millis();
+            }
+#endif
+            delay(20);
+        }
+    }
+
+    // ---------------------- LORA SYNC
+
+    if (sys.phase == MODE_LORA_SYNC)
+    {
+
+        if (sys.num_peers == 0 || sys.lora_no_tx)
+        { // Alone or Silent mode, no need to sync
+            sys.lora_next_tx = millis() + sys.lora_cycle;
+        }
+        else
+        { // Not alone, sync by slot
+            resync_tx_slot(cfg.lora_timing_delay);
         }
 
-        curr.gps.fixType = 0;
-        curr.gps.lat = 0;
-        curr.gps.lon = 0;
-        curr.gps.alt = 0;
-        curr.id = 0;
+        sys.display_updated = sys.lora_next_tx + sys.lora_cycle - 30;
+        sys.stats_updated = sys.lora_next_tx + sys.lora_cycle - 15;
+        sys.pps = 0;
+        sys.ppsc = 0;
+        sys.num_peers = 0;
+        stats.packets_total = 0;
+        stats.packets_received = 0;
+        stats.percent_received = 0;
+        digitalWrite(IO_LED_PIN, LOW);
+        sys.phase = MODE_LORA_RX;
+    }
+
+    // ---------------------- LORA RX
+
+    if ((sys.phase == MODE_LORA_RX) && (sys.now > sys.lora_next_tx))
+    {
+
+        while (sys.now > sys.lora_next_tx)
+        { // In  case we skipped some beats
+            sys.lora_next_tx += sys.lora_cycle;
+        }
+
+        if (sys.lora_no_tx)
+        {
+            sprintf(sys.message, "%s", "SILENT MODE (NO TX)");
+        }
+        else
+        {
+            sys.phase = MODE_LORA_TX;
+        }
+        sys.lora_tick++;
+    }
+
+    // ---------------------- LORA TX
+
+    if (sys.phase == MODE_LORA_TX)
+    {
+        if (curr.host == HOST_NONE)
+        {
+            curr.gps.lat = 0;
+            curr.gps.lon = 0;
+            curr.gps.alt = 0;
+            curr.gps.groundCourse = 0;
+            curr.gps.groundSpeed = 0;
+        }
+        else if (curr.host == HOST_INAV)
+        {
+            msp_get_gps(); // GPS > FC > ESP
+        }
+
+        sys.lora_last_tx = millis();
+        packet_prep();
+#ifdef HAS_LORA
+        lora_send();
+#endif
+        espnow_send(&air_0);
+        stats.last_tx_duration = millis() - sys.lora_last_tx;
+
+        // Drift correction
+
+        if (curr.id > 1 && sys.num_peers_active > 0)
+        {
+            int prev = curr.id - 2;
+            if (peers[prev].id > 0)
+            {
+                sys.lora_drift = sys.lora_last_tx - peers[prev].updated - cfg.lora_slot_spacing;
+
+                if ((abs(sys.lora_drift) > LORA_DRIFT_THRESHOLD) && (abs(sys.lora_drift) < cfg.lora_slot_spacing))
+                {
+                    sys.drift_correction = constrain(sys.lora_drift, -LORA_DRIFT_CORRECTION, LORA_DRIFT_CORRECTION);
+                    sys.lora_next_tx -= sys.drift_correction;
+                    sprintf(sys.message, "%s %3d", "TIMING ADJUST", -sys.drift_correction);
+                }
+            }
+        }
+
+        sys.lora_slot = 0;
+        sys.msp_next_cycle = sys.lora_last_tx + cfg.msp_after_tx_delay;
+
+        // Back to RX
 
         LoRa.sleep();
         LoRa.receive();
-        if (cfg.display_enable) {
-            display_draw_scan(&sys);
+        sys.phase = MODE_LORA_RX;
+    }
+
+    // ---------------------- DISPLAY
+
+    if ((sys.now > sys.display_updated + DISPLAY_CYCLE) && sys.display_enable && (sys.phase > MODE_LORA_SYNC) && cfg.display_enable)
+    {
+        stats.timer_begin = millis();
+
+        if (sys.num_peers == 0 && sys.display_page == 1)
+        { // No need for timings graphs when alone
+            sys.display_page++;
         }
 
-        sys.cycle_scan_begin = millis();
-        sys.phase = MODE_LORA_SCAN;
+        if (sys.display_page >= (3 + cfg.lora_nodes))
+        {
+            sys.display_page = 0;
+        }
 
+        display_draw_status(&sys);
+        sys.message[0] = 0;
+        stats.last_oled_duration = millis() - stats.timer_begin;
+        sys.display_updated = sys.now;
     }
-    else { // Still scanning
-        if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2) {
-            delay(100);
-            msp_set_fc();
-            if (cfg.force_gs) { curr.host = HOST_GCS; }
-            if (cfg.display_enable) {
-                display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / HOST_MSP_TIMEOUT);
+
+    // ---------------------- SERIAL / MSP
+
+    if (sys.now > sys.msp_next_cycle && curr.host != HOST_NONE && sys.phase > MODE_LORA_SYNC && sys.lora_slot < cfg.lora_nodes)
+    {
+        stats.timer_begin = millis();
+
+        if (sys.lora_slot == 0 && curr.host == HOST_INAV)
+        {
+
+            if (sys.lora_tick % 6 == 0)
+            {
+                msp_get_state();
             }
-            sys.display_updated = millis();
-        }
-    }
-}
 
-// ---------------------- LORA INIT
-
-if (sys.phase == MODE_LORA_SCAN) {
-
-    if (sys.now > (sys.cycle_scan_begin + LORA_CYCLE_SCAN)) {  // End of the scan, set the ID then sync
-
-        if (sys.io_bt_enabled) {
-            initConfigInterface();
-        }
-        #if !defined(PIN_BUTTON)
-        // Enable WiFi / Bluetooth if there's no button to do so
-        initConfigInterface();
-        #endif
-
-        sys.num_peers = count_peers(0, &cfg);
-        if (sys.num_peers >= cfg.lora_nodes || curr.host == HOST_GCS) { // Too many nodes already, or connected to a ground station : go silent mode
-            sys.lora_no_tx = 1;
-        }
-        else {
-            sys.lora_no_tx = 0;
-            pick_id();
-        }
-        sys.display_page = 0;
-        sys.phase = MODE_LORA_SYNC;
-    }
-    else { // Still scanning
-        #ifdef HAS_OLED
-        if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2 && cfg.display_enable) {
-            for (int i = 0; i < cfg.lora_nodes; i++) {
-                if (peers[i].id > 0) {
-                    display_draw_peername(peers[i].id);
-                }
-            }
-            display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / LORA_CYCLE_SCAN);
-            sys.display_updated = millis();
-        }
-        #endif
-    delay(20);
-    }
-}
-
-// ---------------------- LORA SYNC
-
-if (sys.phase == MODE_LORA_SYNC) {
-
-    if (sys.num_peers == 0 || sys.lora_no_tx) { // Alone or Silent mode, no need to sync
-        sys.lora_next_tx = millis() + sys.lora_cycle;
-        }
-    else { // Not alone, sync by slot
-        resync_tx_slot(cfg.lora_timing_delay);
-    }
-
-    sys.display_updated = sys.lora_next_tx + sys.lora_cycle - 30;
-    sys.stats_updated = sys.lora_next_tx + sys.lora_cycle - 15;
-    sys.pps = 0;
-    sys.ppsc = 0;
-    sys.num_peers = 0;
-    stats.packets_total = 0;
-    stats.packets_received = 0;
-    stats.percent_received = 0;
-    digitalWrite(IO_LED_PIN, LOW);
-    sys.phase = MODE_LORA_RX;
-}
-
-// ---------------------- LORA RX
-
-if ((sys.phase == MODE_LORA_RX) && (sys.now > sys.lora_next_tx)) {
-
-    while (sys.now > sys.lora_next_tx) { // In  case we skipped some beats
-        sys.lora_next_tx += sys.lora_cycle;
-    }
-
-    if (sys.lora_no_tx) {
-        sprintf(sys.message, "%s", "SILENT MODE (NO TX)");
-        }
-    else {
-        sys.phase = MODE_LORA_TX;
-    }
-    sys.lora_tick++;
-}
-
-// ---------------------- LORA TX
-
-if (sys.phase == MODE_LORA_TX) {
-    if (curr.host == HOST_NONE) {
-        curr.gps.lat = 0;
-        curr.gps.lon = 0;
-        curr.gps.alt = 0;
-        curr.gps.groundCourse = 0;
-        curr.gps.groundSpeed = 0;
-    }
-    else if (curr.host == HOST_INAV) {
-        msp_get_gps(); // GPS > FC > ESP
-    }
-
-    sys.lora_last_tx = millis();
-    packet_prep();
-    #ifdef HAS_LORA
-    lora_send();
-    #endif
-    espnow_send(&air_0);
-    stats.last_tx_duration = millis() - sys.lora_last_tx;
-
-    // Drift correction
-
-    if (curr.id > 1 && sys.num_peers_active > 0) {
-        int prev = curr.id - 2;
-        if (peers[prev].id > 0) {
-            sys.lora_drift = sys.lora_last_tx - peers[prev].updated - cfg.lora_slot_spacing;
-
-            if ((abs(sys.lora_drift) > LORA_DRIFT_THRESHOLD) && (abs(sys.lora_drift) < cfg.lora_slot_spacing)) {
-                sys.drift_correction = constrain(sys.lora_drift, -LORA_DRIFT_CORRECTION, LORA_DRIFT_CORRECTION);
-                sys.lora_next_tx -= sys.drift_correction;
-                sprintf(sys.message, "%s %3d", "TIMING ADJUST", -sys.drift_correction);
+            if ((sys.lora_tick + 1) % 6 == 0)
+            {
+                msp_get_fcanalog();
             }
         }
-    }
 
-    sys.lora_slot = 0;
-    sys.msp_next_cycle = sys.lora_last_tx + cfg.msp_after_tx_delay;
+        // msp_send_peer(sys.lora_slot);
 
-    // Back to RX
+        // ----------------Send MSP to FC and predict new position for all nodes minus current
 
-    LoRa.sleep();
-    LoRa.receive();
-    sys.phase = MODE_LORA_RX;
-}
+        for (int i = 0; i < cfg.lora_nodes; i++)
+        {
+            if (peers[i].id > 0 && i + 1 != curr.id)
+            {
+                peers[i].gps_comp.lat = peers[i].gps.lat;
+                peers[i].gps_comp.lon = peers[i].gps.lon;
+                peers[i].gps_comp.alt = peers[i].gps.alt;
 
-// ---------------------- DISPLAY
-
-if ((sys.now > sys.display_updated + DISPLAY_CYCLE) && sys.display_enable && (sys.phase > MODE_LORA_SYNC) && cfg.display_enable) {
-    stats.timer_begin = millis();
-
-    if (sys.num_peers == 0 && sys.display_page == 1)  { // No need for timings graphs when alone
-        sys.display_page++;
-    }
-
-    if (sys.display_page >= (3 + cfg.lora_nodes)) {
-        sys.display_page = 0;
-    }
-
-    display_draw_status(&sys);
-    sys.message[0] = 0;
-    stats.last_oled_duration = millis() - stats.timer_begin;
-    sys.display_updated = sys.now;
-}
-
-// ---------------------- SERIAL / MSP
-
-if (sys.now > sys.msp_next_cycle && curr.host != HOST_NONE && sys.phase > MODE_LORA_SYNC && sys.lora_slot < cfg.lora_nodes) {
-    stats.timer_begin = millis();
-
-    if (sys.lora_slot == 0 && curr.host == HOST_INAV) {
-
-        if (sys.lora_tick % 6 == 0) {
-            msp_get_state();
-        }
-
-        if ((sys.lora_tick + 1) % 6 == 0) {
-            msp_get_fcanalog();
-        }
-
-    }
-
-// msp_send_peer(sys.lora_slot);
-
-// ----------------Send MSP to FC and predict new position for all nodes minus current
-
-    for (int i = 0; i < cfg.lora_nodes; i++) {
-        if (peers[i].id > 0 && i+1 != curr.id ) {
-            peers[i].gps_comp.lat = peers[i].gps.lat;
-            peers[i].gps_comp.lon = peers[i].gps.lon;
-            peers[i].gps_comp.alt = peers[i].gps.alt;
-
-            if (peers[i].gps.groundSpeed > 200 && peers[i].gps.lat != 0 && peers[i].gps_pre.lat != 0) { // If speed >2m/s : Compensate the position delay
+                if (peers[i].gps.groundSpeed > 200 && peers[i].gps.lat != 0 && peers[i].gps_pre.lat != 0)
+                { // If speed >2m/s : Compensate the position delay
                     sys.now_sec = millis();
                     int32_t comp_var_lat = peers[i].gps.lat - peers[i].gps_pre.lat;
                     int32_t comp_var_lon = peers[i].gps.lon - peers[i].gps_pre.lon;
@@ -593,87 +673,100 @@ if (sys.now > sys.msp_next_cycle && curr.host != HOST_NONE && sys.phase > MODE_L
                     peers[i].gps_comp.lat += comp_var_lat * comp_ratio;
                     peers[i].gps_comp.lon += comp_var_lon * comp_ratio;
                     peers[i].gps_comp.alt += comp_var_alt * comp_ratio;
-            }
-            msp_send_radar(i);
-            delay(7);
-        }
-    }
-    stats.last_msp_duration[sys.lora_slot] = millis() - stats.timer_begin;
-    sys.msp_next_cycle += cfg.lora_slot_spacing;
-    sys.lora_slot++;
-}
-
-// ---------------------- SERIAL CONFIG CHANNEL
-handleConfig();
-
-// ---------------------- STATISTICS & IO
-
-if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_LORA_SYNC)) {
-    sys.pps = sys.ppsc;
-    sys.ppsc = 0;
-    // sys.last_snr = LoRa.packetSnr();
-    // sys.last_freqerror = LoRa.packetFrequencyError();
-
-    // Timed-out peers + LQ
-
-    for (int i = 0; i < cfg.lora_nodes; i++) {
-        if (sys.now > (peers[i].lq_updated +  sys.lora_cycle * 4)) {
-            uint16_t diff = peers[i].updated - peers[i].lq_updated;
-            peers[i].lq = constrain(peers[i].lq_tick * 4.2 * sys.lora_cycle / diff, 0, 4);
-            peers[i].lq_updated = sys.now;
-            peers[i].lq_tick = 0;
-        }
-        if (peers[i].id > 0 && ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT)) { // Lost for a short time
-            peers[i].lost = 1;
-            if ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT_LOST) { // Lost for a long time
-                peers[i].lost = 2;
+                }
+                msp_send_radar(i);
+                delay(7);
             }
         }
+        stats.last_msp_duration[sys.lora_slot] = millis() - stats.timer_begin;
+        sys.msp_next_cycle += cfg.lora_slot_spacing;
+        sys.lora_slot++;
     }
 
-    sys.num_peers_active = count_peers(1, &cfg);
-    stats.packets_total += sys.num_peers_active * sys.cycle_stats / sys.lora_cycle;
-    stats.packets_received += sys.pps;
-    stats.percent_received = (stats.packets_received > 0) ? constrain(100 * stats.packets_received / stats.packets_total, 0 ,100) : 0;
+    // ---------------------- SERIAL CONFIG CHANNEL
+    handleConfig();
 
-    // Screen management
-    #ifdef HAS_OLED
-    if (!curr.state && !sys.display_enable) { // Aircraft is disarmed = Turning on the OLED
-        display_off();
-        sys.display_enable = 1;
+    // ---------------------- STATISTICS & IO
+
+    if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_LORA_SYNC))
+    {
+        sys.pps = sys.ppsc;
+        sys.ppsc = 0;
+        // sys.last_snr = LoRa.packetSnr();
+        // sys.last_freqerror = LoRa.packetFrequencyError();
+
+        // Timed-out peers + LQ
+
+        for (int i = 0; i < cfg.lora_nodes; i++)
+        {
+            if (sys.now > (peers[i].lq_updated + sys.lora_cycle * 4))
+            {
+                uint16_t diff = peers[i].updated - peers[i].lq_updated;
+                peers[i].lq = constrain(peers[i].lq_tick * 4.2 * sys.lora_cycle / diff, 0, 4);
+                peers[i].lq_updated = sys.now;
+                peers[i].lq_tick = 0;
+            }
+            if (peers[i].id > 0 && ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT))
+            { // Lost for a short time
+                peers[i].lost = 1;
+                if ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT_LOST)
+                { // Lost for a long time
+                    peers[i].lost = 2;
+                }
+            }
+        }
+
+        sys.num_peers_active = count_peers(1, &cfg);
+        stats.packets_total += sys.num_peers_active * sys.cycle_stats / sys.lora_cycle;
+        stats.packets_received += sys.pps;
+        stats.percent_received = (stats.packets_received > 0) ? constrain(100 * stats.packets_received / stats.packets_total, 0, 100) : 0;
+
+// Screen management
+#ifdef HAS_OLED
+        if (!curr.state && !sys.display_enable)
+        { // Aircraft is disarmed = Turning on the OLED
+            display_off();
+            sys.display_enable = 1;
+        }
+        else if (curr.state && sys.display_enable)
+        { // Aircraft is armed = Turning off the OLED
+            display_on;
+            sys.display_enable = 0;
+        }
+#endif
+        sys.stats_updated = sys.now;
     }
-    else if (curr.state && sys.display_enable) { // Aircraft is armed = Turning off the OLED
-        display_on;
-        sys.display_enable = 0;
-    }
-    #endif
-    sys.stats_updated = sys.now;
-}
 
-// ---------------------- LED blinker
+    // ---------------------- LED blinker
 
-if (sys.lora_tick % 6 == 0) {
-    if (sys.num_peers_active > 0) {
-        sys.io_led_changestate = millis() + IO_LEDBLINK_DURATION;
-        sys.io_led_count = 0;
-        sys.io_led_blink = 1;
-    }
-}
-
-if (sys.io_led_blink && millis() > sys.io_led_changestate) {
-
-    sys.io_led_count++;
-    sys.io_led_changestate += IO_LEDBLINK_DURATION;
-
-    if (sys.io_led_count % 2 == 0) {
-        digitalWrite(IO_LED_PIN, LOW);
-    }
-    else {
-        digitalWrite(IO_LED_PIN, HIGH);
+    if (sys.lora_tick % 6 == 0)
+    {
+        if (sys.num_peers_active > 0)
+        {
+            sys.io_led_changestate = millis() + IO_LEDBLINK_DURATION;
+            sys.io_led_count = 0;
+            sys.io_led_blink = 1;
+        }
     }
 
-    if (sys.io_led_count >= sys.num_peers_active * 2) {
-        sys.io_led_blink = 0;
-    }
+    if (sys.io_led_blink && millis() > sys.io_led_changestate)
+    {
 
+        sys.io_led_count++;
+        sys.io_led_changestate += IO_LEDBLINK_DURATION;
+
+        if (sys.io_led_count % 2 == 0)
+        {
+            digitalWrite(IO_LED_PIN, LOW);
+        }
+        else
+        {
+            digitalWrite(IO_LED_PIN, HIGH);
+        }
+
+        if (sys.io_led_count >= sys.num_peers_active * 2)
+        {
+            sys.io_led_blink = 0;
+        }
+    }
 }
