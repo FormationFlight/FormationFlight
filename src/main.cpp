@@ -240,7 +240,7 @@ void msp_set_fc()
     curr.host = HOST_NONE;
     msp.request(MSP_FC_VARIANT, &j, sizeof(j));
 
-    if (strncmp(j, "INAV", 4) == 0 || strncmp(j, "ARDU", 4) == 0)
+    if (strncmp(j, "INAV", 4) == 0 || strncmp(j, "ARDU", 4) == 0 || strncmp(j, "BTFL", 4) == 0)
     {
         curr.host = HOST_INAV;
         msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
@@ -359,6 +359,7 @@ void setup()
     DBGLN("Begin init LoRa");
     lora_init();
 #endif
+    DBGLN("Begin init espnow");
     espnow_setup();
     DBGLN("Begin display");
 
@@ -414,9 +415,19 @@ void loop()
 
             if (curr.name[0] == '\0')
             {
+                uint32_t chipID;
+#ifdef PLATFORM_ESP8266
+                chipID = ESP.getChipId();
+#elif defined(PLATFORM_ESP32)
+                uint64_t macAddress = ESP.getEfuseMac();
+                uint64_t macAddressTrunc = macAddress << 40;
+                chipID = macAddressTrunc >> 40;
+ #endif
+                String chipIDString = String(chipID, HEX);
+                chipIDString.toUpperCase();
                 for (int i = 0; i < 3; i++)
                 {
-                    curr.name[i] = (char)random(65, 90);
+                    curr.name[i] = chipIDString.charAt(i+3); //(char)random(65, 90);
                 }
                 curr.name[3] = 0;
             }
@@ -630,7 +641,7 @@ void loop()
 
     // ---------------------- SERIAL / MSP
 
-    if (sys.now > sys.msp_next_cycle && curr.host != HOST_NONE && sys.phase > MODE_LORA_SYNC && sys.lora_slot < cfg.lora_nodes)
+    if (sys.now > sys.msp_next_cycle && sys.phase > MODE_LORA_SYNC && sys.lora_slot < cfg.lora_nodes)
     {
         stats.timer_begin = millis();
 
