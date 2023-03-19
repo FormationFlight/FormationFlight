@@ -32,6 +32,14 @@ void espnow_receive(const uint8_t * mac_addr, const uint8_t *incomingData, int p
     {
         return;
     }
+    uint8_t calculatedCrc = 0;
+    // Check CRC
+    for (uint8_t i = 0; i < sizeof(air_type0_t) - sizeof(air_0.crc); i++) {
+        calculatedCrc = crc8_dvb_s2(calculatedCrc, incomingData[i]); // loop over summable data
+    }
+    if (calculatedCrc != air_0.crc) {
+        return;
+    }
 
     uint8_t id = air_0.id - 1;
 
@@ -47,8 +55,8 @@ void espnow_receive(const uint8_t * mac_addr, const uint8_t *incomingData, int p
     peers[id].lq_tick++;
     peers[id].state = 0;
     peers[id].lost = 0;
-    peers[id].updated = sys.lora_last_rx;
-    peers[id].rssi = sys.last_rssi;
+    peers[id].updated = millis();
+    peers[id].rssi = 0;
 
     peers[id].gps.lat = air_0.lat * 100;
     peers[id].gps.lon = air_0.lon * 100;

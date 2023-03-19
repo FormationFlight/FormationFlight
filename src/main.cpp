@@ -77,6 +77,14 @@ void packet_prep()
     default:
         break;
     }
+    // calculate crc
+    uint8_t buf[sizeof(air_type0_t)];
+    memcpy_P(buf, &air_0, sizeof(air_type0_t));
+    uint8_t calculatedCrc = 0;
+    for (uint8_t i = 0; i < sizeof(air_type0_t) - sizeof(air_0.crc); i++) {
+        calculatedCrc = crc8_dvb_s2(calculatedCrc, buf[i]); // loop over summable data
+    }
+    air_0.crc = calculatedCrc;
 }
 
 void lora_send()
@@ -92,6 +100,9 @@ void lora_receive(int packetSize)
 {
     if (packetSize == 0)
         return;
+    if (packetSize != sizeof(air_type0_t)) {
+        return;
+    }
 
     sys.lora_last_rx = millis();
     sys.lora_last_rx -= (stats.last_tx_duration > 0) ? stats.last_tx_duration : 0; // RX time is the same as TX time
@@ -99,6 +110,15 @@ void lora_receive(int packetSize)
     sys.ppsc++;
 
     LoRa.readBytes((uint8_t *)&air_0, packetSize);
+
+    uint8_t calculatedCrc = 0;
+    // Check CRC
+    for (uint8_t i = 0; i < sizeof(air_0) - sizeof(air_0.crc); i++) {
+        calculatedCrc = crc8_dvb_s2(calculatedCrc, ((uint8_t*)&air_0)[i]); // loop over summable data
+    }
+    if (calculatedCrc != air_0.crc) {
+        return;
+    }
 
     uint8_t id = air_0.id - 1;
 
@@ -582,10 +602,13 @@ void loop()
         }
 
         sys.lora_last_tx = millis();
+
         packet_prep();
 #ifdef HAS_LORA
-        lora_send();
+
+        //lora_send();
 #endif
+
         espnow_send(&air_0);
         stats.last_tx_duration = millis() - sys.lora_last_tx;
 

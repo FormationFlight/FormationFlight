@@ -132,13 +132,24 @@ struct curr_t {
     msp_analog_t fcanalog;
 };
 
-struct air_type0_t { // 80 bits
+/*struct air_type0_t {
     unsigned int id : 3;
     signed int lat : 25; // -9 000 000 to +9 000 000 (5 decimals)
     signed int lon : 26; // -18 000 000 to +18 000 000 (5 decimals)
     unsigned int alt : 13; // 0 to +8192m
     unsigned int extra_type : 3;
     signed int extra_value : 10;
+    uint8_t crc;
+};*/
+
+struct __attribute__((packed)) air_type0_t {
+    uint8_t id;
+    int32_t lat;
+    int32_t lon;
+    uint16_t alt;
+    uint8_t extra_type;
+    int16_t extra_value;
+    uint8_t crc;
 };
 
 struct config_t {
