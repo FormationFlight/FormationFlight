@@ -114,3 +114,8 @@
     #define IO_LED_PIN 16
     #define PIN_BUTTON 0
 #endif
+
+#ifdef TARGET_ESP32
+    #define SERIAL_PIN_TX 17
+    #define SERIAL_PIN_RX 16
+#endif

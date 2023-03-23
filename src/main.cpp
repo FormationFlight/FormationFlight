@@ -11,7 +11,9 @@
 #include <esp_system.h>
 #endif
 #include <lib/MSP.h>
+#ifdef HAS_LORA
 #include <lib/LoRa.h>
+#endif
 #include <lib/Display.h>
 #include <EEPROM.h>
 #include <main.h>
@@ -26,7 +28,7 @@
 #include <lib/espnow.h>
 
 #if !defined(WIFI_CONFIG) && defined(DEBUG)
-#define DBGLN(x) Serial.println(x);
+#define DBGLN(x) Serial.printf("%d: ", millis()); Serial.println(x);
 #else
 #define DBGLN(x) debugPrintln(x);
 #endif
@@ -81,26 +83,31 @@ void packet_prep()
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, &air_0, sizeof(air_type0_t));
     uint8_t calculatedCrc = 0;
-    for (uint8_t i = 0; i < sizeof(air_type0_t) - sizeof(air_0.crc); i++) {
-        calculatedCrc = crc8_dvb_s2(calculatedCrc, buf[i]); // loop over summable data
+    for (uint8_t i = 0; i < sizeof(air_type0_t) - sizeof(air_0.crc); i++)
+    {
+        calculatedCrc = crc8_dvb_s2(calculatedCrc, buf[i]);
     }
     air_0.crc = calculatedCrc;
 }
 
 void lora_send()
 {
+#ifdef HAS_LORA
     while (!LoRa.beginPacket())
     {
     } // --------------------------- Implicit len
     LoRa.write((uint8_t *)&air_0, sizeof(air_0));
     LoRa.endPacket(false);
+#endif
 }
 
 void lora_receive(int packetSize)
 {
+    #ifdef HAS_LORA
     if (packetSize == 0)
         return;
-    if (packetSize != sizeof(air_type0_t)) {
+    if (packetSize != sizeof(air_type0_t))
+    {
         return;
     }
 
@@ -113,10 +120,12 @@ void lora_receive(int packetSize)
 
     uint8_t calculatedCrc = 0;
     // Check CRC
-    for (uint8_t i = 0; i < sizeof(air_0) - sizeof(air_0.crc); i++) {
-        calculatedCrc = crc8_dvb_s2(calculatedCrc, ((uint8_t*)&air_0)[i]); // loop over summable data
+    for (uint8_t i = 0; i < sizeof(air_0) - sizeof(air_0.crc); i++)
+    {
+        calculatedCrc = crc8_dvb_s2(calculatedCrc, ((uint8_t *)&air_0)[i]); // loop over summable data
     }
-    if (calculatedCrc != air_0.crc) {
+    if (calculatedCrc != air_0.crc)
+    {
         return;
     }
 
@@ -197,11 +206,12 @@ void lora_receive(int packetSize)
             resync_tx_slot(cfg.lora_timing_delay);
         }
     }
+    #endif
 }
 
 void lora_init()
 {
-
+#ifdef HAS_LORA
 #ifdef PLATFORM_ESP32
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 #elif defined(PLATFORM_ESP8266)
@@ -232,6 +242,7 @@ void lora_init()
     LoRa.idle();
     LoRa.onReceive(lora_receive);
     LoRa.enableCrc();
+#endif
 }
 
 // -------- MSP and FC
@@ -260,7 +271,7 @@ void msp_set_fc()
     curr.host = HOST_NONE;
     msp.request(MSP_FC_VARIANT, &j, sizeof(j));
 
-    if (strncmp(j, "INAV", 4) == 0 || strncmp(j, "ARDU", 4) == 0 || strncmp(j, "BTFL", 4) == 0)
+    if (strncmp(j, "INAV", 4) == 0)
     {
         curr.host = HOST_INAV;
         msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
@@ -268,6 +279,16 @@ void msp_set_fc()
     else if (strncmp(j, "GCS", 3) == 0)
     {
         curr.host = HOST_GCS;
+        msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
+    }
+    else if (strncmp(j, "ARDU", 4) == 0)
+    {
+        curr.host = HOST_ARDU;
+        msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
+    }
+    else if (strncmp(j, "BTFL", 4) == 0)
+    {
+        curr.host = HOST_BETA;
         msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
     }
 }
@@ -442,12 +463,12 @@ void loop()
                 uint64_t macAddress = ESP.getEfuseMac();
                 uint64_t macAddressTrunc = macAddress << 40;
                 chipID = macAddressTrunc >> 40;
- #endif
+#endif
                 String chipIDString = String(chipID, HEX);
                 chipIDString.toUpperCase();
                 for (int i = 0; i < 3; i++)
                 {
-                    curr.name[i] = chipIDString.charAt(i+3); //(char)random(65, 90);
+                    curr.name[i] = chipIDString.charAt(i + 3); //(char)random(65, 90);
                 }
                 curr.name[3] = 0;
             }
@@ -457,9 +478,10 @@ void loop()
             curr.gps.lon = 0;
             curr.gps.alt = 0;
             curr.id = 0;
-
+#ifdef HAS_LORA
             LoRa.sleep();
             LoRa.receive();
+#endif
             if (cfg.display_enable)
             {
                 display_draw_scan(&sys);
@@ -596,7 +618,7 @@ void loop()
             curr.gps.groundCourse = 0;
             curr.gps.groundSpeed = 0;
         }
-        else if (curr.host == HOST_INAV)
+        else if (curr.host == HOST_INAV || curr.host == HOST_ARDU || curr.host == HOST_BETA)
         {
             msp_get_gps(); // GPS > FC > ESP
         }
@@ -606,9 +628,9 @@ void loop()
         packet_prep();
 #ifdef HAS_LORA
 
-        //lora_send();
+        // lora_send();
 #endif
-
+        DBGLN("sending ota");
         espnow_send(&air_0);
         stats.last_tx_duration = millis() - sys.lora_last_tx;
 
@@ -634,9 +656,10 @@ void loop()
         sys.msp_next_cycle = sys.lora_last_tx + cfg.msp_after_tx_delay;
 
         // Back to RX
-
+#ifdef HAS_LORA
         LoRa.sleep();
         LoRa.receive();
+#endif
         sys.phase = MODE_LORA_RX;
     }
 
@@ -668,7 +691,7 @@ void loop()
     {
         stats.timer_begin = millis();
 
-        if (sys.lora_slot == 0 && curr.host == HOST_INAV)
+        if (sys.lora_slot == 0 && (curr.host == HOST_INAV || curr.host == HOST_ARDU || curr.host == HOST_BETA))
         {
 
             if (sys.lora_tick % 6 == 0)
@@ -685,31 +708,33 @@ void loop()
         // msp_send_peer(sys.lora_slot);
 
         // ----------------Send MSP to FC and predict new position for all nodes minus current
-
-        for (int i = 0; i < cfg.lora_nodes; i++)
-        {
-            if (peers[i].id > 0 && i + 1 != curr.id)
+        if (sys.lora_slot == 0) {
+            DBGLN("sending msp");
+            for (int i = 0; i < cfg.lora_nodes; i++)
             {
-                peers[i].gps_comp.lat = peers[i].gps.lat;
-                peers[i].gps_comp.lon = peers[i].gps.lon;
-                peers[i].gps_comp.alt = peers[i].gps.alt;
+                if (peers[i].id > 0 && i + 1 != curr.id)
+                {
+                    peers[i].gps_comp.lat = peers[i].gps.lat;
+                    peers[i].gps_comp.lon = peers[i].gps.lon;
+                    peers[i].gps_comp.alt = peers[i].gps.alt;
 
-                if (peers[i].gps.groundSpeed > 200 && peers[i].gps.lat != 0 && peers[i].gps_pre.lat != 0)
-                { // If speed >2m/s : Compensate the position delay
-                    sys.now_sec = millis();
-                    int32_t comp_var_lat = peers[i].gps.lat - peers[i].gps_pre.lat;
-                    int32_t comp_var_lon = peers[i].gps.lon - peers[i].gps_pre.lon;
-                    int32_t comp_var_alt = peers[i].gps.alt - peers[i].gps_pre.alt;
-                    int32_t comp_var_dur = 1 + peers[i].updated - peers[i].gps_pre_updated;
-                    int32_t comp_dur_fw = (sys.now_sec - peers[i].updated);
-                    float comp_ratio = comp_dur_fw / comp_var_dur;
+                    /*if (peers[i].gps.groundSpeed > 200 && peers[i].gps.lat != 0 && peers[i].gps_pre.lat != 0)
+                    { // If speed >2m/s : Compensate the position delay
+                        sys.now_sec = millis();
+                        int32_t comp_var_lat = peers[i].gps.lat - peers[i].gps_pre.lat;
+                        int32_t comp_var_lon = peers[i].gps.lon - peers[i].gps_pre.lon;
+                        int32_t comp_var_alt = peers[i].gps.alt - peers[i].gps_pre.alt;
+                        int32_t comp_var_dur = 1 + peers[i].updated - peers[i].gps_pre_updated;
+                        int32_t comp_dur_fw = (sys.now_sec - peers[i].updated);
+                        float comp_ratio = comp_dur_fw / comp_var_dur;
 
-                    peers[i].gps_comp.lat += comp_var_lat * comp_ratio;
-                    peers[i].gps_comp.lon += comp_var_lon * comp_ratio;
-                    peers[i].gps_comp.alt += comp_var_alt * comp_ratio;
+                        peers[i].gps_comp.lat += comp_var_lat * comp_ratio;
+                        peers[i].gps_comp.lon += comp_var_lon * comp_ratio;
+                        peers[i].gps_comp.alt += comp_var_alt * comp_ratio;
+                    }*/
+                    msp_send_radar(i);
+                    // delay(7);
                 }
-                msp_send_radar(i);
-                delay(7);
             }
         }
         stats.last_msp_duration[sys.lora_slot] = millis() - stats.timer_begin;
@@ -742,11 +767,11 @@ void loop()
             }
             if (peers[i].id > 0 && ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT))
             { // Lost for a short time
-                peers[i].lost = 1;
-                if ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT_LOST)
+                peers[i].lost = 2;
+                /*if ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT_LOST)
                 { // Lost for a long time
                     peers[i].lost = 2;
-                }
+                }*/
             }
         }
 

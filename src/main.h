@@ -13,7 +13,7 @@
 
 #define VERSION "3.0.2"
 #define VERSION_CONFIG 302
-#define FORCE_DEFAULT_CONFIG 0
+#define FORCE_DEFAULT_CONFIG 1
 #define CFG_AUTOSTART_BT 0
 #define START_DELAY 2500
 // #define CFG_TARGET_NAME < (platformio.ini)
@@ -60,12 +60,21 @@
 #define LORA_M2_TIMING_DELAY -75 // ms
 #define LORA_M2_MSP_AFTER_TX_DELAY 75 // ms
 
+// --- Mode 3 (Ultrafast)
+
+#define LORA_M3_BANDWIDTH 250000 // Hz
+#define LORA_M3_CODING_RATE 4
+#define LORA_M3_SPREADING_FACTOR 6
+#define LORA_M3_NODES 6
+#define LORA_M3_SLOT_SPACING 1000/LORA_M3_NODES/10 // ms
+#define LORA_M3_TIMING_DELAY -5 // ms
+#define LORA_M3_MSP_AFTER_TX_DELAY 1 // ms
+
 // --- All modes common
 
 #define LORA_NAME_LENGTH 3
 #define LORA_CYCLE_SCAN 5000 // 5s
 #define LORA_PEER_TIMEOUT 6000 // 6s
-#define LORA_PEER_TIMEOUT_LOST 120000  // 2 mins
 #define LORA_DRIFT_THRESHOLD 6 // Min for action
 #define LORA_DRIFT_CORRECTION 12 // Max to correct
 
@@ -77,19 +86,26 @@
 
 // -------- PHASES
 
-#define MODE_START       0
-#define MODE_HOST_SCAN   1
-#define MODE_LORA_SCAN   2
-#define MODE_LORA_SYNC   3
-#define MODE_LORA_RX     4
-#define MODE_LORA_TX     5
+enum MODE {
+    MODE_START = 0,
+    MODE_HOST_SCAN = 1,
+    MODE_LORA_SCAN = 2,
+    MODE_LORA_SYNC = 3,
+    MODE_LORA_RX = 4,
+    MODE_LORA_TX = 5
+};
 
 // -------- HOST
 
 #define HOST_MSP_TIMEOUT 8500
-#define HOST_NONE 0
-#define HOST_GCS 1
-#define HOST_INAV 2
+
+enum HOST {
+    HOST_NONE = 0,
+    HOST_GCS = 1,
+    HOST_INAV = 2,
+    HOST_ARDU = 3,
+    HOST_BETA = 4
+};
 
 // -------- BEACON
 

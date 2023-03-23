@@ -35,15 +35,22 @@ void config_init(bool forcedefault) {
         cfg.lora_band = LORA_BAND;
         cfg.lora_frequency = LORA_FREQUENCY;
         #endif
+
         cfg.lora_mode = LORA_MODE;
         cfg.force_gs = LORA_FORCE_GS;
         cfg.lora_bandwidth = LORA_M0_BANDWIDTH;
         cfg.lora_coding_rate = LORA_M0_CODING_RATE;
         cfg.lora_spreading_factor = LORA_M0_SPREADING_FACTOR;
+                /*
         cfg.lora_nodes = LORA_M0_NODES;
         cfg.lora_slot_spacing = LORA_M0_SLOT_SPACING;
         cfg.lora_timing_delay = LORA_M0_TIMING_DELAY;
         cfg.msp_after_tx_delay = LORA_M0_MSP_AFTER_TX_DELAY;
+        */
+       cfg.lora_nodes = LORA_M3_NODES;
+       cfg.lora_slot_spacing = LORA_M3_SLOT_SPACING;
+       cfg.lora_timing_delay = LORA_M3_TIMING_DELAY;
+       cfg.msp_after_tx_delay = LORA_M3_MSP_AFTER_TX_DELAY;
 
         cfg.display_enable = 1;
         config_save();
