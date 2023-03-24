@@ -90,7 +90,7 @@ void display_draw_status(system_t *sys)
         {
             if (peers[i].id > 0 && peers[i].lost == 0)
             {
-                diff = sys->lora_last_tx - peers[i].updated;
+                diff = sys->last_tx - peers[i].updated;
                 if (diff > 0 && diff < sys->lora_cycle)
                 {
                     pos[i] = 128 - round(128 * diff / sys->lora_cycle);
@@ -125,22 +125,22 @@ void display_draw_status(system_t *sys)
 
                 if (peers[i].lost == 1)
                 { // Peer timed out, short
-                    display.drawString(127, line, "x:" + String((int)((sys->lora_last_tx - peers[i].updated) / 1000)) + "s");
+                    display.drawString(127, line, "x:" + String((int)((sys->last_tx - peers[i].updated) / 1000)) + "s");
                 }
                 else if (peers[i].lost == 2)
                 { // Peer timed out, long
-                    display.drawString(127, line, "L:" + String((int)((sys->lora_last_tx - peers[i].updated) / 1000)) + "s");
+                    display.drawString(127, line, "L:" + String((int)((sys->last_tx - peers[i].updated) / 1000)) + "s");
                 }
                 else
                 {
-                    if (sys->lora_last_tx > peers[i].updated)
+                    if (sys->last_tx > peers[i].updated)
                     {
-                        display.drawString(119, line, String(sys->lora_last_tx - peers[i].updated));
+                        display.drawString(119, line, String(sys->last_tx - peers[i].updated));
                         display.drawString(127, line, "-");
                     }
                     else
                     {
-                        display.drawString(119, line, String(sys->lora_cycle + sys->lora_last_tx - peers[i].updated));
+                        display.drawString(119, line, String(sys->lora_cycle + sys->last_tx - peers[i].updated));
                         display.drawString(127, line, "+");
                     }
                 }
@@ -173,7 +173,7 @@ void display_draw_status(system_t *sys)
         display.drawString(111, 10, String(stats.last_msp_duration[0]) + " / " + String(stats.last_msp_duration[1]));
         display.drawString(111, 20, String(stats.last_oled_duration));
         display.drawString(111, 30, String(sys->lora_cycle));
-        display.drawString(111, 40, String(cfg.lora_nodes) + " x " + String(cfg.lora_slot_spacing));
+        display.drawString(111, 40, String(cfg.lora_nodes) + " x " + String(cfg.slot_spacing));
         display.drawString(111, 50, String((int)millis() / 1000));
     }
     else if (sys->display_page >= 3)

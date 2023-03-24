@@ -48,7 +48,7 @@ void config_init(bool forcedefault) {
         cfg.msp_after_tx_delay = LORA_M0_MSP_AFTER_TX_DELAY;
         */
        cfg.lora_nodes = LORA_M3_NODES;
-       cfg.lora_slot_spacing = LORA_M3_SLOT_SPACING;
+       cfg.slot_spacing = LORA_M3_SLOT_SPACING;
        cfg.lora_timing_delay = LORA_M3_TIMING_DELAY;
        cfg.msp_after_tx_delay = LORA_M3_MSP_AFTER_TX_DELAY;
 
@@ -116,10 +116,10 @@ void handleConfigMessage(Stream& input_source, String message)
         cfg.lora_coding_rate = LORA_M0_CODING_RATE;
         cfg.lora_spreading_factor = LORA_M0_SPREADING_FACTOR;
         cfg.lora_nodes = LORA_M0_NODES;
-        cfg.lora_slot_spacing = LORA_M0_SLOT_SPACING;
+        cfg.slot_spacing = LORA_M0_SLOT_SPACING;
         cfg.lora_timing_delay = LORA_M0_TIMING_DELAY;
         cfg.msp_after_tx_delay = LORA_M0_MSP_AFTER_TX_DELAY;
-        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
+        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.slot_spacing) + "ms cycle");
         input_source.println("Active after reboot");
         config_save();
     }
@@ -130,10 +130,10 @@ void handleConfigMessage(Stream& input_source, String message)
         cfg.lora_coding_rate = LORA_M1_CODING_RATE;
         cfg.lora_spreading_factor = LORA_M1_SPREADING_FACTOR;
         cfg.lora_nodes = LORA_M1_NODES;
-        cfg.lora_slot_spacing = LORA_M1_SLOT_SPACING;
+        cfg.slot_spacing = LORA_M1_SLOT_SPACING;
         cfg.lora_timing_delay = LORA_M1_TIMING_DELAY;
         cfg.msp_after_tx_delay = LORA_M1_MSP_AFTER_TX_DELAY;
-        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
+        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.slot_spacing) + "ms cycle");
         input_source.println("Active after reboot");
         config_save();
     }
@@ -144,10 +144,10 @@ void handleConfigMessage(Stream& input_source, String message)
         cfg.lora_coding_rate = LORA_M2_CODING_RATE;
         cfg.lora_spreading_factor = LORA_M2_SPREADING_FACTOR;
         cfg.lora_nodes = LORA_M2_NODES;
-        cfg.lora_slot_spacing = LORA_M2_SLOT_SPACING;
+        cfg.slot_spacing = LORA_M2_SLOT_SPACING;
         cfg.lora_timing_delay = LORA_M2_TIMING_DELAY;
         cfg.msp_after_tx_delay = LORA_M2_MSP_AFTER_TX_DELAY;
-        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
+        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.slot_spacing) + "ms cycle");
         input_source.println("Active after reboot");
         config_save();
     }
@@ -189,13 +189,13 @@ void handleConfigMessage(Stream& input_source, String message)
         input_source.println("Band: " + String(cfg.lora_band)+ "MHz / Mode: " + String(loramode_name[cfg.lora_mode]));
         input_source.println("Freq: " + String((float)cfg.lora_frequency / 1000000, 3)+ "MHz / Power: " + String(cfg.lora_power));
         input_source.println("BW: " + String((float)cfg.lora_bandwidth / 1000, 0)+ "KHz / CR: " + String(cfg.lora_coding_rate) + " / SF: " +String(cfg.lora_spreading_factor));
-        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.lora_slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.lora_slot_spacing) + "ms cycle");
+        input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.slot_spacing) + "ms cycle");
         input_source.println("Ground station mode: " + (String)onoff[cfg.force_gs]);
     }
     else if (message=="list") {
         for (int i = 0; i < cfg.lora_nodes; i++) {
             if (peers[i].id > 0) {
-                input_source.println((String)"[" + char(i+65) + "] " + peers[i].name + " N" + String((float)peers[i].gps_rec.lat / 10000000, 5) + " E" + String((float)peers[i].gps_rec.lon / 10000000, 5) + " " + peers[i].gps_rec.alt + "m " + String(peers[i].gps.groundSpeed / 100) + "m/s " + String(peers[i].gps.groundCourse / 10) + "° " + String((int)((sys.lora_last_tx - peers[i].updated) / 1000)) + "s " + String(peers[i].rssi) + "db");
+                input_source.println((String)"[" + char(i+65) + "] " + peers[i].name + " N" + String((float)peers[i].gps_rec.lat / 10000000, 5) + " E" + String((float)peers[i].gps_rec.lon / 10000000, 5) + " " + peers[i].gps_rec.alt + "m " + String(peers[i].gps.groundSpeed / 100) + "m/s " + String(peers[i].gps.groundCourse / 10) + "° " + String((int)((sys.last_tx - peers[i].updated) / 1000)) + "s " + String(peers[i].rssi) + "db");
             }
             if (i + 1 == curr.id) {
                 input_source.println((String)"[" + char(i+65) + "] " + String(host_name[curr.host]) + " (host) N" + String((float)curr.gps.lat / 10000000, 5) + " E" + String((float)curr.gps.lon / 10000000, 5) + " " + String(curr.gps.alt) + "m Eff:" + String(stats.percent_received) + "%" );

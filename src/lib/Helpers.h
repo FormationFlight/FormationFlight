@@ -14,4 +14,5 @@ void reset_peers();
 void pick_id();
 void resync_tx_slot(int16_t delay);
 uint8_t crc8_dvb_s2(uint8_t crc, unsigned char a);
+String generate_id();
 #endif

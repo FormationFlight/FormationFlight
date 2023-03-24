@@ -7,12 +7,17 @@
 //
 // -------------------------------------------------------------------------------------------
 
+#ifndef DEBUG
+#define DEBUG 0
+#endif
+#define DBGLN(x) do { if (DEBUG) { Serial.printf("%lu: ", millis()); Serial.println(x); } } while (0)
+
 #include "lib/MSP.h"
 
 // -------- GENERAL
 
-#define VERSION "3.0.2"
-#define VERSION_CONFIG 302
+#define VERSION "4.0.0"
+#define VERSION_CONFIG 400
 #define FORCE_DEFAULT_CONFIG 1
 #define CFG_AUTOSTART_BT 0
 #define START_DELAY 2500
@@ -89,10 +94,10 @@
 enum MODE {
     MODE_START = 0,
     MODE_HOST_SCAN = 1,
-    MODE_LORA_SCAN = 2,
-    MODE_LORA_SYNC = 3,
-    MODE_LORA_RX = 4,
-    MODE_LORA_TX = 5
+    MODE_OTA_SCAN = 2,
+    MODE_OTA_SYNC = 3,
+    MODE_OTA_RX = 4,
+    MODE_OTA_TX = 5
 };
 
 // -------- HOST
@@ -104,7 +109,7 @@ enum HOST {
     HOST_GCS = 1,
     HOST_INAV = 2,
     HOST_ARDU = 3,
-    HOST_BETA = 4
+    HOST_BTFL = 4
 };
 
 // -------- BEACON
@@ -135,7 +140,7 @@ struct peer_t {
    msp_raw_gps_t gps_comp;
    msp_analog_t fcanalog;
    char name[LORA_NAME_LENGTH + 1];
-   };
+};
 
 struct curr_t {
     uint8_t id;
@@ -186,7 +191,7 @@ struct config_t {
     uint8_t lora_coding_rate;
     uint8_t lora_spreading_factor;
     uint8_t lora_nodes;
-    uint16_t lora_slot_spacing;
+    uint16_t slot_spacing;
     int16_t lora_timing_delay;
     int16_t msp_after_tx_delay;
 
@@ -201,7 +206,7 @@ struct system_t {
     uint8_t phase;
 
     uint16_t lora_cycle;
-    uint8_t lora_tick = 0;
+    uint8_t ota_nonce = 0;
 
     uint32_t now = 0;
     uint32_t now_sec = 0;
@@ -216,11 +221,11 @@ struct system_t {
     uint8_t num_peers_active = 0;
 
     bool lora_no_tx = 0;
-    uint8_t lora_slot = 0;
-    uint32_t lora_last_tx = 0;
+    uint8_t ota_slot = 0;
+    uint32_t last_tx = 0;
     uint32_t lora_last_rx = 0;
-    uint32_t lora_next_tx = 0;
-    int32_t lora_drift = 0;
+    uint32_t next_tx = 0;
+    int32_t drift = 0;
     int drift_correction = 0;
 
     uint32_t msp_next_cycle = 0;

@@ -4,7 +4,6 @@
 #include <Arduino.h>
 #include "main.h"
 
-
 double deg2rad(double deg)
 {
     return (deg * M_PI / 180);
@@ -45,18 +44,22 @@ double gpsCourseTo(double lat1, double long1, double lat2, double long2)
     return degrees(a2);
 }
 
-
 int count_peers(bool active, config_t *cfg)
 {
     int j = 0;
-    for (int i = 0; i < cfg->lora_nodes; i++) {
-        if (active == 1) {
-            if ((peers[i].id > 0) && peers[i].lost == 0) {
+    for (int i = 0; i < cfg->lora_nodes; i++)
+    {
+        if (active == 1)
+        {
+            if ((peers[i].id > 0) && peers[i].lost == 0)
+            {
                 j++;
             }
         }
-        else {
-            if (peers[i].id > 0) {
+        else
+        {
+            if (peers[i].id > 0)
+            {
                 j++;
             }
         }
@@ -64,9 +67,11 @@ int count_peers(bool active, config_t *cfg)
     return j;
 }
 
-void reset_peers() {
+void reset_peers()
+{
     sys.now_sec = millis();
-    for (int i = 0; i < cfg.lora_nodes; i++) {
+    for (int i = 0; i < cfg.lora_nodes; i++)
+    {
         peers[i].id = 0;
         peers[i].host = 0;
         peers[i].state = 0;
@@ -84,21 +89,26 @@ void reset_peers() {
     }
 }
 
-
-void pick_id() {
+void pick_id()
+{
     curr.id = 0;
-    for (int i = 0; i < cfg.lora_nodes; i++) {
-        if ((peers[i].id == 0) && (curr.id == 0)) {
+    for (int i = 0; i < cfg.lora_nodes; i++)
+    {
+        if ((peers[i].id == 0) && (curr.id == 0))
+        {
             curr.id = i + 1;
         }
     }
 }
 
-void resync_tx_slot(int16_t delay) {
+void resync_tx_slot(int16_t delay)
+{
     bool startnow = 0;
-    for (int i = 0; (i < cfg.lora_nodes) && (startnow == 0); i++) {
-        if (peers[i].id > 0) {
-            sys.lora_next_tx = peers[i].updated + (curr.id - peers[i].id) * cfg.lora_slot_spacing + sys.lora_cycle + delay;
+    for (int i = 0; (i < cfg.lora_nodes) && (startnow == 0); i++)
+    {
+        if (peers[i].id > 0)
+        {
+            sys.next_tx = peers[i].updated + (curr.id - peers[i].id) * cfg.slot_spacing + sys.lora_cycle + delay;
             startnow = 1;
         }
     }
@@ -107,12 +117,31 @@ void resync_tx_slot(int16_t delay) {
 uint8_t crc8_dvb_s2(uint8_t crc, unsigned char a)
 {
     crc ^= a;
-    for (int ii = 0; ii < 8; ++ii) {
-        if (crc & 0x80) {
+    for (int ii = 0; ii < 8; ++ii)
+    {
+        if (crc & 0x80)
+        {
             crc = (crc << 1) ^ 0xD5;
-        } else {
+        }
+        else
+        {
             crc = crc << 1;
         }
     }
     return crc;
+}
+
+String generate_id()
+{
+    uint32_t chipID;
+#ifdef PLATFORM_ESP8266
+    chipID = ESP.getChipId();
+#elif defined(PLATFORM_ESP32)
+    uint64_t macAddress = ESP.getEfuseMac();
+    uint64_t macAddressTrunc = macAddress << 40;
+    chipID = macAddressTrunc >> 40;
+#endif
+    String chipIDString = String(chipID, HEX);
+    chipIDString.toUpperCase();
+    return chipIDString;
 }
