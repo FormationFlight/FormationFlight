@@ -68,7 +68,7 @@ air_type0_t RadioManager::prepare_packet()
 }
 
 
-void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize)
+void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize, float rssi)
 {
     // Check packet size
     if (packetSize != sizeof(air_type0_t))
@@ -108,7 +108,9 @@ void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize)
     peers[id].state = 0;
     peers[id].lost = 0;
     peers[id].updated = millis();
-    peers[id].rssi = 0;
+    if (rssi != 0) {
+        peers[id].rssi = int(rssi);
+    }
 
     peers[id].gps.lat = air_0.lat * 100;
     peers[id].gps.lon = air_0.lon * 100;

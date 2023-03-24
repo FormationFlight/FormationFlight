@@ -8,7 +8,7 @@ void espnow_receive(uint8_t *mac, uint8_t *incomingData, uint8_t packetSize)
 void espnow_receive(const uint8_t *mac_addr, const uint8_t *incomingData, int packetSize)
 #endif
 {
-    RadioManager::getSingleton()->receive(incomingData, packetSize);
+    RadioManager::getSingleton()->receive(incomingData, packetSize, 0);
 }
 
 ESPNOW *espnowInstance = NULL;

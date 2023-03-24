@@ -26,7 +26,7 @@ public:
     static RadioManager *getSingleton();
 
     air_type0_t prepare_packet();
-    void receive(const uint8_t *rawPacket, size_t packetSize);
+    void receive(const uint8_t *rawPacket, size_t packetSize, float rssi);
     void transmit(air_type0_t *packet);
 
     void addRadio(Radio *radio);

@@ -54,9 +54,8 @@ void LoRa::flagPacketReceived()
 void LoRa::receive()
 {
     uint8_t buf[sizeof(air_type0_t)];
-    
     radio.readData(buf, sizeof(air_type0_t));
-    RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t));
+    RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio.getRSSI());
 }
 
 void LoRa::loop()
