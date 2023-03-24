@@ -1,7 +1,7 @@
 #include "RadioManager.h"
 #include <RadioLib.h>
 
-#define FREQUENCY 2400.0f // MHz
+#define FREQUENCY 2500.0f // MHz
 #define BANDWIDTH 203 // kHz
 #define SPREADING_FACTOR 5 // SF5
 #define CODING_RATE 6 // 4/6 CR

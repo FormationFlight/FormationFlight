@@ -20,7 +20,7 @@
 #ifdef BT_CONFIG
 #include <lib/BTConfig.h>
 #elif defined(WIFI_CONFIG)
-//#include <lib/WiFiConfig.h>
+// #include <lib/WiFiConfig.h>
 #endif
 // Radios
 #include <lib/Radios/RadioManager.h>
@@ -29,7 +29,7 @@
 #include <lib/Radios/LoRa.h>
 #endif
 
-
+#define DEBUG 1
 
 // -------- VARS
 
@@ -40,7 +40,6 @@ MSP msp;
 msp_radar_pos_t radarPos;
 curr_t curr;
 peer_t peers[LORA_NODES_MAX];
-
 
 // -------- MSP and FC
 
@@ -185,14 +184,13 @@ void setup()
 
     reset_peers();
 
-
+    DBGLN("[main] init espnow");
+    RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
 
 #ifdef HAS_LORA
     DBGLN("[main] init LoRa");
     RadioManager::getSingleton()->addRadio(LoRa::getSingleton());
 #endif
-    //DBGLN("[main] init espnow");
-    //RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
 
     if (cfg.display_enable)
     {
@@ -298,7 +296,7 @@ void loop()
 
             if (sys.io_bt_enabled)
             {
-                //initConfigInterface();
+                // initConfigInterface();
             }
 #if !defined(PIN_BUTTON)
             // Enable WiFi / Bluetooth if there's no button to do so
@@ -478,7 +476,8 @@ void loop()
         // msp_send_peer(sys.lora_slot);
 
         // ----------------Send MSP to FC and predict new position for all nodes minus current
-        if (sys.ota_slot == 0) {
+        if (sys.ota_slot == 0)
+        {
             DBGLN("[main] sending msp");
             for (int i = 0; i < cfg.lora_nodes; i++)
             {
@@ -488,23 +487,23 @@ void loop()
                     peers[i].gps_comp.lon = peers[i].gps.lon;
                     peers[i].gps_comp.alt = peers[i].gps.alt;
 
-                    /*if (peers[i].gps.groundSpeed > 200 && peers[i].gps.lat != 0 && peers[i].gps_pre.lat != 0)
-                    { // If speed >2m/s : Compensate the position delay
-                        sys.now_sec = millis();
-                        int32_t comp_var_lat = peers[i].gps.lat - peers[i].gps_pre.lat;
-                        int32_t comp_var_lon = peers[i].gps.lon - peers[i].gps_pre.lon;
-                        int32_t comp_var_alt = peers[i].gps.alt - peers[i].gps_pre.alt;
-                        int32_t comp_var_dur = 1 + peers[i].updated - peers[i].gps_pre_updated;
-                        int32_t comp_dur_fw = (sys.now_sec - peers[i].updated);
-                        float comp_ratio = comp_dur_fw / comp_var_dur;
+/*if (peers[i].gps.groundSpeed > 200 && peers[i].gps.lat != 0 && peers[i].gps_pre.lat != 0)
+{ // If speed >2m/s : Compensate the position delay
+    sys.now_sec = millis();
+    int32_t comp_var_lat = peers[i].gps.lat - peers[i].gps_pre.lat;
+    int32_t comp_var_lon = peers[i].gps.lon - peers[i].gps_pre.lon;
+    int32_t comp_var_alt = peers[i].gps.alt - peers[i].gps_pre.alt;
+    int32_t comp_var_dur = 1 + peers[i].updated - peers[i].gps_pre_updated;
+    int32_t comp_dur_fw = (sys.now_sec - peers[i].updated);
+    float comp_ratio = comp_dur_fw / comp_var_dur;
 
-                        peers[i].gps_comp.lat += comp_var_lat * comp_ratio;
-                        peers[i].gps_comp.lon += comp_var_lon * comp_ratio;
-                        peers[i].gps_comp.alt += comp_var_alt * comp_ratio;
-                    }*/
-                    #ifndef DEBUG
+    peers[i].gps_comp.lat += comp_var_lat * comp_ratio;
+    peers[i].gps_comp.lon += comp_var_lon * comp_ratio;
+    peers[i].gps_comp.alt += comp_var_alt * comp_ratio;
+}*/
+#ifndef DEBUG
                     msp_send_radar(i);
-                    #endif
+#endif
                 }
             }
             DBGLN("[main] finished sending msp");
@@ -515,7 +514,7 @@ void loop()
     }
 
     // ---------------------- SERIAL CONFIG CHANNEL
-    //handleConfig();
+    // handleConfig();
 
     // ---------------------- STATISTICS & IO
 

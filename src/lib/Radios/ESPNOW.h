@@ -10,9 +10,11 @@
 class ESPNOW : public Radio
 {
 public:
+    ESPNOW();
     int begin();
     void transmit(air_type0_t *air_0);
     void loop();
+    static ESPNOW* getSingleton();
 private:
     uint8_t broadcastAddress[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #if defined(PLATFORM_ESP32)

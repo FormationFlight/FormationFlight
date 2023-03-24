@@ -170,10 +170,9 @@ void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize)
 void RadioManager::transmit(air_type0_t *packet)
 {
     for (uint8_t i = 0; i < MAX_RADIOS; i++) {
-        if (radios[i] == nullptr) {
-            continue;
+        if (radios[i] != nullptr) {
+            radios[i]->transmit(packet);
         }
-        radios[i]->transmit(packet);
     }
 }
 
