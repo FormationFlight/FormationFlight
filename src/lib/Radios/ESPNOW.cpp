@@ -1,6 +1,7 @@
 
 #include "ESPNOW.h"
 #include "RadioManager.h"
+#include "../CryptoManager.h"
 
 #if defined(PLATFORM_ESP8266)
 void espnow_receive(uint8_t *mac, uint8_t *incomingData, uint8_t packetSize)
@@ -8,10 +9,13 @@ void espnow_receive(uint8_t *mac, uint8_t *incomingData, uint8_t packetSize)
 void espnow_receive(const uint8_t *mac_addr, const uint8_t *incomingData, int packetSize)
 #endif
 {
-    RadioManager::getSingleton()->receive(incomingData, packetSize, 0);
+    uint8_t buf[packetSize];
+    memcpy(buf, incomingData, packetSize);
+    CryptoManager::getSingleton()->decrypt(buf, packetSize);
+    RadioManager::getSingleton()->receive(buf, packetSize, 0);
 }
 
-ESPNOW *espnowInstance = NULL;
+ESPNOW *espnowInstance = nullptr;
 
 ESPNOW::ESPNOW()
 {
@@ -19,7 +23,7 @@ ESPNOW::ESPNOW()
 
 ESPNOW* ESPNOW::getSingleton()
 {
-    if (espnowInstance == NULL)
+    if (espnowInstance == nullptr)
     {
         espnowInstance = new ESPNOW();
     }
@@ -30,6 +34,7 @@ void ESPNOW::transmit(air_type0_t *air_0)
 {
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
+    CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
     esp_now_send(broadcastAddress, buf, sizeof(air_type0_t));
 }
 
@@ -47,7 +52,7 @@ int ESPNOW::begin()
     esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
 #elif defined(PLATFORM_ESP32)
     memset((void*)&peerInfo, 0, sizeof(esp_now_peer_info_t));
-    peerInfo.ifidx = WIFI_IF_STA;
+    peerInfo.ifidx = WIFI_IF_AP;
     memcpy(peerInfo.peer_addr, broadcastAddress, 6);
     peerInfo.channel = 0;
     peerInfo.encrypt = false;

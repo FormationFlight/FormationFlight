@@ -112,12 +112,6 @@ enum HOST {
     HOST_BTFL = 4
 };
 
-// -------- BEACON
-
-// #define BEACON_TRIGGER_DELAY
-// #define BEACON_CYCLE_DELAY
-
-// -------- STRUCTURE
 
 struct peer_t {
    uint8_t id;
@@ -163,7 +157,13 @@ struct curr_t {
     uint8_t crc;
 };*/
 
+enum PACKETTYPE {
+    PACKET_TYPE_RADAR_POSITION = 0
+};
+
+// For encryption reasons, the packet must be 16 bytes or greater
 struct __attribute__((packed)) air_type0_t {
+    uint8_t packet_type;
     uint8_t id;
     int32_t lat;
     int32_t lon;

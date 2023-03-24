@@ -1,13 +1,14 @@
 
 #include "LoRa.h"
 #include "RadioManager.h"
+#include "../CryptoManager.h"
 
 void IRAM_ATTR onPacketReceive(void)
 {
     LoRa::getSingleton()->flagPacketReceived();
 }
 
-LoRa *loraInstance = NULL;
+LoRa *loraInstance = nullptr;
 
 LoRa::LoRa()
 {
@@ -16,7 +17,7 @@ LoRa::LoRa()
 
 LoRa* LoRa::getSingleton()
 {
-    if (loraInstance == NULL)
+    if (loraInstance == nullptr)
     {
         loraInstance = new LoRa();
     }
@@ -27,7 +28,7 @@ void LoRa::transmit(air_type0_t *air_0)
 {
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
-    DBGLN("[LoRa] transmit");
+    CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
     radio.transmit(buf, sizeof(air_type0_t));
     radio.startReceive();
 }
@@ -55,6 +56,7 @@ void LoRa::receive()
 {
     uint8_t buf[sizeof(air_type0_t)];
     radio.readData(buf, sizeof(air_type0_t));
+    CryptoManager::getSingleton()->decrypt(buf, sizeof(air_type0_t));
     RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio.getRSSI());
 }
 

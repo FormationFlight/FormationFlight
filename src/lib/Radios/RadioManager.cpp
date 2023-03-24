@@ -5,16 +5,17 @@
 #ifdef HAS_LORA
 #include <RadioLib.h>
 #endif
+#include "../CryptoManager.h"
 
 RadioManager::RadioManager()
 {
 }
 
-RadioManager* radioManager;
+RadioManager* radioManager = nullptr;
 
 RadioManager* RadioManager::getSingleton()
 {
-    if (radioManager == NULL)
+    if (radioManager == nullptr)
     {
         radioManager = new RadioManager();
     }
@@ -24,6 +25,7 @@ RadioManager* RadioManager::getSingleton()
 air_type0_t RadioManager::prepare_packet()
 {
     air_type0_t air_0;
+    air_0.packet_type = PACKET_TYPE_RADAR_POSITION;
     air_0.id = curr.id;
     air_0.lat = curr.gps.lat / 100;
     air_0.lon = curr.gps.lon / 100;
@@ -70,6 +72,8 @@ air_type0_t RadioManager::prepare_packet()
 
 void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize, float rssi)
 {
+
+
     // Check packet size
     if (packetSize != sizeof(air_type0_t))
     {
@@ -77,6 +81,12 @@ void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize, float rs
     }
     air_type0_t air_0;
     memcpy_P(&air_0, rawPacket, packetSize);
+    if (air_0.packet_type != PACKET_TYPE_RADAR_POSITION)
+    {
+        // We can implement additional packet types here
+        return;
+    }
+
     uint8_t calculatedCrc = 0;
     // Check CRC
     for (uint8_t i = 0; i < sizeof(air_type0_t) - sizeof(air_0.crc); i++)
