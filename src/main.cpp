@@ -16,6 +16,7 @@
 #include <main.h>
 #include <lib/Helpers.h>
 #include <lib/ConfigHandler.h>
+#include <lib/CryptoManager.h>
 #include <lib/Peers/PeerManager.h>
 // Radios
 #include <lib/WiFi/WiFiManager.h>
@@ -182,6 +183,9 @@ void setup()
     DBGLN("[main] start peermanager");
     PeerManager *peerManager = PeerManager::getSingleton();
     peerManager->reset();
+
+    // Create CryptoManager
+    CryptoManager::getSingleton();
 
     DBGLN("[main] start wifimanager");
     WiFiManager::getSingleton();

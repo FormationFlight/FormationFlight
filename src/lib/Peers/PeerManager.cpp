@@ -78,6 +78,7 @@ void PeerManager::statusJson(JsonDocument *doc)
             o["self"] = peer->id == curr.id;
             o["name"] = peer->name;
             o["updated"] = peer->updated;
+            o["lost"] = peer->lost;
             o["lat"] = peer->gps.lat;
             o["lon"] = peer->gps.lon;
             o["alt"] = peer->gps.alt;
