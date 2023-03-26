@@ -2,7 +2,8 @@
 #include "ESPNOW.h"
 #include "RadioManager.h"
 #include "../CryptoManager.h"
-
+#include "../Helpers.h"
+#include "../WiFi/WiFiManager.h"
 #if defined(PLATFORM_ESP8266)
 void espnow_receive(uint8_t *mac, uint8_t *incomingData, uint8_t packetSize)
 #elif defined(PLATFORM_ESP32)
@@ -40,12 +41,9 @@ void ESPNOW::transmit(air_type0_t *air_0)
 
 int ESPNOW::begin()
 {
-#ifdef PLATFORM_ESP32
-    WiFi.mode(WIFI_MODE_AP);
-#elif defined(PLATFORM_ESP8266)
-    WiFi.mode(WIFI_AP);
-#endif
-    WiFi.disconnect();
+    // Ensure WiFi was started
+    WiFiManager::getSingleton();
+    // Initialize ESPNOW
     esp_now_init();
 #ifdef PLATFORM_ESP8266
     esp_now_set_self_role(ESP_NOW_ROLE_COMBO);

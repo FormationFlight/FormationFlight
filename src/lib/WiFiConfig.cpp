@@ -21,7 +21,7 @@ void setupNetwork()
     chipID = macAddressTrunc >> 40;
 #endif
     String chipIDString = String(chipID, HEX);
-    String ssid = "iNav Radar-";
+    String ssid = "Radar-";
     ssid += chipIDString;
     WiFi.mode(WIFI_AP);
     WiFi.softAP(ssid.c_str(), "inavradar");

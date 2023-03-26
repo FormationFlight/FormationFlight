@@ -16,13 +16,8 @@
 #include <main.h>
 #include <lib/Helpers.h>
 #include <lib/ConfigHandler.h>
-// Configuration systems (Bluetooth or WiFi)
-#ifdef BT_CONFIG
-#include <lib/BTConfig.h>
-#elif defined(WIFI_CONFIG)
-// #include <lib/WiFiConfig.h>
-#endif
 // Radios
+#include <lib/WiFi/WiFiManager.h>
 #include <lib/Radios/RadioManager.h>
 #include <lib/Radios/ESPNOW.h>
 #ifdef HAS_LORA
@@ -184,6 +179,9 @@ void setup()
 
     reset_peers();
 
+    DBGLN("[main] start wifi");
+    WiFiManager::getSingleton();
+
     DBGLN("[main] init espnow");
     RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
 
@@ -207,7 +205,10 @@ void setup()
 void loop()
 {
     sys.now = millis();
+    // Run our periodic radio tasks
     RadioManager::getSingleton()->loop();
+    // Periodic WiFi Tasks
+    WiFiManager::getSingleton()->loop();
 
     // ---------------------- IO BUTTON
 
@@ -300,7 +301,7 @@ void loop()
             }
 #if !defined(PIN_BUTTON)
             // Enable WiFi / Bluetooth if there's no button to do so
-            initConfigInterface();
+            //initConfigInterface();
 #endif
 
             sys.num_peers = count_peers(0, &cfg);

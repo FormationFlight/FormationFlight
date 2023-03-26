@@ -41,6 +41,7 @@ int LoRa::begin() {
     #ifdef LORA_PIN_RXEN
     radio.setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
     #endif
+    radio.implicitHeader(sizeof(air_type0_t));
     radio.setDio1Action(onPacketReceive);
     radio.startReceive();
 #endif
