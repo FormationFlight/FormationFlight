@@ -15,9 +15,13 @@ public:
     void transmit(air_type0_t *air_0);
     void loop();
     static ESPNOW* getSingleton();
+    String getStatusString();
+    void onPacketReceived();
 private:
     uint8_t broadcastAddress[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 #if defined(PLATFORM_ESP32)
     esp_now_peer_info_t peerInfo;
+    uint32_t packetsReceived = 0;
+    uint32_t packetsTransmitted = 0;
 #endif
 };

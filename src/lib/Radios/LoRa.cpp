@@ -26,6 +26,9 @@ LoRa* LoRa::getSingleton()
 
 void LoRa::transmit(air_type0_t *air_0)
 {
+    if (!getEnabled()) {
+        return;
+    }
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
@@ -50,6 +53,9 @@ int LoRa::begin() {
 
 void LoRa::flagPacketReceived()
 {
+    if (!getEnabled()) {
+        return;
+    }
     packetReceived = true;
 }
 
@@ -68,4 +74,14 @@ void LoRa::loop()
         receive();
         packetReceived = false;
     }
+}
+
+String LoRa::getStatusString()
+{
+    char buf[128];
+#ifdef HAS_LORA
+    sprintf(buf, "LoRa @ %fMHz (%ddBm) [%luTX/%luRX]", FREQUENCY, LORA_POWER, packetsTransmitted, packetsReceived);
+#endif
+    return String(buf);
+
 }

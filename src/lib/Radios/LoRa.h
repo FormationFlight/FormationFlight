@@ -21,6 +21,7 @@ public:
     void receive();
     void flagPacketReceived();
     void loop();
+    String getStatusString();
 private:
     SX128x radio = nullptr;
     volatile bool packetReceived;

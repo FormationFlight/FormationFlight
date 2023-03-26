@@ -1,5 +1,6 @@
 #pragma once
 #include <main.h>
+#include <ArduinoJson.h>
 
 #define MAX_RADIOS 4
 
@@ -17,6 +18,15 @@ public:
     virtual int begin();
     virtual void transmit(air_type0_t *packet);
     virtual void loop();
+    virtual String getStatusString();
+    bool getEnabled() {
+        return enabled;
+    }
+    void setEnabled(bool status) {
+        enabled = status;
+    }
+private:
+    bool enabled;
 };
 
 class RadioManager
@@ -31,6 +41,8 @@ public:
 
     void addRadio(Radio *radio);
     void loop();
+    void statusJson(JsonDocument *doc);
+    void setRadioStatus(uint8_t index, bool status);
 private:
     Radio *radios[MAX_RADIOS] = {nullptr};
 };

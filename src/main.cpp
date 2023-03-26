@@ -16,6 +16,7 @@
 #include <main.h>
 #include <lib/Helpers.h>
 #include <lib/ConfigHandler.h>
+#include <lib/Peers/PeerManager.h>
 // Radios
 #include <lib/WiFi/WiFiManager.h>
 #include <lib/Radios/RadioManager.h>
@@ -34,7 +35,6 @@ stats_t stats;
 MSP msp;
 msp_radar_pos_t radarPos;
 curr_t curr;
-peer_t peers[LORA_NODES_MAX];
 
 // -------- MSP and FC
 
@@ -91,14 +91,15 @@ void msp_get_fcanalog()
 
 void msp_send_radar(uint8_t i)
 {
+    peer_t *peer = PeerManager::getSingleton()->getPeer(i);
     radarPos.id = i;
-    radarPos.state = (peers[i].lost == 2) ? 2 : peers[i].state;
-    radarPos.lat = peers[i].gps_comp.lat;              // x 10E7
-    radarPos.lon = peers[i].gps_comp.lon;              // x 10E7
-    radarPos.alt = peers[i].gps_comp.alt * 100;        // cm
-    radarPos.heading = peers[i].gps.groundCourse / 10; // From ° x 10 to °
-    radarPos.speed = peers[i].gps.groundSpeed;         // cm/s
-    radarPos.lq = peers[i].lq;
+    radarPos.state = (peer->lost == 2) ? 2 : peer->state;
+    radarPos.lat = peer->gps_comp.lat;              // x 10E7
+    radarPos.lon = peer->gps_comp.lon;              // x 10E7
+    radarPos.alt = peer->gps_comp.alt * 100;        // cm
+    radarPos.heading = peer->gps.groundCourse / 10; // From ° x 10 to °
+    radarPos.speed = peer->gps.groundSpeed;         // cm/s
+    radarPos.lq = peer->lq;
     msp.command2(MSP2_COMMON_SET_RADAR_POS, &radarPos, sizeof(radarPos), 0);
 }
 // -------- INTERRUPTS
@@ -177,16 +178,19 @@ void setup()
     Serial.begin(SERIAL_SPEED, SERIAL_8N1);
 #endif
 
-    reset_peers();
+    // Create PeerManager
+    DBGLN("[main] start peermanager");
+    PeerManager *peerManager = PeerManager::getSingleton();
+    peerManager->reset();
 
-    DBGLN("[main] start wifi");
+    DBGLN("[main] start wifimanager");
     WiFiManager::getSingleton();
 
-    DBGLN("[main] init espnow");
+    DBGLN("[main] init radio espnow");
     RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
 
 #ifdef HAS_LORA
-    DBGLN("[main] init LoRa");
+    DBGLN("[main] init radio LoRa");
     RadioManager::getSingleton()->addRadio(LoRa::getSingleton());
 #endif
 
@@ -209,6 +213,8 @@ void loop()
     RadioManager::getSingleton()->loop();
     // Periodic WiFi Tasks
     WiFiManager::getSingleton()->loop();
+    // Periodic peer tasks
+    PeerManager::getSingleton()->loop();
 
     // ---------------------- IO BUTTON
 
@@ -304,8 +310,7 @@ void loop()
             //initConfigInterface();
 #endif
 
-            sys.num_peers = count_peers(0, &cfg);
-            if (sys.num_peers >= cfg.lora_nodes || curr.host == HOST_GCS)
+            if (PeerManager::getSingleton()->count() >= cfg.lora_nodes || curr.host == HOST_GCS)
             { // Too many nodes already, or connected to a ground station : go silent mode
                 sys.lora_no_tx = 1;
             }
@@ -322,11 +327,12 @@ void loop()
 #ifdef HAS_OLED
             if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2 && cfg.display_enable)
             {
+                peer_t *peer = PeerManager::getSingleton()->getPeer(i);
                 for (int i = 0; i < cfg.lora_nodes; i++)
                 {
-                    if (peers[i].id > 0)
+                    if (peer->id > 0)
                     {
-                        display_draw_peername(peers[i].id);
+                        display_draw_peername(peer->id);
                     }
                 }
                 display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / LORA_CYCLE_SCAN);
@@ -342,7 +348,7 @@ void loop()
     if (sys.phase == MODE_OTA_SYNC)
     {
 
-        if (sys.num_peers == 0 || sys.lora_no_tx)
+        if (PeerManager::getSingleton()->count(false) == 0 || sys.lora_no_tx)
         {
             // Alone or Silent mode, no need to sync
             sys.next_tx = millis() + sys.lora_cycle;
@@ -357,7 +363,6 @@ void loop()
         sys.stats_updated = sys.next_tx + sys.lora_cycle - 15;
         sys.pps = 0;
         sys.ppsc = 0;
-        sys.num_peers = 0;
         stats.packets_total = 0;
         stats.packets_received = 0;
         stats.percent_received = 0;
@@ -411,12 +416,13 @@ void loop()
 
         // Drift correction
 
-        if (curr.id > 1 && sys.num_peers_active > 0)
+        if (curr.id > 1 && PeerManager::getSingleton()->count_active() > 0)
         {
             int prev = curr.id - 2;
-            if (peers[prev].id > 0)
+            peer_t *peer = PeerManager::getSingleton()->getPeer(prev);
+            if (peer->id > 0)
             {
-                sys.drift = sys.last_tx - peers[prev].updated - cfg.slot_spacing;
+                sys.drift = sys.last_tx - peer->updated - cfg.slot_spacing;
 
                 if ((abs(sys.drift) > LORA_DRIFT_THRESHOLD) && (abs(sys.drift) < cfg.slot_spacing))
                 {
@@ -438,7 +444,7 @@ void loop()
     {
         stats.timer_begin = millis();
 
-        if (sys.num_peers == 0 && sys.display_page == 1)
+        if (PeerManager::getSingleton()->count() == 0 && sys.display_page == 1)
         { // No need for timings graphs when alone
             sys.display_page++;
         }
@@ -482,26 +488,13 @@ void loop()
             DBGLN("[main] sending msp");
             for (int i = 0; i < cfg.lora_nodes; i++)
             {
-                if (peers[i].id > 0 && i + 1 != curr.id)
+                peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+                // Only send if the peer has been seen and it's not us
+                if (peer->id > 0 && i + 1 != curr.id)
                 {
-                    peers[i].gps_comp.lat = peers[i].gps.lat;
-                    peers[i].gps_comp.lon = peers[i].gps.lon;
-                    peers[i].gps_comp.alt = peers[i].gps.alt;
-
-/*if (peers[i].gps.groundSpeed > 200 && peers[i].gps.lat != 0 && peers[i].gps_pre.lat != 0)
-{ // If speed >2m/s : Compensate the position delay
-    sys.now_sec = millis();
-    int32_t comp_var_lat = peers[i].gps.lat - peers[i].gps_pre.lat;
-    int32_t comp_var_lon = peers[i].gps.lon - peers[i].gps_pre.lon;
-    int32_t comp_var_alt = peers[i].gps.alt - peers[i].gps_pre.alt;
-    int32_t comp_var_dur = 1 + peers[i].updated - peers[i].gps_pre_updated;
-    int32_t comp_dur_fw = (sys.now_sec - peers[i].updated);
-    float comp_ratio = comp_dur_fw / comp_var_dur;
-
-    peers[i].gps_comp.lat += comp_var_lat * comp_ratio;
-    peers[i].gps_comp.lon += comp_var_lon * comp_ratio;
-    peers[i].gps_comp.alt += comp_var_alt * comp_ratio;
-}*/
+                    peer->gps_comp.lat = peer->gps.lat;
+                    peer->gps_comp.lon = peer->gps.lon;
+                    peer->gps_comp.alt = peer->gps.alt;
 #ifndef DEBUG
                     msp_send_radar(i);
 #endif
@@ -529,21 +522,21 @@ void loop()
 
         for (int i = 0; i < cfg.lora_nodes; i++)
         {
-            if (sys.now > (peers[i].lq_updated + sys.lora_cycle * 4))
+            peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+            if (sys.now > (peer->lq_updated + sys.lora_cycle * 4))
             {
-                uint16_t diff = peers[i].updated - peers[i].lq_updated;
-                peers[i].lq = constrain(peers[i].lq_tick * 4.2 * sys.lora_cycle / diff, 0, 4);
-                peers[i].lq_updated = sys.now;
-                peers[i].lq_tick = 0;
+                uint16_t diff = peer->updated - peer->lq_updated;
+                peer->lq = constrain(peer->lq_tick * 4.2 * sys.lora_cycle / diff, 0, 4);
+                peer->lq_updated = sys.now;
+                peer->lq_tick = 0;
             }
-            if (peers[i].id > 0 && ((sys.now - peers[i].updated) > LORA_PEER_TIMEOUT))
+            if (peer->id > 0 && ((sys.now - peer->updated) > LORA_PEER_TIMEOUT))
             {
-                peers[i].lost = 2;
+                peer->lost = 2;
             }
         }
 
-        sys.num_peers_active = count_peers(1, &cfg);
-        stats.packets_total += sys.num_peers_active * sys.cycle_stats / sys.lora_cycle;
+        stats.packets_total += PeerManager::getSingleton()->count_active() * sys.cycle_stats / sys.lora_cycle;
         stats.packets_received += sys.pps;
         stats.percent_received = (stats.packets_received > 0) ? constrain(100 * stats.packets_received / stats.packets_total, 0, 100) : 0;
 
@@ -567,7 +560,7 @@ void loop()
 
     if (sys.ota_nonce % 6 == 0)
     {
-        if (sys.num_peers_active > 0)
+        if (PeerManager::getSingleton()->count_active() > 0)
         {
             sys.io_led_changestate = millis() + IO_LEDBLINK_DURATION;
             sys.io_led_count = 0;
@@ -590,7 +583,7 @@ void loop()
             digitalWrite(IO_LED_PIN, HIGH);
         }
 
-        if (sys.io_led_count >= sys.num_peers_active * 2)
+        if (sys.io_led_count >= PeerManager::getSingleton()->count_active() * 2)
         {
             sys.io_led_blink = 0;
         }

@@ -192,16 +192,6 @@ void handleConfigMessage(Stream& input_source, String message)
         input_source.println((String)cfg.lora_nodes + " nodes x " + (String)cfg.slot_spacing + "ms = " + (String)(cfg.lora_nodes * cfg.slot_spacing) + "ms cycle");
         input_source.println("Ground station mode: " + (String)onoff[cfg.force_gs]);
     }
-    else if (message=="list") {
-        for (int i = 0; i < cfg.lora_nodes; i++) {
-            if (peers[i].id > 0) {
-                input_source.println((String)"[" + char(i+65) + "] " + peers[i].name + " N" + String((float)peers[i].gps_rec.lat / 10000000, 5) + " E" + String((float)peers[i].gps_rec.lon / 10000000, 5) + " " + peers[i].gps_rec.alt + "m " + String(peers[i].gps.groundSpeed / 100) + "m/s " + String(peers[i].gps.groundCourse / 10) + "° " + String((int)((sys.last_tx - peers[i].updated) / 1000)) + "s " + String(peers[i].rssi) + "db");
-            }
-            if (i + 1 == curr.id) {
-                input_source.println((String)"[" + char(i+65) + "] " + String(host_name[curr.host]) + " (host) N" + String((float)curr.gps.lat / 10000000, 5) + " E" + String((float)curr.gps.lon / 10000000, 5) + " " + String(curr.gps.alt) + "m Eff:" + String(stats.percent_received) + "%" );
-            }
-        }
-    }
     else {
         input_source.printf("Unknown command %s\n", message.c_str());
     }
