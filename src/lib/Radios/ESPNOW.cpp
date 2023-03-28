@@ -80,6 +80,6 @@ void ESPNOW::onPacketReceived()
 String ESPNOW::getStatusString()
 {
     char buf[64];
-    sprintf(buf, "ESPNOW [%luTX/%luRX] [%luCRC/%luSIZE/%luVAL]", packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
+    sprintf(buf, "ESPNOW [%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
     return String(buf);
 }

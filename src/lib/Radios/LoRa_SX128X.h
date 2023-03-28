@@ -10,11 +10,11 @@
 
 #define RECEIVE_TIMEOUT LORA_M3_SLOT_SPACING * LORA_M3_NODES - 1
 
-class LoRa : public Radio
+class LoRa_SX128X : public Radio
 {
 public:
-    LoRa();
-    static LoRa *getSingleton();
+    LoRa_SX128X();
+    static LoRa_SX128X *getSingleton();
 
     int begin();
     void transmit(air_type0_t *air_0);

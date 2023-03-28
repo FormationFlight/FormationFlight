@@ -23,7 +23,7 @@
 #include <lib/Radios/RadioManager.h>
 #include <lib/Radios/ESPNOW.h>
 #ifdef HAS_LORA
-#include <lib/Radios/LoRa.h>
+#include <lib/Radios/LoRa_SX128X.h>
 #endif
 
 #define DEBUG 1
@@ -194,8 +194,8 @@ void setup()
     RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
 
 #ifdef HAS_LORA
-    DBGLN("[main] init radio LoRa");
-    RadioManager::getSingleton()->addRadio(LoRa::getSingleton());
+    DBGLN("[main] init radio LoRa_SX128X");
+    RadioManager::getSingleton()->addRadio(LoRa_SX128X::getSingleton());
 #endif
 
     if (cfg.display_enable)

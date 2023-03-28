@@ -30,7 +30,6 @@ WiFiManager::WiFiManager()
     });
     server->on("/system/shutdown", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
-        WiFi.mode(WIFI_MODE_NULL);
         ESP.deepSleep(UINT32_MAX);
     });
     server->on("/radiomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {

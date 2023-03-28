@@ -45,6 +45,9 @@ public:
             case RECEIVE_RESULT_BAD_PACKET_TYPE:
             packetsBadValidation++;
             break;
+            case RECEIVE_RESULT_OK:
+            default:
+            break;
         }
     }
 protected:

@@ -1,30 +1,30 @@
 
-#include "LoRa.h"
+#include "LoRa_SX128X.h"
 #include "RadioManager.h"
 #include "../CryptoManager.h"
 
 void IRAM_ATTR onPacketReceive(void)
 {
-    LoRa::getSingleton()->flagPacketReceived();
+    LoRa_SX128X::getSingleton()->flagPacketReceived();
 }
 
-LoRa *loraInstance = nullptr;
+LoRa_SX128X *loraInstance = nullptr;
 
-LoRa::LoRa()
+LoRa_SX128X::LoRa_SX128X()
 {
 
 }
 
-LoRa* LoRa::getSingleton()
+LoRa_SX128X* LoRa_SX128X::getSingleton()
 {
     if (loraInstance == nullptr)
     {
-        loraInstance = new LoRa();
+        loraInstance = new LoRa_SX128X();
     }
     return loraInstance;
 }
 
-void LoRa::transmit(air_type0_t *air_0)
+void LoRa_SX128X::transmit(air_type0_t *air_0)
 {
     if (!getEnabled()) {
         return;
@@ -36,7 +36,7 @@ void LoRa::transmit(air_type0_t *air_0)
     radio.startReceive();
 }
 
-int LoRa::begin() {
+int LoRa_SX128X::begin() {
 #ifdef HAS_LORA
     radio = new Module(LORA_PIN_CS, LORA_PIN_DIO, LORA_PIN_RST);
     radio.begin(FREQUENCY, BANDWIDTH, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, LORA_POWER, PREAMBLE_LENGTH);
@@ -51,7 +51,7 @@ int LoRa::begin() {
     return 0;
 }
 
-void LoRa::flagPacketReceived()
+void LoRa_SX128X::flagPacketReceived()
 {
     if (!getEnabled()) {
         return;
@@ -59,7 +59,7 @@ void LoRa::flagPacketReceived()
     packetReceived = true;
 }
 
-void LoRa::receive()
+void LoRa_SX128X::receive()
 {
     uint8_t buf[sizeof(air_type0_t)];
     radio.readData(buf, sizeof(air_type0_t));
@@ -67,7 +67,7 @@ void LoRa::receive()
     handleReceiveCounters(RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio.getRSSI()));
 }
 
-void LoRa::loop()
+void LoRa_SX128X::loop()
 {
     if (packetReceived)
     {
@@ -76,11 +76,11 @@ void LoRa::loop()
     }
 }
 
-String LoRa::getStatusString()
+String LoRa_SX128X::getStatusString()
 {
     char buf[128];
 #ifdef HAS_LORA
-    sprintf(buf, "LoRa @ %fMHz (%ddBm) [%luTX/%luRX] [%luCRC/%luSIZE/%luVAL]", FREQUENCY, LORA_POWER, packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
+    sprintf(buf, "LoRa SX1280 @ %fMHz (%ddBm) [%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", FREQUENCY, LORA_POWER, packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
 #endif
     return String(buf);
 
