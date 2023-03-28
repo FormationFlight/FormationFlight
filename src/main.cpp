@@ -148,7 +148,7 @@ void setup()
 #ifdef PLATFORM_ESP32
     msp.begin(Serial1);
     Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
-    Serial.begin(115200);
+    Serial.begin(921600);
 #elif defined(PLATFORM_ESP8266)
     msp.begin(Serial);
     Serial.begin(SERIAL_SPEED, SERIAL_8N1);
@@ -419,9 +419,9 @@ void loop()
         if (curr.id != 0) {
             sys.last_tx = millis();
             air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
-            DBGLN("[main] begin transmit");
+            //DBGLN("[main] begin transmit");
             RadioManager::getSingleton()->transmit(&packet);
-            DBGLN("[main] end transmit");
+            //DBGLN("[main] end transmit");
             stats.last_tx_duration = millis() - sys.last_tx;
         }
 
@@ -496,7 +496,7 @@ void loop()
         // ----------------Send MSP to FC and predict new position for all nodes minus current
         if (sys.ota_slot == 0)
         {
-            DBGLN("[main] sending msp");
+            //DBGLN("[main] sending msp");
             for (int i = 0; i < cfg.lora_nodes; i++)
             {
                 peer_t *peer = PeerManager::getSingleton()->getPeer(i);
@@ -511,7 +511,7 @@ void loop()
 #endif
                 }
             }
-            DBGLN("[main] finished sending msp");
+            //DBGLN("[main] finished sending msp");
         }
         stats.last_msp_duration[sys.ota_slot] = millis() - stats.timer_begin;
         sys.msp_next_cycle += cfg.slot_spacing;
@@ -525,7 +525,6 @@ void loop()
 
     if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_OTA_SYNC))
     {
-        DBGLN("[main] updating stats");
         sys.pps = sys.ppsc;
         sys.ppsc = 0;
 

@@ -42,11 +42,14 @@ void LoRa_SX127X::transmit(air_type0_t *air_0)
     }
     Serial.println();*/
     stateTransmitting = true;
-    radio->transmit(buf, sizeof(air_type0_t));
+    DBGLN("t");
+    int16_t result = radio->transmit(buf, sizeof(air_type0_t));
+    //if (result != RADIOLIB_ERR_NONE) {
+    //    DBGF("transmit error: %d\n", result);
+    //}
     stateTransmitting = false;
     packetsTransmitted++;
     lastTransmitTime = millis();
-    delay(1);
     radio->startReceive(sizeof(air_type0_t));
 }
 
@@ -65,6 +68,7 @@ int LoRa_SX127X::begin() {
     #ifdef LORA_PIN_RXEN
     radio->setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
     #endif
+    radio->setCurrentLimit(0);
     radio->implicitHeader(sizeof(air_type0_t));
     radio->setDio0Action(onSX127XPacketReceive);
     radio->startReceive(sizeof(air_type0_t));
@@ -77,18 +81,18 @@ void LoRa_SX127X::flagPacketReceived()
     if (!getEnabled()) {
         return;
     }
-    //if (radio->getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE == RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE)
-    if (!stateTransmitting) {
+    if (radio->getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE)
+    //if (!stateTransmitting) 
         packetReceived = true;
-    }
+    //radio->startReceive(sizeof(air_type0_t), RADIOLIB_SX127X_RXSINGLE);
 }
 
 void LoRa_SX127X::receive()
 {
-    //DBGLN("running 127x rx");
+    DBGLN("rx");
     uint8_t buf[sizeof(air_type0_t)];
     radio->readData(buf, sizeof(air_type0_t));
-
+    radio->startReceive(sizeof(air_type0_t));
     /*Serial.print("RX (e): ");
     for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
         Serial.printf("%02X ", buf[i]);
@@ -103,6 +107,7 @@ void LoRa_SX127X::receive()
     Serial.print("\n");*/
     //radio->startReceive(sizeof(air_type0_t));
     handleReceiveCounters(RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio->getRSSI()));
+    
 }
 
 void LoRa_SX127X::loop()

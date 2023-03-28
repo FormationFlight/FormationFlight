@@ -174,6 +174,7 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         if (cs1 < cs2)
         { // Pick another slot
             sprintf(sys.message, "%s", "ID CONFLICT");
+            DBGLN("id conflict");
             pick_id();
             resync_tx_slot(cfg.lora_timing_delay);
         }

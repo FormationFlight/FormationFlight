@@ -104,7 +104,7 @@ enum MODE {
 
 // -------- HOST
 
-#define HOST_MSP_TIMEOUT 8500
+#define HOST_MSP_TIMEOUT 1000
 
 enum HOST {
     HOST_NONE = 0,
