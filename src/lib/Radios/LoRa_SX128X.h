@@ -1,15 +1,18 @@
+#pragma once
+
 #include "RadioManager.h"
 #include <RadioLib.h>
 
+#ifdef LORA_FAMILY_SX128X
 #define FREQUENCY 2500.0f // MHz
 #define BANDWIDTH 203 // kHz
 #define SPREADING_FACTOR 5 // SF5
 #define CODING_RATE 6 // 4/6 CR
 #define SYNC_WORD 0x17 // Arbitrarily chosen
-#define PREAMBLE_LENGTH 12
+#define PREAMBLE_LENGTH 12 // symbols
 
 #define RECEIVE_TIMEOUT LORA_M3_SLOT_SPACING * LORA_M3_NODES - 1
-
+#endif
 class LoRa_SX128X : public Radio
 {
 public:
@@ -23,6 +26,7 @@ public:
     void loop();
     String getStatusString();
 private:
-    SX128x radio = nullptr;
+    SX128x* radio = nullptr;
     volatile bool packetReceived;
 };
+

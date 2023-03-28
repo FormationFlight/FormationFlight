@@ -28,11 +28,17 @@ CryptoManager::CryptoManager()
 
 void CryptoManager::encrypt(uint8_t *buf, size_t length)
 {
+    if (!getEnabled()) {
+        return;
+    }
     cipher->encryptSector(buf, buf);
 }
 
 void CryptoManager::decrypt(uint8_t *buf, size_t length)
 {
+    if (!getEnabled()) {
+        return;
+    }
     cipher->decryptSector(buf, buf);
 }
 
@@ -45,4 +51,14 @@ CryptoManager* CryptoManager::getSingleton()
         cryptoManager = new CryptoManager();
     }
     return cryptoManager;
+}
+
+bool CryptoManager::getEnabled()
+{
+    return this->enabled;
+}
+
+void CryptoManager::setEnabled(bool enabled)
+{
+    this->enabled = enabled;
 }

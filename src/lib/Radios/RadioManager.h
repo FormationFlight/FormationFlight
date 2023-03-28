@@ -47,6 +47,7 @@ public:
             break;
             case RECEIVE_RESULT_OK:
             default:
+            packetsReceived++;
             break;
         }
     }
@@ -56,7 +57,8 @@ protected:
     uint32_t packetsBadCrc = 0;
     uint32_t packetsBadSize = 0;
     uint32_t packetsBadValidation = 0;
-    bool enabled;
+    bool enabled = true;
+    uint32_t lastTransmitTime;
 };
 
 class RadioManager

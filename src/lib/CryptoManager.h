@@ -13,11 +13,14 @@
 #define TWEAK_LENGTH_BYTES 16
 
 class CryptoManager {
-    public:
+public:
     CryptoManager();
     void encrypt(uint8_t *buf, size_t length);
     void decrypt(uint8_t *buf, size_t length);
     static CryptoManager* getSingleton();
-    private:
+    bool getEnabled();
+    void setEnabled(bool enabled);
+private:
     XTSCommon *cipher;
+    bool enabled = true;
 };

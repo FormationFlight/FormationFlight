@@ -11,11 +11,13 @@
 #define DEBUG 0
 #endif
 #define DBGLN(x) do { if (DEBUG) { Serial.printf("%lu: ", millis()); Serial.println(x); } } while (0)
+#define DBGF(...) do { if (DEBUG) { Serial.printf("%lu: ", millis()); Serial.printf(__VA_ARGS__); } } while (0)
 
 #include "lib/MSP.h"
 
 // -------- GENERAL
 
+#define PRODUCT_NAME "FormationFlight"
 #define VERSION "4.0.0"
 #define VERSION_CONFIG 400
 #define FORCE_DEFAULT_CONFIG 1

@@ -45,8 +45,6 @@ double gpsCourseTo(double lat1, double long1, double lat2, double long2)
     return degrees(a2);
 }
 
-
-
 void pick_id()
 {
     curr.id = 0;
@@ -98,11 +96,11 @@ String generate_id()
 #ifdef PLATFORM_ESP8266
     chipID = ESP.getChipId();
 #elif defined(PLATFORM_ESP32)
-    uint64_t macAddress = ESP.getEfuseMac();
-    uint64_t macAddressTrunc = macAddress << 40;
-    chipID = macAddressTrunc >> 40;
+    uint32_t low = ESP.getEfuseMac() & 0xFFFFFFFF;
+    uint32_t high = (ESP.getEfuseMac() >> 32) % 0xFFFFFFFF;
+    chipID = (high << 8 | low >> 24) << 8;
 #endif
-    String chipIDString = String(chipID, HEX);
+    String chipIDString = String(__builtin_bswap32(chipID), HEX);
     chipIDString.toUpperCase();
     return chipIDString;
 }

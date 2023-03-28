@@ -22,9 +22,8 @@
 #include <lib/WiFi/WiFiManager.h>
 #include <lib/Radios/RadioManager.h>
 #include <lib/Radios/ESPNOW.h>
-#ifdef HAS_LORA
 #include <lib/Radios/LoRa_SX128X.h>
-#endif
+#include <lib/Radios/LoRa_SX127X.h>
 
 #define DEBUG 1
 
@@ -146,6 +145,17 @@ void IRAM_ATTR handleInterrupt()
 void setup()
 {
 
+#ifdef PLATFORM_ESP32
+    msp.begin(Serial1);
+    Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
+    Serial.begin(115200);
+#elif defined(PLATFORM_ESP8266)
+    msp.begin(Serial);
+    Serial.begin(SERIAL_SPEED, SERIAL_8N1);
+#endif
+    DBGLN("[main] start");
+    DBGF("%s version %s UID %s\n", PRODUCT_NAME, VERSION, generate_id());
+
     sys.phase = MODE_START;
     sys.forcereset = 0;
     sys.io_bt_enabled = CFG_AUTOSTART_BT;
@@ -170,14 +180,7 @@ void setup()
 
     delay(START_DELAY);
 
-#ifdef PLATFORM_ESP32
-    msp.begin(Serial1);
-    Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
-    Serial.begin(115200);
-#elif defined(PLATFORM_ESP8266)
-    msp.begin(Serial);
-    Serial.begin(SERIAL_SPEED, SERIAL_8N1);
-#endif
+
 
     // Create PeerManager
     DBGLN("[main] start peermanager");
@@ -185,17 +188,25 @@ void setup()
     peerManager->reset();
 
     // Create CryptoManager
-    CryptoManager::getSingleton();
+    CryptoManager *cryptoManager = CryptoManager::getSingleton();
+    cryptoManager->setEnabled(false);
+    
 
     DBGLN("[main] start wifimanager");
     WiFiManager::getSingleton();
 
-    DBGLN("[main] init radio espnow");
-    RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
+    //DBGLN("[main] init radio espnow");
+    //RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
 
 #ifdef HAS_LORA
+#ifdef LORA_FAMILY_SX128X
     DBGLN("[main] init radio LoRa_SX128X");
     RadioManager::getSingleton()->addRadio(LoRa_SX128X::getSingleton());
+#endif
+#ifdef LORA_FAMILY_SX127X
+    DBGLN("[main] init radio LoRa_SX127X");
+    RadioManager::getSingleton()->addRadio(LoRa_SX127X::getSingleton());
+#endif
 #endif
 
     if (cfg.display_enable)
@@ -264,6 +275,7 @@ void loop()
                 }
                 curr.name[3] = 0;
             }
+            DBGF("[main] selected name %s\n", curr.name);
 
             curr.gps.fixType = 0;
             curr.gps.lat = 0;
@@ -324,9 +336,9 @@ void loop()
 #ifdef HAS_OLED
             if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2 && cfg.display_enable)
             {
-                peer_t *peer = PeerManager::getSingleton()->getPeer(i);
                 for (int i = 0; i < cfg.lora_nodes; i++)
                 {
+                    peer_t *peer = PeerManager::getSingleton()->getPeer(i);
                     if (peer->id > 0)
                     {
                         display_draw_peername(peer->id);
@@ -404,12 +416,14 @@ void loop()
         {
             msp_get_gps(); // GPS > FC > ESP
         }
-
-        sys.last_tx = millis();
-        air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
-        DBGLN("[main] begin transmit");
-        RadioManager::getSingleton()->transmit(&packet);
-        stats.last_tx_duration = millis() - sys.last_tx;
+        if (curr.id != 0) {
+            sys.last_tx = millis();
+            air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
+            DBGLN("[main] begin transmit");
+            RadioManager::getSingleton()->transmit(&packet);
+            DBGLN("[main] end transmit");
+            stats.last_tx_duration = millis() - sys.last_tx;
+        }
 
         // Drift correction
 

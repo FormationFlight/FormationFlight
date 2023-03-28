@@ -7,6 +7,7 @@
 #include "ConfigStrings.h"
 #include "pixel.h"
 #include "Helpers.h"
+#include "Peers/PeerManager.h"
 
 #ifdef HAS_OLED
 SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);
@@ -51,7 +52,7 @@ void display_draw_status(system_t *sys)
             display.setFont(ArialMT_Plain_24);
             display.setTextAlignment(TEXT_ALIGN_RIGHT);
             display.drawString(26, 11, String(curr.gps.numSat));
-            display.drawString(13, 42, String(sys->num_peers_active + 1 - sys->lora_no_tx));
+            display.drawString(13, 42, String(PeerManager::getSingleton()->count_active() + 1 - sys->lora_no_tx));
             display.drawString(125, 11, String(peer_slotname[curr.id]));
             display.setFont(ArialMT_Plain_10);
             display.drawString(126, 29, "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ ");
@@ -88,9 +89,10 @@ void display_draw_status(system_t *sys)
 
         for (int i = 0; i < cfg.lora_nodes; i++)
         {
-            if (peers[i].id > 0 && peers[i].lost == 0)
+            peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+            if (peer->id > 0 && peer->lost == 0)
             {
-                diff = sys->last_tx - peers[i].updated;
+                diff = sys->last_tx - peer->updated;
                 if (diff > 0 && diff < sys->lora_cycle)
                 {
                     pos[i] = 128 - round(128 * diff / sys->lora_cycle);
@@ -108,39 +110,40 @@ void display_draw_status(system_t *sys)
         {
 
             display.setTextAlignment(TEXT_ALIGN_LEFT);
+            peer_t *peer = PeerManager::getSingleton()->getPeer(i);
 
             if (pos[i] > -1)
             {
                 display.drawRect(pos[i], 0, rect_l, 12);
-                display.drawString(pos[i] + 2, 0, String(peer_slotname[peers[i].id]));
+                display.drawString(pos[i] + 2, 0, String(peer_slotname[peer->id]));
             }
 
-            if (peers[i].id > 0 && j < 4)
+            if (peer->id > 0 && j < 4)
             {
                 line = j * 9 + 14;
 
-                display.drawString(0, line, String(peer_slotname[peers[i].id]));
-                display.drawString(12, line, String(peers[i].name));
+                display.drawString(0, line, String(peer_slotname[peer->id]));
+                display.drawString(12, line, String(peer->name));
                 display.setTextAlignment(TEXT_ALIGN_RIGHT);
 
-                if (peers[i].lost == 1)
+                if (peer->lost == 1)
                 { // Peer timed out, short
-                    display.drawString(127, line, "x:" + String((int)((sys->last_tx - peers[i].updated) / 1000)) + "s");
+                    display.drawString(127, line, "x:" + String((int)((sys->last_tx - peer->updated) / 1000)) + "s");
                 }
-                else if (peers[i].lost == 2)
+                else if (peer->lost == 2)
                 { // Peer timed out, long
-                    display.drawString(127, line, "L:" + String((int)((sys->last_tx - peers[i].updated) / 1000)) + "s");
+                    display.drawString(127, line, "L:" + String((int)((sys->last_tx - peer->updated) / 1000)) + "s");
                 }
                 else
                 {
-                    if (sys->last_tx > peers[i].updated)
+                    if (sys->last_tx > peer->updated)
                     {
-                        display.drawString(119, line, String(sys->last_tx - peers[i].updated));
+                        display.drawString(119, line, String(sys->last_tx - peer->updated));
                         display.drawString(127, line, "-");
                     }
                     else
                     {
-                        display.drawString(119, line, String(sys->lora_cycle + sys->last_tx - peers[i].updated));
+                        display.drawString(119, line, String(sys->lora_cycle + sys->last_tx - peer->updated));
                         display.drawString(127, line, "+");
                     }
                 }
@@ -181,6 +184,8 @@ void display_draw_status(system_t *sys)
 
         int i = constrain(sys->display_page - 3, 0, cfg.lora_nodes - 1);
         bool iscurrent = (i + 1 == curr.id);
+        peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+
 
         display.setFont(ArialMT_Plain_24);
         display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -194,36 +199,36 @@ void display_draw_status(system_t *sys)
         }
         else
         {
-            display.drawString(128, 0, String(peers[i].name));
+            display.drawString(128, 0, String(peer->name));
         }
 
         display.setTextAlignment(TEXT_ALIGN_LEFT);
         display.setFont(ArialMT_Plain_10);
 
-        if (peers[i].id > 0 || iscurrent)
+        if (peer->id > 0 || iscurrent)
         {
 
-            if (peers[i].lost > 0 && !iscurrent)
+            if (peer->lost > 0 && !iscurrent)
             {
                 display.drawString(19, 0, "LOST");
             }
-            else if (peers[i].lq == 0 && !iscurrent)
+            else if (peer->lq == 0 && !iscurrent)
             {
                 display.drawString(19, 0, "x");
             }
-            else if (peers[i].lq == 1)
+            else if (peer->lq == 1)
             {
                 display.drawXbm(19, 2, 8, 8, icon_lq_1);
             }
-            else if (peers[i].lq == 2)
+            else if (peer->lq == 2)
             {
                 display.drawXbm(19, 2, 8, 8, icon_lq_2);
             }
-            else if (peers[i].lq == 3)
+            else if (peer->lq == 3)
             {
                 display.drawXbm(19, 2, 8, 8, icon_lq_3);
             }
-            else if (peers[i].lq == 4)
+            else if (peer->lq == 4)
             {
                 display.drawXbm(19, 2, 8, 8, icon_lq_4);
             }
@@ -235,9 +240,9 @@ void display_draw_status(system_t *sys)
             }
             else
             {
-                if (peers[i].lost == 0)
+                if (peer->lost == 0 && peer->rssi != 0)
                 {
-                    display.drawString(28, 0, String(peers[i].rssi) + "db");
+                    display.drawString(28, 0, "-" + String(peer->rssi) + "dBm");
                 }
             }
 
@@ -255,8 +260,8 @@ void display_draw_status(system_t *sys)
             }
             else
             {
-                display.drawString(128, 24, "LA " + String((float)peers[i].gps_rec.lat / 10000000, 5));
-                display.drawString(128, 34, "LO " + String((float)peers[i].gps_rec.lon / 10000000, 5));
+                display.drawString(128, 24, "LA " + String((float)peer->gps_rec.lat / 10000000, 5));
+                display.drawString(128, 34, "LO " + String((float)peer->gps_rec.lon / 10000000, 5));
             }
 
             display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -269,27 +274,27 @@ void display_draw_status(system_t *sys)
             }
             else
             {
-                display.drawString(0, 24, "A " + String(peers[i].gps_rec.alt) + "m");
-                display.drawString(0, 34, "S " + String(peers[i].gps_rec.groundSpeed / 100) + "m/s");
-                display.drawString(0, 44, "C " + String(peers[i].gps_rec.groundCourse / 10) + "°");
+                display.drawString(0, 24, "A " + String(peer->gps_rec.alt) + "m");
+                display.drawString(0, 34, "S " + String(peer->gps_rec.groundSpeed / 100) + "m/s");
+                display.drawString(0, 44, "C " + String(peer->gps_rec.groundCourse / 10) + "°");
             }
 
-            if (peers[i].gps.lat != 0 && peers[i].gps.lon != 0 && curr.gps.lat != 0 && curr.gps.lon != 0 && !iscurrent)
+            if (peer->gps.lat != 0 && peer->gps.lon != 0 && curr.gps.lat != 0 && curr.gps.lon != 0 && !iscurrent)
             {
 
                 double lat1 = (double)curr.gps.lat / 10000000;
                 double lon1 = (double)curr.gps.lon / 10000000;
-                double lat2 = (double)peers[i].gps_rec.lat / 10000000;
-                double lon2 = (double)peers[i].gps_rec.lon / 10000000;
+                double lat2 = (double)peer->gps_rec.lat / 10000000;
+                double lon2 = (double)peer->gps_rec.lon / 10000000;
 
-                peers[i].distance = gpsDistanceBetween(lat1, lon1, lat2, lon2);
-                peers[i].direction = gpsCourseTo(lat1, lon1, lat2, lon2);
-                peers[i].relalt = peers[i].gps_rec.alt - curr.gps.alt;
+                peer->distance = gpsDistanceBetween(lat1, lon1, lat2, lon2);
+                peer->direction = gpsCourseTo(lat1, lon1, lat2, lon2);
+                peer->relalt = peer->gps_rec.alt - curr.gps.alt;
 
-                display.drawString(0, 54, "R " + String(peers[i].relalt) + "m");
-                display.drawString(50, 54, "B " + String(peers[i].direction) + "°");
+                display.drawString(0, 54, "R " + String(peer->relalt) + "m");
+                display.drawString(50, 54, "B " + String(peer->direction) + "°");
                 display.setTextAlignment(TEXT_ALIGN_RIGHT);
-                display.drawString(128, 44, "D " + String((int)peers[i].distance) + "m");
+                display.drawString(128, 44, "D " + String((int)peer->distance) + "m");
                 display.setTextAlignment(TEXT_ALIGN_LEFT);
             }
 

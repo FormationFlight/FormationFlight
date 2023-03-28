@@ -83,6 +83,7 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
     if (air_0.packet_type != PACKET_TYPE_RADAR_POSITION)
     {
         // We can implement additional packet types here
+        DBGF("Received bad packet type: %d\n", air_0.packet_type);
         return RECEIVE_RESULT_BAD_PACKET_TYPE;
     }
 
@@ -96,14 +97,13 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
     {
         return RECEIVE_RESULT_BAD_CRC;
     }
-
-    uint8_t id = air_0.id - 1;
-    if (id >= LORA_NODES_MAX)
+    if (air_0.id == 0 || air_0.id > LORA_NODES_MAX)
     {
+        DBGF("Received bad ID: %d\n", air_0.id);
         return RECEIVE_RESULT_BAD_ID;
     }
 
-    peer_t *peer = PeerManager::getSingleton()->getPeer(id - 1);
+    peer_t *peer = PeerManager::getSingleton()->getPeer(air_0.id - 1);
 
     // Update previous GPS location for extrapolation
     peer->gps_pre.lat = peer->gps.lat;

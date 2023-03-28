@@ -13,7 +13,6 @@ void espnow_receive(const uint8_t *mac_addr, const uint8_t *incomingData, int pa
     if (!ESPNOW::getSingleton()->getEnabled()) {
         return;
     }
-    ESPNOW::getSingleton()->onPacketReceived();
     uint8_t buf[packetSize];
     memcpy(buf, incomingData, packetSize);
     CryptoManager::getSingleton()->decrypt(buf, packetSize);
@@ -40,11 +39,12 @@ void ESPNOW::transmit(air_type0_t *air_0)
     if (!getEnabled()) {
         return;
     }
-    packetsTransmitted++;
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
     esp_now_send(broadcastAddress, buf, sizeof(air_type0_t));
+    packetsTransmitted++;
+    lastTransmitTime = millis();
 }
 
 int ESPNOW::begin()
@@ -70,11 +70,6 @@ int ESPNOW::begin()
 
 void ESPNOW::loop()
 {
-}
-
-void ESPNOW::onPacketReceived()
-{
-    packetsReceived++;
 }
 
 String ESPNOW::getStatusString()
