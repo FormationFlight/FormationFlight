@@ -22,7 +22,7 @@
 #define VERSION_CONFIG 400
 #define FORCE_DEFAULT_CONFIG 1
 #define CFG_AUTOSTART_BT 0
-#define START_DELAY 2500
+#define START_DELAY 1000
 // #define CFG_TARGET_NAME < (platformio.ini)
 // #define CFG_TARGET_FULLNAME < (platformio.ini)
 
@@ -82,8 +82,8 @@
 #define LORA_NAME_LENGTH 3
 #define LORA_CYCLE_SCAN 5000 // 5s
 #define LORA_PEER_TIMEOUT 6000 // 6s
-#define LORA_DRIFT_THRESHOLD 6 // Min for action
-#define LORA_DRIFT_CORRECTION 12 // Max to correct
+#define LORA_DRIFT_THRESHOLD LORA_M3_SLOT_SPACING / LORA_M3_NODES // Min for action
+#define LORA_DRIFT_CORRECTION LORA_M3_SLOT_SPACING / (LORA_M3_NODES / 2) // Max to correct
 
 // --------- IO AND DISPLAY
 

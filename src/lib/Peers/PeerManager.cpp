@@ -53,8 +53,12 @@ uint8_t PeerManager::count(bool active)
     int n = 0;
     for (int i = 0; i < LORA_NODES_MAX; i++)
     {
-        if ((peers[i].id > 0) && (active && peers[i].lost == 0))
+        // If active, don't count lost peers
+        if (peers[i].id > 0)
         {
+            if (active && peers[i].lost > 0) {
+                continue;
+            }
             n++;
         }
     }
@@ -82,8 +86,8 @@ void PeerManager::statusJson(JsonDocument *doc)
             o["lat"] = peer->gps.lat;
             o["lon"] = peer->gps.lon;
             o["alt"] = peer->gps.alt;
-            o["ground_speed"] = peer->gps.groundSpeed;
-            o["ground_course"] = peer->gps.groundCourse;
+            o["groundSpeed"] = peer->gps.groundSpeed;
+            o["groundCourse"] = peer->gps.groundCourse;
             o["packetsReceived"] = peer->packetsReceived;
         }
     }

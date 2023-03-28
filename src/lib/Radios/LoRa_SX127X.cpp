@@ -30,23 +30,10 @@ void LoRa_SX127X::transmit(air_type0_t *air_0)
     }
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
-    /*Serial.print("TX(d): ");
-    for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
-        Serial.printf("%02X ", buf[i]);
-    }
-    Serial.println();*/
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
-    /*Serial.print("TX(e): ");
-    for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
-        Serial.printf("%02X ", buf[i]);
-    }
-    Serial.println();*/
     stateTransmitting = true;
     DBGLN("t");
-    int16_t result = radio->transmit(buf, sizeof(air_type0_t));
-    //if (result != RADIOLIB_ERR_NONE) {
-    //    DBGF("transmit error: %d\n", result);
-    //}
+    radio->transmit(buf, sizeof(air_type0_t));
     stateTransmitting = false;
     packetsTransmitted++;
     lastTransmitTime = millis();
@@ -81,10 +68,9 @@ void LoRa_SX127X::flagPacketReceived()
     if (!getEnabled()) {
         return;
     }
-    if (radio->getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE)
-    //if (!stateTransmitting) 
+    if (radio->getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE) {
         packetReceived = true;
-    //radio->startReceive(sizeof(air_type0_t), RADIOLIB_SX127X_RXSINGLE);
+    }
 }
 
 void LoRa_SX127X::receive()
@@ -93,19 +79,7 @@ void LoRa_SX127X::receive()
     uint8_t buf[sizeof(air_type0_t)];
     radio->readData(buf, sizeof(air_type0_t));
     radio->startReceive(sizeof(air_type0_t));
-    /*Serial.print("RX (e): ");
-    for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
-        Serial.printf("%02X ", buf[i]);
-    }
-    Serial.print("\n");*/
     CryptoManager::getSingleton()->decrypt(buf, sizeof(air_type0_t));
-
-    /*Serial.print("RX (d): ");
-        for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
-        Serial.printf("%02X ", buf[i]);
-    }
-    Serial.print("\n");*/
-    //radio->startReceive(sizeof(air_type0_t));
     handleReceiveCounters(RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio->getRSSI()));
     
 }

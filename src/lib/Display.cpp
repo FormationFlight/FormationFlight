@@ -38,43 +38,31 @@ void display_draw_status(system_t *sys)
     if (sys->display_page == 0)
     {
 
-        if (sys->io_bt_enabled)
-        {
-            display.setFont(ArialMT_Plain_10);
-            display.setTextAlignment(TEXT_ALIGN_LEFT);
-            display.drawString(18, 0, "CONFIGURATION");
-            display.drawString(0, 20, "Connect to the ESP32 AP");
-            display.drawString(0, 30, "with a Bluetooth terminal");
-            display.drawString(0, 40, "type CMD for commands");
-        }
-        else
-        {
-            display.setFont(ArialMT_Plain_24);
-            display.setTextAlignment(TEXT_ALIGN_RIGHT);
-            display.drawString(26, 11, String(curr.gps.numSat));
-            display.drawString(13, 42, String(PeerManager::getSingleton()->count_active() + 1 - sys->lora_no_tx));
-            display.drawString(125, 11, String(peer_slotname[curr.id]));
-            display.setFont(ArialMT_Plain_10);
-            display.drawString(126, 29, "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ ");
-            display.drawString(107, 44, String(stats.percent_received));
-            display.drawString(107, 54, String(sys->last_rssi));
-            display.setTextAlignment(TEXT_ALIGN_CENTER);
-            display.drawString(64, 0, String(sys->message));
-            display.setTextAlignment(TEXT_ALIGN_LEFT);
-            display.drawString(55, 12, String(curr.name));
-            display.drawString(27, 23, "SAT");
-            display.drawString(108, 44, "%E");
-            display.drawString(35, 44, String(sys->pps) + "p/s");
-            display.drawString(109, 54, "dB");
-            display.drawString(55, 23, String(host_name[curr.host]));
-            display.drawString(15, 44, "/" + String(cfg.lora_nodes));
-            display.drawString(15, 54, String(loramode_name[cfg.lora_mode]));
+        display.setFont(ArialMT_Plain_24);
+        display.setTextAlignment(TEXT_ALIGN_RIGHT);
+        display.drawString(26, 11, String(curr.gps.numSat));
+        display.drawString(13, 42, String(PeerManager::getSingleton()->count_active() + 1 - sys->lora_no_tx));
+        display.drawString(125, 11, String(peer_slotname[curr.id]));
+        display.setFont(ArialMT_Plain_10);
+        display.drawString(126, 29, "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ ");
+        display.drawString(107, 44, String(stats.percent_received));
+        display.drawString(107, 54, String(sys->last_rssi));
+        display.setTextAlignment(TEXT_ALIGN_CENTER);
+        display.drawString(64, 0, String(sys->message));
+        display.setTextAlignment(TEXT_ALIGN_LEFT);
+        display.drawString(55, 12, String(curr.name));
+        display.drawString(27, 23, "SAT");
+        display.drawString(108, 44, "%E");
+        display.drawString(35, 44, String(sys->pps) + "p/s");
+        display.drawString(109, 54, "dB");
+        display.drawString(55, 23, String(host_name[curr.host]));
+        display.drawString(15, 44, "/" + String(cfg.lora_nodes));
+        display.drawString(15, 54, String(loramode_name[cfg.lora_mode]));
 
-            if (curr.gps.fixType == 1)
-                display.drawString(27, 12, "2D");
-            if (curr.gps.fixType == 2)
-                display.drawString(27, 12, "3D");
-        }
+        if (curr.gps.fixType == 1)
+            display.drawString(27, 12, "2D");
+        if (curr.gps.fixType == 2)
+            display.drawString(27, 12, "3D");
     }
 
     else if (sys->display_page == 1)
@@ -186,7 +174,6 @@ void display_draw_status(system_t *sys)
         bool iscurrent = (i + 1 == curr.id);
         peer_t *peer = PeerManager::getSingleton()->getPeer(i);
 
-
         display.setFont(ArialMT_Plain_24);
         display.setTextAlignment(TEXT_ALIGN_LEFT);
         display.drawString(0, 0, String(peer_slotname[i + 1]));
@@ -242,7 +229,7 @@ void display_draw_status(system_t *sys)
             {
                 if (peer->lost == 0 && peer->rssi != 0)
                 {
-                    display.drawString(28, 0, "-" + String(peer->rssi) + "dBm");
+                    display.drawString(28, 0, String(peer->rssi) + "dBm");
                 }
             }
 
@@ -323,8 +310,8 @@ void display_draw_intro()
     display.clear();
     display.setFont(ArialMT_Plain_16);
     display.setTextAlignment(TEXT_ALIGN_LEFT);
-    display.drawString(0, 0, "ESP32");
-    display.drawString(0, 17, "RADAR");
+    //display.drawString(0, 0, "ESP32");
+    display.drawString(0, 17, PRODUCT_NAME);
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
     display.drawString(127, 0, String(VERSION));
     display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -339,7 +326,6 @@ void display_draw_startup()
 #ifdef HAS_OLED
     display.clear();
     display.setFont(ArialMT_Plain_10);
-    display.drawString(0, 52, "Press to start BT config");
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     display.drawString(0, 9, String(cfg.target_name));
@@ -356,7 +342,6 @@ void display_draw_clearconfig()
 #ifdef HAS_OLED
     display.clear();
     display.setFont(ArialMT_Plain_10);
-    display.drawString(0, 52, "Press to start BT config");
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
     display.setTextAlignment(TEXT_ALIGN_LEFT);
     display.drawString(0, 9, String(cfg.target_name));
@@ -379,10 +364,6 @@ void display_draw_scan(system_t *sys)
     else
     {
         display.drawString(35, 29, String(host_name[curr.host]));
-    }
-    if (sys->io_bt_enabled)
-    {
-        display.drawString(105, 29, "+BT");
     }
     display.drawProgressBar(0, 0, 63, 6, 100);
     display.drawString(0, 39, "SCAN:");
