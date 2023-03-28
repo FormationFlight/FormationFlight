@@ -71,22 +71,19 @@ air_type0_t RadioManager::prepare_packet()
     return air_0;
 }
 
-
-void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize, float rssi)
+ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize, float rssi)
 {
-
-
     // Check packet size
     if (packetSize != sizeof(air_type0_t))
     {
-        return;
+        return RECEIVE_RESULT_BAD_SIZE;
     }
     air_type0_t air_0;
     memcpy_P(&air_0, rawPacket, packetSize);
     if (air_0.packet_type != PACKET_TYPE_RADAR_POSITION)
     {
         // We can implement additional packet types here
-        return;
+        return RECEIVE_RESULT_BAD_PACKET_TYPE;
     }
 
     uint8_t calculatedCrc = 0;
@@ -97,13 +94,13 @@ void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize, float rs
     }
     if (calculatedCrc != air_0.crc)
     {
-        return;
+        return RECEIVE_RESULT_BAD_CRC;
     }
 
     uint8_t id = air_0.id - 1;
     if (id >= LORA_NODES_MAX)
     {
-        return;
+        return RECEIVE_RESULT_BAD_ID;
     }
 
     peer_t *peer = PeerManager::getSingleton()->getPeer(id - 1);
@@ -182,6 +179,7 @@ void RadioManager::receive(const uint8_t *rawPacket, size_t packetSize, float rs
         }
     }
     peer->packetsReceived++;
+    return RECEIVE_RESULT_OK;
 }
 
 void RadioManager::transmit(air_type0_t *packet)

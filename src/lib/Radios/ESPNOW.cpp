@@ -17,7 +17,7 @@ void espnow_receive(const uint8_t *mac_addr, const uint8_t *incomingData, int pa
     uint8_t buf[packetSize];
     memcpy(buf, incomingData, packetSize);
     CryptoManager::getSingleton()->decrypt(buf, packetSize);
-    RadioManager::getSingleton()->receive(buf, packetSize, 0);
+    ESPNOW::getSingleton()->handleReceiveCounters(RadioManager::getSingleton()->receive(buf, packetSize, 0));
 }
 
 ESPNOW *espnowInstance = nullptr;
@@ -80,6 +80,6 @@ void ESPNOW::onPacketReceived()
 String ESPNOW::getStatusString()
 {
     char buf[64];
-    sprintf(buf, "ESPNOW [%luTX/%luRX]", packetsTransmitted, packetsReceived);
+    sprintf(buf, "ESPNOW [%luTX/%luRX] [%luCRC/%luSIZE/%luVAL]", packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
     return String(buf);
 }

@@ -64,7 +64,7 @@ void LoRa::receive()
     uint8_t buf[sizeof(air_type0_t)];
     radio.readData(buf, sizeof(air_type0_t));
     CryptoManager::getSingleton()->decrypt(buf, sizeof(air_type0_t));
-    RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio.getRSSI());
+    handleReceiveCounters(RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio.getRSSI()));
 }
 
 void LoRa::loop()
@@ -80,7 +80,7 @@ String LoRa::getStatusString()
 {
     char buf[128];
 #ifdef HAS_LORA
-    sprintf(buf, "LoRa @ %fMHz (%ddBm) [%luTX/%luRX]", FREQUENCY, LORA_POWER, packetsTransmitted, packetsReceived);
+    sprintf(buf, "LoRa @ %fMHz (%ddBm) [%luTX/%luRX] [%luCRC/%luSIZE/%luVAL]", FREQUENCY, LORA_POWER, packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
 #endif
     return String(buf);
 

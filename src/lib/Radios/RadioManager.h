@@ -12,6 +12,14 @@ enum RadioState
     RADIO_STATE_TX
 };
 
+enum ReceiveResult {
+    RECEIVE_RESULT_OK,
+    RECEIVE_RESULT_BAD_SIZE,
+    RECEIVE_RESULT_BAD_PACKET_TYPE,
+    RECEIVE_RESULT_BAD_CRC,
+    RECEIVE_RESULT_BAD_ID,
+};
+
 class Radio
 {
 public:
@@ -25,7 +33,26 @@ public:
     void setEnabled(bool status) {
         enabled = status;
     }
-private:
+    void handleReceiveCounters(ReceiveResult result) {
+        switch (result) {
+            case RECEIVE_RESULT_BAD_CRC:
+            packetsBadCrc++;
+            break;
+            case RECEIVE_RESULT_BAD_SIZE:
+            packetsBadSize++;
+            break;
+            case RECEIVE_RESULT_BAD_ID:
+            case RECEIVE_RESULT_BAD_PACKET_TYPE:
+            packetsBadValidation++;
+            break;
+        }
+    }
+protected:
+    uint32_t packetsReceived = 0;
+    uint32_t packetsTransmitted = 0;
+    uint32_t packetsBadCrc = 0;
+    uint32_t packetsBadSize = 0;
+    uint32_t packetsBadValidation = 0;
     bool enabled;
 };
 
@@ -36,7 +63,7 @@ public:
     static RadioManager *getSingleton();
 
     air_type0_t prepare_packet();
-    void receive(const uint8_t *rawPacket, size_t packetSize, float rssi);
+    ReceiveResult receive(const uint8_t *rawPacket, size_t packetSize, float rssi);
     void transmit(air_type0_t *packet);
 
     void addRadio(Radio *radio);

@@ -249,7 +249,8 @@ void loop()
 
         if ((sys.now > (sys.cycle_scan_begin + HOST_MSP_TIMEOUT)) || (curr.host != HOST_NONE))
         {
-            // End of the host scan - Ardu's craftname is used for DJI messages, so "INIT" will generally be everyone's craftname.
+            // End of the host scan - Ardu's craftname is used for DJI messages, so "INIT" will be everyone's craftname.
+            // Better to use randomly generated names for Ardu
             if (curr.host != HOST_NONE && curr.host != HOST_ARDU)
             {
                 msp_get_name();
@@ -303,19 +304,10 @@ void loop()
     {
 
         if (sys.now > (sys.cycle_scan_begin + LORA_CYCLE_SCAN))
-        { // End of the scan, set the ID then sync
-
-            if (sys.io_bt_enabled)
-            {
-                // initConfigInterface();
-            }
-#if !defined(PIN_BUTTON)
-            // Enable WiFi / Bluetooth if there's no button to do so
-            //initConfigInterface();
-#endif
-
+        {
+            // End of the scan, set the ID then sync
             if (PeerManager::getSingleton()->count() >= cfg.lora_nodes || curr.host == HOST_GCS)
-            { // Too many nodes already, or connected to a ground station : go silent mode
+            { // Too many nodes already, or connected to a ground station: go to silent mode
                 sys.lora_no_tx = 1;
             }
             else
@@ -327,7 +319,8 @@ void loop()
             sys.phase = MODE_OTA_SYNC;
         }
         else
-        { // Still scanning
+        {
+            // Still scanning
 #ifdef HAS_OLED
             if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2 && cfg.display_enable)
             {
