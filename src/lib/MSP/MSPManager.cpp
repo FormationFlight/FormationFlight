@@ -88,14 +88,29 @@ msp_analog_t MSPManager::getAnalogValues()
 msp_raw_gps_t MSPManager::getLocation()
 {
     msp_raw_gps_t gps;
-    msp->request(MSP_RAW_GPS, &gps, sizeof(gps));
+    if (!msp->request(MSP_RAW_GPS, &gps, sizeof(gps))) {
+        // Force fixType to 0
+        gps.fixType = 0;
+        return gps;
+    }
     return gps;
 }
-/*
-void MSPManager::sendLocation()
+
+void MSPManager::sendLocation(GNSSLocation loc)
 {
+    msp_raw_gps_t gps;
+    gps.alt = loc.alt;
+    gps.fixType = loc.fixType;
+    gps.groundCourse = loc.groundCourse * 10;
+    const double kmh_to_cms = 27.77;
+    gps.groundSpeed = loc.groundSpeed * kmh_to_cms;
+    gps.hdop = loc.hdop;
+    gps.lat = loc.lat * (1 / 10000000);
+    gps.lon = loc.lon * (1 / 10000000);
+    gps.numSat = loc.numSat;
+    msp->command(MSP_SET_RAW_GPS, &gps, sizeof(gps), 0);
 }
-*/
+
 void MSPManager::sendRadar(peer_t *peer)
 {
     msp_radar_pos_t position;

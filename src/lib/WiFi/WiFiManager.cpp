@@ -11,6 +11,7 @@
 #include <ArduinoJson.h>
 #include "../Radios/RadioManager.h"
 #include "../Peers/PeerManager.h"
+#include "../GNSS/GNSSManager.h"
 
 WiFiManager::WiFiManager()
 {
@@ -52,6 +53,13 @@ WiFiManager::WiFiManager()
     server->on("/peermanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;
         PeerManager::getSingleton()->statusJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
+    server->on("/gnssmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<1024> doc;
+        GNSSManager::getSingleton()->statusJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);

@@ -26,6 +26,7 @@ public:
     msp_raw_gps_t getLocation();
     msp_analog_t getAnalogValues();
     void sendRadar(peer_t *peer);
+    void sendLocation(GNSSLocation location);
     static MSPManager* getSingleton();
     void begin(Stream &stream);
 private:

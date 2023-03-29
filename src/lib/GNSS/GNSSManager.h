@@ -1,8 +1,11 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 #define GNSS_MAX_PROVIDERS 2
+#define GNSS_MAX_LISTENERS 2
+#define GNSS_FRESH_INTERVAL_MS 100
 
 enum GNSS_FIX_TYPE {
     GNSS_FIX_TYPE_NONE = 0,
@@ -19,13 +22,30 @@ struct GNSSLocation {
   double  groundSpeed;
   double  groundCourse;
   double hdop;
+  unsigned long lastUpdate;
 };
 
+// A system that can provide us our location, like an FC with GPS or an on-board GPS module (TTGO T-Beam, etc.)
 class GNSSProvider {
 public:
-    GNSSLocation getLocation();
-    void begin();
-    void loop();
+    virtual GNSSLocation getLocation();
+    virtual void loop();
+    virtual String getStatusString();
+    bool getEnabled() {
+        return enabled;
+    }
+    void setEnabled(bool status) {
+        enabled = status;
+    }
+private:
+    bool enabled = true;
+};
+
+// A system which will want to receive our location, like an FC without GPS or a GCS over a network connection
+class GNSSListener {
+public:
+    virtual void update(GNSSLocation location);
+
 };
 
 class GNSSManager {
@@ -33,8 +53,12 @@ public:
     GNSSManager();
     static GNSSManager* getSingleton();
     void addProvider(GNSSProvider *provider);
+    void setProviderStatus(uint8_t index, bool status);
+    void addListener(GNSSListener *listener);
     GNSSLocation getLocation();
     void loop();
+    void statusJson(JsonDocument *doc);
 private:
-    GNSSProvider* providers[GNSS_MAX_PROVIDERS];
+    GNSSProvider* providers[GNSS_MAX_PROVIDERS] = {nullptr};
+    GNSSListener* listeners[GNSS_MAX_LISTENERS] = {nullptr};
 };

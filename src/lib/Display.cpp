@@ -32,6 +32,7 @@ void display_init()
 void display_draw_status(system_t *sys)
 {
 #ifdef HAS_OLED
+    GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
     display.clear();
     int j = 0;
     int line;
@@ -41,7 +42,7 @@ void display_draw_status(system_t *sys)
 
         display.setFont(ArialMT_Plain_24);
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
-        display.drawString(26, 11, String(curr.gps.numSat));
+        display.drawString(26, 11, String(loc.numSat));
         display.drawString(13, 42, String(PeerManager::getSingleton()->count_active() + 1 - sys->lora_no_tx));
         display.drawString(125, 11, String(peer_slotname[curr.id]));
         display.setFont(ArialMT_Plain_10);
@@ -60,9 +61,9 @@ void display_draw_status(system_t *sys)
         display.drawString(15, 44, "/" + String(cfg.lora_nodes));
         display.drawString(15, 54, String(loramode_name[cfg.lora_mode]));
 
-        if (curr.gps.fixType == 1)
+        if (loc.fixType == GNSS_FIX_TYPE_2D)
             display.drawString(27, 12, "2D");
-        if (curr.gps.fixType == 2)
+        if (loc.fixType == GNSS_FIX_TYPE_3D)
             display.drawString(27, 12, "3D");
     }
 
@@ -243,8 +244,8 @@ void display_draw_status(system_t *sys)
 
             if (iscurrent)
             {
-                display.drawString(128, 24, "LA " + String((float)curr.gps.lat / 10000000, 5));
-                display.drawString(128, 34, "LO " + String((float)curr.gps.lon / 10000000, 5));
+                display.drawString(128, 24, "LA " + String((float)loc.lat / 10000000, 5));
+                display.drawString(128, 34, "LO " + String((float)loc.lon / 10000000, 5));
             }
             else
             {
@@ -256,9 +257,9 @@ void display_draw_status(system_t *sys)
 
             if (iscurrent)
             {
-                display.drawString(0, 24, "A " + String(curr.gps.alt) + "m");
-                display.drawString(0, 34, "S " + String(curr.gps.groundSpeed / 100) + "m/s");
-                display.drawString(0, 44, "C " + String(curr.gps.groundCourse / 10) + "°");
+                display.drawString(0, 24, "A " + String(loc.alt) + "m");
+                display.drawString(0, 34, "S " + String(loc.groundSpeed / 100) + "m/s");
+                display.drawString(0, 44, "C " + String(loc.groundCourse / 10) + "°");
             }
             else
             {
@@ -267,17 +268,17 @@ void display_draw_status(system_t *sys)
                 display.drawString(0, 44, "C " + String(peer->gps_rec.groundCourse / 10) + "°");
             }
 
-            if (peer->gps.lat != 0 && peer->gps.lon != 0 && curr.gps.lat != 0 && curr.gps.lon != 0 && !iscurrent)
+            if (peer->gps.lat != 0 && peer->gps.lon != 0 && loc.lat != 0 && loc.lon != 0 && !iscurrent)
             {
 
-                double lat1 = (double)curr.gps.lat / 10000000;
-                double lon1 = (double)curr.gps.lon / 10000000;
+                double lat1 = (double)loc.lat / 10000000;
+                double lon1 = (double)loc.lon / 10000000;
                 double lat2 = (double)peer->gps_rec.lat / 10000000;
                 double lon2 = (double)peer->gps_rec.lon / 10000000;
 
                 peer->distance = gpsDistanceBetween(lat1, lon1, lat2, lon2);
                 peer->direction = gpsCourseTo(lat1, lon1, lat2, lon2);
-                peer->relalt = peer->gps_rec.alt - curr.gps.alt;
+                peer->relalt = peer->gps_rec.alt - loc.alt;
 
                 display.drawString(0, 54, "R " + String(peer->relalt) + "m");
                 display.drawString(50, 54, "B " + String(peer->direction) + "°");

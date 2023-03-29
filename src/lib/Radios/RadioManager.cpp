@@ -8,6 +8,7 @@
 #include "../CryptoManager.h"
 #include <ArduinoJson.h>
 #include "../Peers/PeerManager.h"
+#include "../GNSS/GNSSManager.h"
 
 RadioManager::RadioManager()
 {
@@ -29,19 +30,20 @@ air_type0_t RadioManager::prepare_packet()
     air_type0_t air_0;
     air_0.packet_type = PACKET_TYPE_RADAR_POSITION;
     air_0.id = curr.id;
-    air_0.lat = curr.gps.lat / 100;
-    air_0.lon = curr.gps.lon / 100;
-    air_0.alt = curr.gps.alt; // m
+    GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
+    air_0.lat = loc.lat / 100;
+    air_0.lon = loc.lon / 100;
+    air_0.alt = loc.alt; // m
     air_0.extra_type = sys.ota_nonce % 5;
 
     switch (air_0.extra_type)
     {
     case 0:
-        air_0.extra_value = curr.gps.groundCourse / 10;
+        air_0.extra_value = loc.groundCourse / 10;
         break;
 
     case 1:
-        air_0.extra_value = curr.gps.groundSpeed / 20;
+        air_0.extra_value = loc.groundSpeed / 20;
         break;
 
     case 2:

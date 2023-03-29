@@ -18,6 +18,12 @@
 #include <lib/CryptoManager.h>
 #include <lib/Peers/PeerManager.h>
 #include <lib/MSP/MSPManager.h>
+// GNSS
+#include <lib/GNSS/GNSSManager.h>
+#include <lib/GNSS/MSP_GNSS.h>
+#ifdef GNSS_ENABLED
+#include <lib/GNSS/Direct_GNSS.h>
+#endif
 // Radios
 #include <lib/WiFi/WiFiManager.h>
 #include <lib/Radios/RadioManager.h>
@@ -72,8 +78,6 @@ void IRAM_ATTR handleInterrupt()
 #endif
 }
 
-// ----------------------------- setup
-
 void setup()
 {
 
@@ -107,19 +111,18 @@ void setup()
 
     delay(START_DELAY);
 
-
-
     // Create PeerManager
     DBGLN("[main] start PeerManager");
     PeerManager *peerManager = PeerManager::getSingleton();
     peerManager->reset();
 
     // Create CryptoManager
+    DBGLN("[main] start CryptoManager");
     CryptoManager *cryptoManager = CryptoManager::getSingleton();
     cryptoManager->setEnabled(false);
     
     // Create WiFiManager
-    DBGLN("[main] start PeerManager");
+    DBGLN("[main] start WiFiManager");
     WiFiManager::getSingleton();
 
     // Create MSPManager
@@ -131,6 +134,16 @@ void setup()
 #elif defined(PLATFORM_ESP8266)
     mspManager->begin(Serial);
     Serial.begin(SERIAL_SPEED, SERIAL_8N1);
+#endif
+
+    // Create GNSSManager
+    DBGLN("[main] start GNSSManager");
+    GNSSManager *gnssManager = GNSSManager::getSingleton();
+    // Use MSP GNSS as our primary provider
+    gnssManager->addProvider(new MSP_GNSS());
+    // Use Direct GNSS if MSP isn't available
+#ifdef GNSS_ENABLED
+    gnssManager->addProvider(new Direct_GNSS());
 #endif
 
     // Create RadioManager
@@ -217,10 +230,6 @@ void loop()
             }
             DBGF("[main] selected name %s\n", curr.name);
 
-            curr.gps.fixType = 0;
-            curr.gps.lat = 0;
-            curr.gps.lon = 0;
-            curr.gps.alt = 0;
             curr.id = 0;
             if (cfg.display_enable)
             {
@@ -345,19 +354,6 @@ void loop()
 
     if (sys.phase == MODE_OTA_TX)
     {
-        if (MSPManager::hostTXCapable(curr.host))
-        {
-            // TODO: Replace with GNSSManager
-            curr.gps = MSPManager::getSingleton()->getLocation();
-        }
-        else
-        {
-            curr.gps.lat = 0;
-            curr.gps.lon = 0;
-            curr.gps.alt = 0;
-            curr.gps.groundCourse = 0;
-            curr.gps.groundSpeed = 0;
-        }
         if (curr.id != 0) {
             sys.last_tx = millis();
             air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
