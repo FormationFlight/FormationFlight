@@ -1,7 +1,6 @@
 #ifndef CONFIGHANDLER_H
 #define CONFIGHANDLER_H
 #include "main.h"
-#include "MSP.h"
 
 
 void handleConfigMessage(Stream& input_source, String message);

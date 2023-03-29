@@ -14,7 +14,7 @@ PeerManager* PeerManager::getSingleton()
 
 peer_t* PeerManager::getPeer(uint8_t index)
 {
-    if (index >= LORA_NODES_MAX) {
+    if (index >= NODES_MAX) {
         return nullptr;
     }
     return &peers[index];
@@ -22,15 +22,14 @@ peer_t* PeerManager::getPeer(uint8_t index)
 
 void PeerManager::reset()
 {
-    sys.now_sec = millis();
-    for (int i = 0; i < LORA_NODES_MAX; i++)
+    for (int i = 0; i < NODES_MAX; i++)
     {
         peers[i].id = 0;
         peers[i].host = 0;
         peers[i].state = 0;
         peers[i].lost = 0;
         peers[i].broadcast = 0;
-        peers[i].lq_updated = sys.now_sec;
+        peers[i].lq_updated = millis();
         peers[i].lq_tick = 0;
         peers[i].lq = 0;
         peers[i].updated = 0;
@@ -51,7 +50,7 @@ void PeerManager::loop()
 uint8_t PeerManager::count(bool active)
 {
     int n = 0;
-    for (int i = 0; i < LORA_NODES_MAX; i++)
+    for (int i = 0; i < NODES_MAX; i++)
     {
         // If active, don't count lost peers
         if (peers[i].id > 0)
@@ -73,13 +72,14 @@ uint8_t PeerManager::count_active()
 void PeerManager::statusJson(JsonDocument *doc)
 {
     JsonArray peerArray = doc->createNestedArray("peers");
-    for (uint8_t i = 0; i < LORA_NODES_MAX; i++)
+    for (uint8_t i = 0; i < NODES_MAX; i++)
     {
         if (getPeer(i)->id != 0) {
             peer_t *peer = getPeer(i);
             JsonObject o = peerArray.createNestedObject();
             o["id"] = peer_slotname[peer->id];
-            o["self"] = peer->id == curr.id;
+            // TODO: get curr id from SystemManager
+            //o["self"] = peer->id == curr.id;
             o["name"] = peer->name;
             o["updated"] = peer->updated;
             o["lost"] = peer->lost;

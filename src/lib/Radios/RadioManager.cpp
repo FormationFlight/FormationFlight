@@ -97,7 +97,7 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
     {
         return RECEIVE_RESULT_BAD_CRC;
     }
-    if (air_0.id == 0 || air_0.id > LORA_NODES_MAX)
+    if (air_0.id == 0 || air_0.id > NODES_MAX)
     {
         DBGF("Received bad ID: %d\n", air_0.id);
         return RECEIVE_RESULT_BAD_ID;

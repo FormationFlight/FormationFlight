@@ -8,6 +8,7 @@
 #include "pixel.h"
 #include "Helpers.h"
 #include "Peers/PeerManager.h"
+#include "MSP/MSPManager.h"
 
 #ifdef HAS_OLED
 SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);
@@ -68,7 +69,7 @@ void display_draw_status(system_t *sys)
     else if (sys->display_page == 1)
     {
 
-        long pos[LORA_NODES_MAX];
+        long pos[NODES_MAX];
         long diff;
 
         display.setFont(ArialMT_Plain_10);
@@ -161,7 +162,7 @@ void display_draw_status(system_t *sys)
 
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
         display.drawString(111, 0, String(stats.last_tx_duration));
-        display.drawString(111, 10, String(stats.last_msp_duration[0]) + " / " + String(stats.last_msp_duration[1]));
+        display.drawString(111, 10, String(stats.last_msp_duration));
         display.drawString(111, 20, String(stats.last_oled_duration));
         display.drawString(111, 30, String(sys->lora_cycle));
         display.drawString(111, 40, String(cfg.lora_nodes) + " x " + String(cfg.slot_spacing));

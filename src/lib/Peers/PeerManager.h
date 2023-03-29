@@ -1,6 +1,9 @@
 #pragma once
-#include <main.h>
+#include "../MSP/MSP.h"
 #include <ArduinoJson.h>
+
+#define NAME_LENGTH 3
+#define NODES_MAX 6
 
 struct peer_t {
    uint8_t id;
@@ -22,7 +25,7 @@ struct peer_t {
    uint32_t gps_pre_updated;
    msp_raw_gps_t gps_comp;
    msp_analog_t fcanalog;
-   char name[LORA_NAME_LENGTH + 1];
+   char name[NAME_LENGTH + 1];
    uint32_t packetsReceived;
 };
 
@@ -37,5 +40,5 @@ public:
     void loop();
     static PeerManager *getSingleton();
 private:
-    peer_t peers[LORA_NODES_MAX];
+    peer_t peers[NODES_MAX];
 };

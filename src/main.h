@@ -13,8 +13,8 @@
 #define DBGLN(x) do { if (DEBUG) { Serial.printf("%lu: ", millis()); Serial.println(x); } } while (0)
 #define DBGF(...) do { if (DEBUG) { Serial.printf("%lu: ", millis()); Serial.printf(__VA_ARGS__); } } while (0)
 
-#include "lib/MSP.h"
-
+#include "lib/MSP/MSP.h"
+#include "lib/MSP/MSPManager.h"
 // -------- GENERAL
 
 #define PRODUCT_NAME "FormationFlight"
@@ -35,7 +35,6 @@
 #define LORA_FREQUENCY_433 433375000 // Hz
 #define LORA_FREQUENCY_868 868500000 // Hz
 #define LORA_FREQUENCY_915 915000000 // Hz
-#define LORA_NODES_MAX 6
 
 // --- Mode 0 (Standard)
 
@@ -79,7 +78,6 @@
 
 // --- All modes common
 
-#define LORA_NAME_LENGTH 3
 #define LORA_CYCLE_SCAN 5000 // 5s
 #define LORA_PEER_TIMEOUT 6000 // 6s
 #define LORA_DRIFT_THRESHOLD LORA_M3_SLOT_SPACING / LORA_M3_NODES // Min for action
@@ -104,22 +102,11 @@ enum MODE {
 
 // -------- HOST
 
-#define HOST_MSP_TIMEOUT 1000
-
-enum HOST {
-    HOST_NONE = 0,
-    HOST_GCS = 1,
-    HOST_INAV = 2,
-    HOST_ARDU = 3,
-    HOST_BTFL = 4
-};
-
-
 
 struct curr_t {
     uint8_t id;
     uint8_t state;
-    uint8_t host;
+    MSPHost host;
     char name[16];
     uint8_t tick;
     msp_raw_gps_t gps;
@@ -244,7 +231,7 @@ struct stats_t {
 
     uint16_t last_tx_duration;
     uint16_t last_rx_duration;
-    uint16_t last_msp_duration[LORA_NODES_MAX];
+    uint16_t last_msp_duration;
     uint16_t last_oled_duration;
 };
 

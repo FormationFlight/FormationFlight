@@ -10,7 +10,6 @@
 #ifdef PLATFORM_ESP32
 #include <esp_system.h>
 #endif
-#include <lib/MSP.h>
 #include <lib/Display.h>
 #include <EEPROM.h>
 #include <main.h>
@@ -18,6 +17,7 @@
 #include <lib/ConfigHandler.h>
 #include <lib/CryptoManager.h>
 #include <lib/Peers/PeerManager.h>
+#include <lib/MSP/MSPManager.h>
 // Radios
 #include <lib/WiFi/WiFiManager.h>
 #include <lib/Radios/RadioManager.h>
@@ -32,76 +32,8 @@
 config_t cfg;
 system_t sys;
 stats_t stats;
-MSP msp;
-msp_radar_pos_t radarPos;
 curr_t curr;
 
-// -------- MSP and FC
-
-void msp_get_state()
-{
-    uint32_t modes;
-    msp.getActiveModes(&modes);
-    curr.state = bitRead(modes, 0);
-}
-
-void msp_get_name()
-{
-    msp.request(MSP_NAME, &curr.name, sizeof(curr.name));
-    curr.name[7] = '\0';
-}
-
-void msp_get_gps()
-{
-    msp.request(MSP_RAW_GPS, &curr.gps, sizeof(curr.gps));
-}
-
-void msp_set_fc()
-{
-    char j[5];
-    curr.host = HOST_NONE;
-    msp.request(MSP_FC_VARIANT, &j, sizeof(j));
-
-    if (strncmp(j, "INAV", 4) == 0)
-    {
-        curr.host = HOST_INAV;
-        msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
-    }
-    else if (strncmp(j, "GCS", 3) == 0)
-    {
-        curr.host = HOST_GCS;
-        msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
-    }
-    else if (strncmp(j, "ARDU", 4) == 0)
-    {
-        curr.host = HOST_ARDU;
-        msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
-    }
-    else if (strncmp(j, "BTFL", 4) == 0)
-    {
-        curr.host = HOST_BTFL;
-        msp.request(MSP_FC_VERSION, &curr.fcversion, sizeof(curr.fcversion));
-    }
-}
-
-void msp_get_fcanalog()
-{
-    msp.request(MSP_ANALOG, &curr.fcanalog, sizeof(curr.fcanalog));
-}
-
-void msp_send_radar(uint8_t i)
-{
-    peer_t *peer = PeerManager::getSingleton()->getPeer(i);
-    radarPos.id = i;
-    radarPos.state = (peer->lost == 2) ? 2 : peer->state;
-    radarPos.lat = peer->gps_comp.lat;              // x 10E7
-    radarPos.lon = peer->gps_comp.lon;              // x 10E7
-    radarPos.alt = peer->gps_comp.alt * 100;        // cm
-    radarPos.heading = peer->gps.groundCourse / 10; // From ° x 10 to °
-    radarPos.speed = peer->gps.groundSpeed;         // cm/s
-    radarPos.lq = peer->lq;
-    msp.command2(MSP2_COMMON_SET_RADAR_POS, &radarPos, sizeof(radarPos), 0);
-}
 // -------- INTERRUPTS
 
 volatile int interruptCounter = 0;
@@ -146,12 +78,7 @@ void setup()
 {
 
 #ifdef PLATFORM_ESP32
-    msp.begin(Serial1);
-    Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
     Serial.begin(921600);
-#elif defined(PLATFORM_ESP8266)
-    msp.begin(Serial);
-    Serial.begin(SERIAL_SPEED, SERIAL_8N1);
 #endif
     DBGLN("[main] start");
     DBGF("%s version %s UID %s\n", PRODUCT_NAME, VERSION, generate_id());
@@ -183,7 +110,7 @@ void setup()
 
 
     // Create PeerManager
-    DBGLN("[main] start peermanager");
+    DBGLN("[main] start PeerManager");
     PeerManager *peerManager = PeerManager::getSingleton();
     peerManager->reset();
 
@@ -191,22 +118,35 @@ void setup()
     CryptoManager *cryptoManager = CryptoManager::getSingleton();
     cryptoManager->setEnabled(false);
     
-
-    DBGLN("[main] start wifimanager");
+    // Create WiFiManager
+    DBGLN("[main] start PeerManager");
     WiFiManager::getSingleton();
 
-    //DBGLN("[main] init radio espnow");
-    //RadioManager::getSingleton()->addRadio(ESPNOW::getSingleton());
+    // Create MSPManager
+    DBGLN("[main] start MSPManager");
+    MSPManager *mspManager = MSPManager::getSingleton();
+#ifdef PLATFORM_ESP32
+    mspManager->begin(Serial1);
+    Serial1.begin(SERIAL_SPEED, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
+#elif defined(PLATFORM_ESP8266)
+    mspManager->begin(Serial);
+    Serial.begin(SERIAL_SPEED, SERIAL_8N1);
+#endif
 
-#ifdef HAS_LORA
+    // Create RadioManager
+    DBGLN("[main] start RadioManager");
+    RadioManager *radioManager = RadioManager::getSingleton();
+
+    //DBGLN("[main] RadioManager::addRadio ESPNOW");
+    //radioManager->addRadio(ESPNOW::getSingleton());
+
 #ifdef LORA_FAMILY_SX128X
-    DBGLN("[main] init radio LoRa_SX128X");
-    RadioManager::getSingleton()->addRadio(LoRa_SX128X::getSingleton());
+    DBGLN("[main] RadioManager::addRadio LoRa_SX128X");
+    radioManager->addRadio(LoRa_SX128X::getSingleton());
 #endif
 #ifdef LORA_FAMILY_SX127X
-    DBGLN("[main] init radio LoRa_SX127X");
-    RadioManager::getSingleton()->addRadio(LoRa_SX127X::getSingleton());
-#endif
+    DBGLN("[main] RadioManager::addRadio LoRa_SX127X");
+    radioManager->addRadio(LoRa_SX127X::getSingleton());
 #endif
 
     if (cfg.display_enable)
@@ -264,14 +204,14 @@ void loop()
             // Better to use randomly generated names for Ardu
             if (curr.host != HOST_NONE && curr.host != HOST_ARDU)
             {
-                msp_get_name();
+                MSPManager::getSingleton()->getName(curr.name, sizeof(curr.name));
             }
             if (curr.name[0] == '\0')
             {
                 String chipIDString = generate_id();
                 for (int i = 0; i < 3; i++)
                 {
-                    curr.name[i] = chipIDString.charAt(i + 3); //(char)random(65, 90);
+                    curr.name[i] = chipIDString.charAt(i + 3);
                 }
                 curr.name[3] = 0;
             }
@@ -296,7 +236,8 @@ void loop()
             if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2)
             {
                 delay(100);
-                msp_set_fc();
+                curr.host = MSPManager::getSingleton()->getFCVariant();
+                curr.fcversion = MSPManager::getSingleton()->getFCVersion();
                 if (cfg.force_gs)
                 {
                     curr.host = HOST_GCS;
@@ -404,17 +345,18 @@ void loop()
 
     if (sys.phase == MODE_OTA_TX)
     {
-        if (curr.host == HOST_NONE)
+        if (MSPManager::hostTXCapable(curr.host))
+        {
+            // TODO: Replace with GNSSManager
+            curr.gps = MSPManager::getSingleton()->getLocation();
+        }
+        else
         {
             curr.gps.lat = 0;
             curr.gps.lon = 0;
             curr.gps.alt = 0;
             curr.gps.groundCourse = 0;
             curr.gps.groundSpeed = 0;
-        }
-        else if (curr.host == HOST_INAV || curr.host == HOST_ARDU || curr.host == HOST_BTFL)
-        {
-            msp_get_gps(); // GPS > FC > ESP
         }
         if (curr.id != 0) {
             sys.last_tx = millis();
@@ -456,7 +398,8 @@ void loop()
         stats.timer_begin = millis();
 
         if (PeerManager::getSingleton()->count() == 0 && sys.display_page == 1)
-        { // No need for timings graphs when alone
+        {
+            // No need for timings graphs when alone
             sys.display_page++;
         }
 
@@ -475,25 +418,23 @@ void loop()
 
     if (sys.now > sys.msp_next_cycle && sys.phase > MODE_OTA_SYNC && sys.ota_slot < cfg.lora_nodes)
     {
-        stats.timer_begin = millis();
 
         if (sys.ota_slot == 0 && (curr.host == HOST_INAV || curr.host == HOST_ARDU || curr.host == HOST_BTFL))
         {
 
             if (sys.ota_nonce % 6 == 0)
             {
-                msp_get_state();
+                curr.state = MSPManager::getSingleton()->getState();
             }
 
             if ((sys.ota_nonce + 1) % 6 == 0)
             {
-                msp_get_fcanalog();
+                curr.fcanalog = MSPManager::getSingleton()->getAnalogValues();
             }
         }
 
-        // msp_send_peer(sys.lora_slot);
-
-        // ----------------Send MSP to FC and predict new position for all nodes minus current
+        stats.timer_begin = millis();
+        // ----------------Send MSP to FC
         if (sys.ota_slot == 0)
         {
             //DBGLN("[main] sending msp");
@@ -507,13 +448,13 @@ void loop()
                     peer->gps_comp.lon = peer->gps.lon;
                     peer->gps_comp.alt = peer->gps.alt;
 #ifndef DEBUG
-                    msp_send_radar(i);
+                    MSPManager::getSingleton()->sendRadar(peer);
 #endif
                 }
             }
             //DBGLN("[main] finished sending msp");
         }
-        stats.last_msp_duration[sys.ota_slot] = millis() - stats.timer_begin;
+        stats.last_msp_duration = millis() - stats.timer_begin;
         sys.msp_next_cycle += cfg.slot_spacing;
         sys.ota_slot++;
     }
@@ -529,6 +470,7 @@ void loop()
         sys.ppsc = 0;
 
         // Timed-out peers + LQ
+        // TODO: Move to PeerManager
 
         for (int i = 0; i < cfg.lora_nodes; i++)
         {
