@@ -55,7 +55,7 @@ String generate_id()
 {
     uint32_t chipID;
 #ifdef PLATFORM_ESP8266
-    chipID = ESP.getChipId();
+    chipID = ESP.getChipId() << 8;
 #elif defined(PLATFORM_ESP32)
     uint32_t low = ESP.getEfuseMac() & 0xFFFFFFFF;
     uint32_t high = (ESP.getEfuseMac() >> 32) % 0xFFFFFFFF;

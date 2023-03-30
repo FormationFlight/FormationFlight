@@ -111,7 +111,7 @@ uint8_t PeerManager::count_active()
 
 void PeerManager::statusJson(JsonDocument *doc)
 {
-    (*doc)["myID"] = curr.id;
+    (*doc)["myID"] = peer_slotname[curr.id];
     JsonArray peerArray = doc->createNestedArray("peers");
     for (uint8_t i = 0; i < NODES_MAX; i++)
     {
@@ -135,6 +135,9 @@ void PeerManager::statusJson(JsonDocument *doc)
             o["courseTo"] = peer->direction;
             o["relativeAltitude"] = peer->relalt;
             o["packetsReceived"] = peer->packetsReceived;
+            if (peer->rssi != 0) {
+                o["rssi"] = peer->rssi;
+            }
         }
     }
 }

@@ -5,6 +5,8 @@
 #elif defined(PLATFORM_ESP32)
 #include <WiFi.h>
 #endif
+// Friendly strings
+#include "../ConfigStrings.h"
 // OTA
 #include <ArduinoOTA.h>
 // Config methods
@@ -29,7 +31,19 @@ WiFiManager::WiFiManager()
     WiFi.softAP(ssid.c_str(), "inavradar");
     server = new AsyncWebServer(80);
     server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/plain", "OK");
+        StaticJsonDocument<512> doc;
+        doc["target"] = CFG_TARGET_FULLNAME;
+        doc["version"] = VERSION;
+#ifdef LORA_BAND
+        doc["lora_band"] = LORA_BAND;
+#endif
+        doc["uptimeMilliseconds"] = millis();
+        doc["name"] = curr.name;
+        doc["longName"] = generate_id();
+        doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
     });
     server->on("/system/shutdown", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");

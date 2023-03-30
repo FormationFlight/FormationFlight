@@ -1,6 +1,9 @@
-#include "LoRa_SX128X.h"
 #include "RadioManager.h"
+#include "LoRa_SX128X.h"
 #include "../CryptoManager.h"
+#include <WiFiUdp.h>
+
+#define RADIOLIB_GODMODE
 
 void IRAM_ATTR onSX128XPacketReceive(void)
 {
@@ -39,8 +42,12 @@ void LoRa_SX128X::transmit(air_type0_t *air_0)
 
 int LoRa_SX128X::begin() {
 #ifdef LORA_FAMILY_SX128X
+#ifdef PLATFORM_ESP32
     SPI.begin(LORA_PIN_SCK, LORA_PIN_MISO, LORA_PIN_MOSI, LORA_PIN_CS);
-    radio = new SX128x(new Module(LORA_PIN_CS, LORA_PIN_DIO0, LORA_PIN_RST));
+#else
+    SPI.begin();
+#endif
+    radio = new SX1281(new Module(LORA_PIN_CS, LORA_PIN_DIO, LORA_PIN_RST, LORA_PIN_BUSY));
     radio->begin(FREQUENCY, BANDWIDTH, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, LORA_POWER, PREAMBLE_LENGTH);
     radio->setCRC(0);
     #ifdef LORA_PIN_RXEN
@@ -49,6 +56,7 @@ int LoRa_SX128X::begin() {
     radio->implicitHeader(sizeof(air_type0_t));
     radio->setDio1Action(onSX128XPacketReceive);
     radio->startReceive();
+
 #endif
     return 0;
 }
@@ -58,13 +66,28 @@ void LoRa_SX128X::flagPacketReceived()
     if (!getEnabled()) {
         return;
     }
-    packetReceived = true;
+    if (radio->getIrqStatus() & RADIOLIB_SX128X_IRQ_RX_DONE) {
+        packetReceived = true;
+    }
 }
 
 void LoRa_SX128X::receive()
 {
     uint8_t buf[sizeof(air_type0_t)];
-    radio->readData(buf, sizeof(air_type0_t));
+    memset(buf, 0, sizeof(buf));
+    int state = radio->readData(buf, sizeof(air_type0_t));
+    Serial.println(state);
+    WiFiUDP u;
+    u.begin(1234);
+    u.beginPacket("255.255.255.255", 1234);
+    for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
+        Serial.print(buf[i], HEX);
+        u.write(buf[i]);
+    }
+    u.endPacket();
+    
+    Serial.println();
+    radio->startReceive();
     CryptoManager::getSingleton()->decrypt(buf, sizeof(air_type0_t));
     handleReceiveCounters(RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio->getRSSI()));
 }
@@ -73,8 +96,8 @@ void LoRa_SX128X::loop()
 {
     if (packetReceived)
     {
-        receive();
         packetReceived = false;
+        receive();
     }
 }
 

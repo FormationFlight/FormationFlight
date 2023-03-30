@@ -160,8 +160,8 @@ void setup()
     DBGLN("[main] start RadioManager");
     RadioManager *radioManager = RadioManager::getSingleton();
 
-    // DBGLN("[main] RadioManager::addRadio ESPNOW");
-    // radioManager->addRadio(ESPNOW::getSingleton());
+    DBGLN("[main] RadioManager::addRadio ESPNOW");
+    radioManager->addRadio(ESPNOW::getSingleton());
 
 #ifdef LORA_FAMILY_SX128X
     DBGLN("[main] RadioManager::addRadio LoRa_SX128X");
