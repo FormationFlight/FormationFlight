@@ -13,6 +13,7 @@ public:
     String getStatusString();
     void loop();
     void update(GNSSLocation location);
+    String getName();
 private:
     msp_raw_gps_t rawLocation;
     unsigned long lastUpdate = 0;

@@ -1,9 +1,11 @@
 #include "PeerManager.h"
 #include "../ConfigStrings.h"
+#include "../GNSS/GNSSManager.h"
+#include "main.h"
 
 PeerManager *peerManager = nullptr;
 
-PeerManager* PeerManager::getSingleton()
+PeerManager *PeerManager::getSingleton()
 {
     if (peerManager == nullptr)
     {
@@ -12,9 +14,10 @@ PeerManager* PeerManager::getSingleton()
     return peerManager;
 }
 
-peer_t* PeerManager::getPeer(uint8_t index)
+peer_t *PeerManager::getPeer(uint8_t index)
 {
-    if (index >= NODES_MAX) {
+    if (index >= NODES_MAX)
+    {
         return nullptr;
     }
     return &peers[index];
@@ -44,7 +47,43 @@ void PeerManager::reset()
 
 void PeerManager::loop()
 {
-    // TODO: Calculate peer distance and other nice metrics
+    // Calculate peer distances
+    static unsigned long lastUpdate = 0;
+    GNSSManager *gnssManager = GNSSManager::getSingleton();
+    GNSSLocation loc = gnssManager->getLocation();
+
+    if (millis() - lastUpdate > 100)
+    {
+        for (int i = 0; i < NODES_MAX; i++)
+        {
+            peer_t *peer = &peers[i];
+
+            // Set LQ & Lost on peers
+            if (millis() > (peer->lq_updated + sys.lora_cycle * NODES_MAX))
+            {
+                uint16_t diff = peer->updated - peer->lq_updated;
+                peer->lq = constrain(peer->lq_tick * 4.2 * sys.lora_cycle / diff, 0, 4);
+                peer->lq_updated = millis();
+                peer->lq_tick = 0;
+            }
+            if (peer->id > 0 && ((millis() - peer->updated) > LORA_PEER_TIMEOUT))
+            {
+                peer->lost = 2;
+            }
+            
+            // Set the distance, direction, and relative altitude of valid peers
+            if (loc.fixType != GNSS_FIX_TYPE_NONE && peer->id > 0 && !peer->lost)
+            {
+                peer_t *peer = &peers[i];
+
+                GNSSLocation peerLocation{.lat = peer->gps.lat * 10000000.0, .lon = peer->gps.lon * 10000000.0, .alt = (double)peer->gps.alt};
+                peer->distance = gnssManager->horizontalDistanceTo(peerLocation);
+                peer->direction = gnssManager->courseTo(peerLocation);
+                peer->relalt = peerLocation.alt - loc.alt;
+            }
+        }
+        lastUpdate = millis();
+    }
 }
 
 uint8_t PeerManager::count(bool active)
@@ -55,7 +94,8 @@ uint8_t PeerManager::count(bool active)
         // If active, don't count lost peers
         if (peers[i].id > 0)
         {
-            if (active && peers[i].lost > 0) {
+            if (active && peers[i].lost > 0)
+            {
                 continue;
             }
             n++;
@@ -71,23 +111,29 @@ uint8_t PeerManager::count_active()
 
 void PeerManager::statusJson(JsonDocument *doc)
 {
+    (*doc)["myID"] = curr.id;
     JsonArray peerArray = doc->createNestedArray("peers");
     for (uint8_t i = 0; i < NODES_MAX; i++)
     {
-        if (getPeer(i)->id != 0) {
+        if (getPeer(i)->id != 0)
+        {
             peer_t *peer = getPeer(i);
             JsonObject o = peerArray.createNestedObject();
             o["id"] = peer_slotname[peer->id];
             // TODO: get curr id from SystemManager
-            //o["self"] = peer->id == curr.id;
+            // o["self"] = peer->id == curr.id;
             o["name"] = peer->name;
             o["updated"] = peer->updated;
+            o["age"] = millis() - peer->updated;
             o["lost"] = peer->lost;
             o["lat"] = peer->gps.lat;
             o["lon"] = peer->gps.lon;
             o["alt"] = peer->gps.alt;
             o["groundSpeed"] = peer->gps.groundSpeed;
             o["groundCourse"] = peer->gps.groundCourse;
+            o["distance"] = peer->distance;
+            o["courseTo"] = peer->direction;
+            o["relativeAltitude"] = peer->relalt;
             o["packetsReceived"] = peer->packetsReceived;
         }
     }

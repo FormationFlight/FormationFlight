@@ -2,6 +2,7 @@
 #include "RadioManager.h"
 #include "main.h"
 #include "../Helpers.h"
+#include "../ConfigStrings.h"
 #ifdef HAS_LORA
 #include <RadioLib.h>
 #endif
@@ -176,8 +177,8 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         if (cs1 < cs2)
         { // Pick another slot
             sprintf(sys.message, "%s", "ID CONFLICT");
-            DBGLN("id conflict");
             pick_id();
+            DBGF("Received packet with our own ID %s, moving to %s\n", peer_slotname[air_0.id], peer_slotname[curr.id]);
             resync_tx_slot(cfg.lora_timing_delay);
         }
     }

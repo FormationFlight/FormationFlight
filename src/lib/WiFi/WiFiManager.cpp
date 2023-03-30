@@ -12,6 +12,8 @@
 #include "../Radios/RadioManager.h"
 #include "../Peers/PeerManager.h"
 #include "../GNSS/GNSSManager.h"
+#include "../Power/PowerManager.h"
+#include "../Statistics/StatsManager.h"
 
 WiFiManager::WiFiManager()
 {
@@ -33,6 +35,7 @@ WiFiManager::WiFiManager()
         request->send(200, "text/plain", "OK");
         ESP.deepSleep(UINT32_MAX);
     });
+    // RadioManager
     server->on("/radiomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<512> doc;
         RadioManager::getSingleton()->statusJson(&doc);
@@ -50,6 +53,7 @@ WiFiManager::WiFiManager()
         RadioManager::getSingleton()->setRadioStatus(index, status);
         request->send(200, "text/plain", "OK");
     });
+    // PeerManager
     server->on("/peermanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;
         PeerManager::getSingleton()->statusJson(&doc);
@@ -57,9 +61,26 @@ WiFiManager::WiFiManager()
         serializeJson(doc, *response);
         request->send(response);
     });
+    // GNSSManager
     server->on("/gnssmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;
         GNSSManager::getSingleton()->statusJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
+    // PowerManager
+    server->on("/powermanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<1024> doc;
+        PowerManager::getSingleton()->statusJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
+    // StatsManager
+        server->on("/statsmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<1024> doc;
+        StatsManager::getSingleton()->statusJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);

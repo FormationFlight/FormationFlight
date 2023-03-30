@@ -80,8 +80,8 @@
 
 #define LORA_CYCLE_SCAN 5000 // 5s
 #define LORA_PEER_TIMEOUT 6000 // 6s
-#define LORA_DRIFT_THRESHOLD LORA_M3_SLOT_SPACING / LORA_M3_NODES // Min for action
-#define LORA_DRIFT_CORRECTION LORA_M3_SLOT_SPACING / (LORA_M3_NODES / 2) // Max to correct
+#define LORA_DRIFT_THRESHOLD 4 // Min for action
+#define LORA_DRIFT_CORRECTION 12 // Max to correct
 
 // --------- IO AND DISPLAY
 
@@ -221,22 +221,7 @@ struct system_t {
     char message[20];
 };
 
-struct stats_t {
-    uint32_t timer_begin;
-    uint32_t timer_end;
-
-    float packets_total;
-    uint32_t packets_received;
-    uint8_t percent_received;
-
-    uint16_t last_tx_duration;
-    uint16_t last_rx_duration;
-    uint16_t last_msp_duration;
-    uint16_t last_oled_duration;
-};
-
 extern config_t cfg;
 extern system_t sys;
-extern stats_t stats;
 extern curr_t curr;
 #endif

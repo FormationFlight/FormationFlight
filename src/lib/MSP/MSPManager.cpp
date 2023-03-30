@@ -40,9 +40,10 @@ void MSPManager::getName(char *name, size_t length)
 
 MSPHost MSPManager::getFCVariant()
 {
-    char variant[5];
-    msp->request(MSP_FC_VARIANT, variant, sizeof(variant));
-    
+    char variant[5] = "";
+    if (variant[0] != '\0') {
+        msp->request(MSP_FC_VARIANT, variant, sizeof(variant));
+    }
     if (strncmp(variant, "INAV", 4) == 0)
     {
         return HOST_INAV;
@@ -89,9 +90,8 @@ msp_raw_gps_t MSPManager::getLocation()
 {
     msp_raw_gps_t gps;
     if (!msp->request(MSP_RAW_GPS, &gps, sizeof(gps))) {
-        // Force fixType to 0
-        gps.fixType = 0;
-        return gps;
+        // Force the response to 0
+        memset(&gps, 0, sizeof(gps));
     }
     return gps;
 }

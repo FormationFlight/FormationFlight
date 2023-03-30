@@ -15,9 +15,13 @@
 #include <main.h>
 #include <lib/Helpers.h>
 #include <lib/ConfigHandler.h>
+// Power
+#include <lib/Power/PowerManager.h>
+// Internals
 #include <lib/CryptoManager.h>
 #include <lib/Peers/PeerManager.h>
 #include <lib/MSP/MSPManager.h>
+#include <lib/Statistics/StatsManager.h>
 // GNSS
 #include <lib/GNSS/GNSSManager.h>
 #include <lib/GNSS/MSP_GNSS.h>
@@ -37,7 +41,6 @@
 
 config_t cfg;
 system_t sys;
-stats_t stats;
 curr_t curr;
 
 // -------- INTERRUPTS
@@ -111,6 +114,15 @@ void setup()
 
     delay(START_DELAY);
 
+    // Create PowerManager
+    DBGLN("[main] start PowerManager");
+    PowerManager *powerManager = PowerManager::getSingleton();
+    powerManager->enablePeripherals();
+
+    // Create StatsManager
+    DBGLN("[main] start StatsManager");
+    StatsManager::getSingleton();
+
     // Create PeerManager
     DBGLN("[main] start PeerManager");
     PeerManager *peerManager = PeerManager::getSingleton();
@@ -120,7 +132,7 @@ void setup()
     DBGLN("[main] start CryptoManager");
     CryptoManager *cryptoManager = CryptoManager::getSingleton();
     cryptoManager->setEnabled(false);
-    
+
     // Create WiFiManager
     DBGLN("[main] start WiFiManager");
     WiFiManager::getSingleton();
@@ -150,8 +162,8 @@ void setup()
     DBGLN("[main] start RadioManager");
     RadioManager *radioManager = RadioManager::getSingleton();
 
-    //DBGLN("[main] RadioManager::addRadio ESPNOW");
-    //radioManager->addRadio(ESPNOW::getSingleton());
+    // DBGLN("[main] RadioManager::addRadio ESPNOW");
+    // radioManager->addRadio(ESPNOW::getSingleton());
 
 #ifdef LORA_FAMILY_SX128X
     DBGLN("[main] RadioManager::addRadio LoRa_SX128X");
@@ -177,12 +189,23 @@ void setup()
 void loop()
 {
     sys.now = millis();
+    // Setup timers
+    StatsManager *statsManager = StatsManager::getSingleton();
+    statsManager->startEpoch();
+    // Run our periodic system tasks
+    statsManager->startTimer();
     // Run our periodic radio tasks
     RadioManager::getSingleton()->loop();
+    statsManager->storeTimerAndRestart(STATS_KEY_RADIOMANAGER_LOOPTIME_MS);
     // Periodic WiFi Tasks
     WiFiManager::getSingleton()->loop();
+    statsManager->storeTimerAndRestart(STATS_KEY_WIFIMANAGER_LOOPTIME_MS);
     // Periodic peer tasks
     PeerManager::getSingleton()->loop();
+    statsManager->storeTimerAndRestart(STATS_KEY_PEERMANAGER_LOOPTIME_MS);
+    // Periodic GNSS tasks
+    GNSSManager::getSingleton()->loop();
+    statsManager->storeTimerAndRestart(STATS_KEY_GNSSMANAGER_LOOPTIME_MS);
 
     // ---------------------- IO BUTTON
 
@@ -322,9 +345,6 @@ void loop()
         sys.stats_updated = sys.next_tx + sys.lora_cycle - 15;
         sys.pps = 0;
         sys.ppsc = 0;
-        stats.packets_total = 0;
-        stats.packets_received = 0;
-        stats.percent_received = 0;
         digitalWrite(IO_LED_PIN, LOW);
         sys.phase = MODE_OTA_RX;
     }
@@ -354,13 +374,15 @@ void loop()
 
     if (sys.phase == MODE_OTA_TX)
     {
-        if (curr.id != 0) {
+        if (curr.id != 0)
+        {
             sys.last_tx = millis();
             air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
-            //DBGLN("[main] begin transmit");
+            statsManager->startTimer();
+            // DBGLN("[main] begin transmit");
             RadioManager::getSingleton()->transmit(&packet);
-            //DBGLN("[main] end transmit");
-            stats.last_tx_duration = millis() - sys.last_tx;
+            statsManager->storeTimerAndRestart(STATS_KEY_OTA_SENDTIME_MS);
+            // DBGLN("[main] end transmit");
         }
 
         // Drift correction
@@ -377,6 +399,7 @@ void loop()
                 {
                     sys.drift_correction = constrain(sys.drift, -LORA_DRIFT_CORRECTION, LORA_DRIFT_CORRECTION);
                     sys.next_tx -= sys.drift_correction;
+                    DBGF("[main] Adjusting timing by %d\n", sys.drift_correction);
                     sprintf(sys.message, "%s %3d", "TIMING ADJUST", -sys.drift_correction);
                 }
             }
@@ -391,7 +414,7 @@ void loop()
 
     if ((sys.now > sys.display_updated + DISPLAY_CYCLE) && sys.display_enable && (sys.phase > MODE_OTA_SYNC) && cfg.display_enable)
     {
-        stats.timer_begin = millis();
+        statsManager->startTimer();
 
         if (PeerManager::getSingleton()->count() == 0 && sys.display_page == 1)
         {
@@ -406,7 +429,7 @@ void loop()
 
         display_draw_status(&sys);
         sys.message[0] = 0;
-        stats.last_oled_duration = millis() - stats.timer_begin;
+        statsManager->storeTimerAndRestart(STATS_KEY_DISPLAY_UPDATETIME_MS);
         sys.display_updated = sys.now;
     }
 
@@ -429,11 +452,10 @@ void loop()
             }
         }
 
-        stats.timer_begin = millis();
+        statsManager->startTimer();
         // ----------------Send MSP to FC
         if (sys.ota_slot == 0)
         {
-            //DBGLN("[main] sending msp");
             for (int i = 0; i < cfg.lora_nodes; i++)
             {
                 peer_t *peer = PeerManager::getSingleton()->getPeer(i);
@@ -448,60 +470,11 @@ void loop()
 #endif
                 }
             }
-            //DBGLN("[main] finished sending msp");
         }
-        stats.last_msp_duration = millis() - stats.timer_begin;
+        statsManager->storeTimerAndRestart(STATS_KEY_MSP_SENDTIME_MS);
+
         sys.msp_next_cycle += cfg.slot_spacing;
         sys.ota_slot++;
-    }
-
-    // ---------------------- SERIAL CONFIG CHANNEL
-    // handleConfig();
-
-    // ---------------------- STATISTICS & IO
-
-    if ((sys.now > (sys.cycle_stats + sys.stats_updated)) && (sys.phase > MODE_OTA_SYNC))
-    {
-        sys.pps = sys.ppsc;
-        sys.ppsc = 0;
-
-        // Timed-out peers + LQ
-        // TODO: Move to PeerManager
-
-        for (int i = 0; i < cfg.lora_nodes; i++)
-        {
-            peer_t *peer = PeerManager::getSingleton()->getPeer(i);
-            if (sys.now > (peer->lq_updated + sys.lora_cycle * 4))
-            {
-                uint16_t diff = peer->updated - peer->lq_updated;
-                peer->lq = constrain(peer->lq_tick * 4.2 * sys.lora_cycle / diff, 0, 4);
-                peer->lq_updated = sys.now;
-                peer->lq_tick = 0;
-            }
-            if (peer->id > 0 && ((sys.now - peer->updated) > LORA_PEER_TIMEOUT))
-            {
-                peer->lost = 2;
-            }
-        }
-
-        stats.packets_total += PeerManager::getSingleton()->count_active() * sys.cycle_stats / sys.lora_cycle;
-        stats.packets_received += sys.pps;
-        stats.percent_received = (stats.packets_received > 0) ? constrain(100 * stats.packets_received / stats.packets_total, 0, 100) : 0;
-
-// Screen management
-#ifdef HAS_OLED
-        if (!curr.state && !sys.display_enable)
-        { // Aircraft is disarmed = Turning on the OLED
-            display_off();
-            sys.display_enable = 1;
-        }
-        else if (curr.state && sys.display_enable)
-        { // Aircraft is armed = Turning off the OLED
-            display_on;
-            sys.display_enable = 0;
-        }
-#endif
-        sys.stats_updated = sys.now;
     }
 
     // ---------------------- LED blinker

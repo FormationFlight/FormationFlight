@@ -9,6 +9,8 @@
 #include "Helpers.h"
 #include "Peers/PeerManager.h"
 #include "MSP/MSPManager.h"
+#include "CryptoManager.h"
+#include "Statistics/StatsManager.h"
 
 #ifdef HAS_OLED
 SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);
@@ -47,19 +49,19 @@ void display_draw_status(system_t *sys)
         display.drawString(125, 11, String(peer_slotname[curr.id]));
         display.setFont(ArialMT_Plain_10);
         display.drawString(126, 29, "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ ");
-        display.drawString(107, 44, String(stats.percent_received));
-        display.drawString(107, 54, String(sys->last_rssi));
+#ifdef LORA_POWER
+        display.drawString(125, 44, "+" + String(LORA_POWER) + "dB");
+#endif
+        display.drawString(125, 54, String(CryptoManager::getSingleton()->getEnabled() ? "ENCR" : "OPEN"));
         display.setTextAlignment(TEXT_ALIGN_CENTER);
         display.drawString(64, 0, String(sys->message));
         display.setTextAlignment(TEXT_ALIGN_LEFT);
         display.drawString(55, 12, String(curr.name));
-        display.drawString(27, 23, "SAT");
-        display.drawString(108, 44, "%E");
-        display.drawString(35, 44, String(sys->pps) + "p/s");
-        display.drawString(109, 54, "dB");
+        display.drawString(27, 23, GNSSManager::getSingleton()->getCurrentProviderNameShort());
+        // display.drawString(35, 44, String(sys->pps) + "p/s");
         display.drawString(55, 23, String(host_name[curr.host]));
-        display.drawString(15, 44, "/" + String(cfg.lora_nodes));
-        display.drawString(15, 54, String(loramode_name[cfg.lora_mode]));
+        display.drawString(15, 44, "/ " + String(NODES_MAX));
+        // display.drawString(15, 54, String(loramode_name[cfg.lora_mode]));
 
         if (loc.fixType == GNSS_FIX_TYPE_2D)
             display.drawString(27, 12, "2D");
@@ -94,7 +96,7 @@ void display_draw_status(system_t *sys)
             }
         }
 
-        int rect_l = stats.last_tx_duration * 128 / sys->lora_cycle;
+        int rect_l = StatsManager::getSingleton()->getLatest(STATS_KEY_OTA_SENDTIME_MS) * 128 / sys->lora_cycle;
 
         for (int i = 0; i < cfg.lora_nodes; i++)
         {
@@ -147,7 +149,7 @@ void display_draw_status(system_t *sys)
 
         display.setFont(ArialMT_Plain_10);
         display.setTextAlignment(TEXT_ALIGN_LEFT);
-        display.drawString(0, 0, "LORA TX");
+        display.drawString(0, 0, "OTA");
         display.drawString(0, 10, "MSP");
         display.drawString(0, 20, "OLED");
         display.drawString(0, 30, "CYCLE");
@@ -162,9 +164,16 @@ void display_draw_status(system_t *sys)
         display.drawString(112, 50, "s");
 
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
-        display.drawString(111, 0, String(stats.last_tx_duration));
-        display.drawString(111, 10, String(stats.last_msp_duration));
-        display.drawString(111, 20, String(stats.last_oled_duration));
+        StatsManager *statsManager = StatsManager::getSingleton();
+        display.drawString(111, 0,
+                           String(statsManager->getAverage(STATS_KEY_OTA_SENDTIME_MS)) + "/" +
+                               String(statsManager->getHighest(STATS_KEY_OTA_SENDTIME_MS)));
+        display.drawString(111, 10,
+                           String(statsManager->getAverage(STATS_KEY_MSP_SENDTIME_MS)) + "/" +
+                               String(statsManager->getHighest(STATS_KEY_MSP_SENDTIME_MS)));
+        display.drawString(111, 20,
+                           String(statsManager->getAverage(STATS_KEY_DISPLAY_UPDATETIME_MS)) + "/" +
+                               String(statsManager->getHighest(STATS_KEY_DISPLAY_UPDATETIME_MS)));
         display.drawString(111, 30, String(sys->lora_cycle));
         display.drawString(111, 40, String(cfg.lora_nodes) + " x " + String(cfg.slot_spacing));
         display.drawString(111, 50, String((int)millis() / 1000));
@@ -276,10 +285,6 @@ void display_draw_status(system_t *sys)
                 double lat2 = (double)peer->gps_rec.lat / 10000000;
                 double lon2 = (double)peer->gps_rec.lon / 10000000;
 
-                peer->distance = gpsDistanceBetween(lat1, lon1, lat2, lon2);
-                peer->direction = gpsCourseTo(lat1, lon1, lat2, lon2);
-                peer->relalt = peer->gps_rec.alt - loc.alt;
-
                 display.drawString(0, 54, "R " + String(peer->relalt) + "m");
                 display.drawString(50, 54, "B " + String(peer->direction) + "°");
                 display.setTextAlignment(TEXT_ALIGN_RIGHT);
@@ -312,8 +317,8 @@ void display_draw_intro()
     display.clear();
     display.setFont(ArialMT_Plain_16);
     display.setTextAlignment(TEXT_ALIGN_LEFT);
-    //display.drawString(0, 0, "ESP32");
-    display.drawString(0, 17, PRODUCT_NAME);
+    // display.drawString(0, 0, "ESP32");
+    display.drawString(0, 21, PRODUCT_NAME);
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
     display.drawString(127, 0, String(VERSION));
     display.setTextAlignment(TEXT_ALIGN_LEFT);

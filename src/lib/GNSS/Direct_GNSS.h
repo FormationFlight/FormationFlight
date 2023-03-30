@@ -13,9 +13,12 @@ public:
     GNSSLocation getLocation();
     String getStatusString();
     void loop();
+    String getName();
+    void fix();
 private:
     TinyGPSPlus *gps;
     Stream *stream;
+    HardwareSerial *gpsSerial;
     unsigned long lastUpdate = 0;
-    uint32_t bytesProcessed = 0;
+    uint32_t linesProcessed = 0;
 };

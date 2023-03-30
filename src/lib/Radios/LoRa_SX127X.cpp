@@ -32,7 +32,6 @@ void LoRa_SX127X::transmit(air_type0_t *air_0)
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
     stateTransmitting = true;
-    DBGLN("t");
     radio->transmit(buf, sizeof(air_type0_t));
     stateTransmitting = false;
     packetsTransmitted++;
@@ -75,7 +74,6 @@ void LoRa_SX127X::flagPacketReceived()
 
 void LoRa_SX127X::receive()
 {
-    DBGLN("rx");
     uint8_t buf[sizeof(air_type0_t)];
     radio->readData(buf, sizeof(air_type0_t));
     radio->startReceive(sizeof(air_type0_t));

@@ -31,6 +31,7 @@ public:
     virtual GNSSLocation getLocation();
     virtual void loop();
     virtual String getStatusString();
+    virtual String getName();
     bool getEnabled() {
         return enabled;
     }
@@ -56,9 +57,14 @@ public:
     void setProviderStatus(uint8_t index, bool status);
     void addListener(GNSSListener *listener);
     GNSSLocation getLocation();
+    // Return the 3-character name of the current GPS provider
+    String getCurrentProviderNameShort();
     void loop();
     void statusJson(JsonDocument *doc);
+    double horizontalDistanceTo(GNSSLocation b);
+    int16_t courseTo(GNSSLocation b);
 private:
     GNSSProvider* providers[GNSS_MAX_PROVIDERS] = {nullptr};
+    uint8_t currentProvider = 0;
     GNSSListener* listeners[GNSS_MAX_LISTENERS] = {nullptr};
 };

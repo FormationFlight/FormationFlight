@@ -8,6 +8,12 @@ MSP_GNSS::MSP_GNSS()
 
 void MSP_GNSS::loop()
 {
+    // Skip requesting MSP from non-capable hosts
+    MSPHost host = MSPManager::getSingleton()->getFCVariant();
+    if (!MSPManager::getSingleton()->hostTXCapable(host)) {
+        return;
+    }
+    // Don't update every loop
     if (millis() - lastUpdate < UPDATE_LOOP_DELAY_MS) {
         return;
     }
@@ -26,6 +32,7 @@ void MSP_GNSS::update(GNSSLocation loc)
 GNSSLocation MSP_GNSS::getLocation()
 {
     GNSSLocation loc;
+    memset(&loc, 0, sizeof(loc));
     loc.alt = rawLocation.alt;
     loc.fixType = (GNSS_FIX_TYPE)rawLocation.fixType;
     loc.groundCourse = rawLocation.groundCourse / 10;
@@ -45,5 +52,9 @@ String MSP_GNSS::getStatusString()
     char buf[128];
     sprintf(buf, "MSP GNSS [%dSAT/%uUPD] (%f,%f) (%fm)", loc.numSat, locationUpdates, loc.lat, loc.lon, loc.alt);
     return String(buf);
+}
 
+String MSP_GNSS::getName()
+{
+    return String("MSP");
 }
