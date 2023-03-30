@@ -35,8 +35,6 @@
 #include <lib/Radios/LoRa_SX128X.h>
 #include <lib/Radios/LoRa_SX127X.h>
 
-#define DEBUG 1
-
 // -------- VARS
 
 config_t cfg;
@@ -88,7 +86,7 @@ void setup()
     Serial.begin(921600);
 #endif
     DBGLN("[main] start");
-    DBGF("%s version %s UID %s\n", PRODUCT_NAME, VERSION, generate_id());
+    DBGF("%s version %s UID %s\n", PRODUCT_NAME, VERSION, generate_id().c_str());
 
     sys.phase = MODE_START;
     sys.forcereset = 0;
@@ -173,6 +171,8 @@ void setup()
     DBGLN("[main] RadioManager::addRadio LoRa_SX127X");
     radioManager->addRadio(LoRa_SX127X::getSingleton());
 #endif
+
+    DBGLN("[main] init complete");
 
     if (cfg.display_enable)
     {
@@ -379,7 +379,7 @@ void loop()
             sys.last_tx = millis();
             air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
             statsManager->startTimer();
-            // DBGLN("[main] begin transmit");
+            //DBGLN("[main] begin transmit");
             RadioManager::getSingleton()->transmit(&packet);
             statsManager->storeTimerAndRestart(STATS_KEY_OTA_SENDTIME_MS);
             // DBGLN("[main] end transmit");
@@ -400,7 +400,7 @@ void loop()
                     sys.drift_correction = constrain(sys.drift, -LORA_DRIFT_CORRECTION, LORA_DRIFT_CORRECTION);
                     sys.next_tx -= sys.drift_correction;
                     DBGF("[main] Adjusting timing by %d\n", sys.drift_correction);
-                    sprintf(sys.message, "%s %3d", "TIMING ADJUST", -sys.drift_correction);
+                    sprintf(sys.message, "%s", "TIMING ADJUST");
                 }
             }
         }

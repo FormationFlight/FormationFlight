@@ -31,9 +31,7 @@ void LoRa_SX127X::transmit(air_type0_t *air_0)
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
-    stateTransmitting = true;
     radio->transmit(buf, sizeof(air_type0_t));
-    stateTransmitting = false;
     packetsTransmitted++;
     lastTransmitTime = millis();
     radio->startReceive(sizeof(air_type0_t));
@@ -41,7 +39,11 @@ void LoRa_SX127X::transmit(air_type0_t *air_0)
 
 int LoRa_SX127X::begin() {
 #ifdef LORA_FAMILY_SX127X
+#ifdef PLATFORM_ESP32
     SPI.begin(LORA_PIN_SCK, LORA_PIN_MISO, LORA_PIN_MOSI, LORA_PIN_CS);
+#else
+    SPI.begin();
+#endif
     radio = new SX1276(new Module(LORA_PIN_CS, LORA_PIN_DIO0, LORA_PIN_RST));
     radio->reset();
     //Serial.printf("Radio version: %d\n", radio->getChipVersion());
