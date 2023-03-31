@@ -34,7 +34,10 @@ void LoRa_SX128X::transmit(air_type0_t *air_0)
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
-    radio->transmit(buf, sizeof(air_type0_t));
+    int state = radio->transmit(buf, sizeof(air_type0_t));
+    if (state != RADIOLIB_ERR_NONE) {
+        DBGF("[SX128X]: TX Status %d\n", state);
+    }
     packetsTransmitted++;
     lastTransmitTime = millis();
     radio->startReceive();
@@ -74,18 +77,12 @@ void LoRa_SX128X::flagPacketReceived()
 void LoRa_SX128X::receive()
 {
     uint8_t buf[sizeof(air_type0_t)];
-    memset(buf, 0, sizeof(buf));
+    memset(buf, 0xaa, sizeof(buf));
     int state = radio->readData(buf, sizeof(air_type0_t));
-    Serial.println(state);
-    WiFiUDP u;
-    u.begin(1234);
-    u.beginPacket("255.255.255.255", 1234);
+    DBGF("LEN: %d\n", radio->getPacketLength());
     for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
         Serial.print(buf[i], HEX);
-        u.write(buf[i]);
-    }
-    u.endPacket();
-    
+    }    
     Serial.println();
     radio->startReceive();
     CryptoManager::getSingleton()->decrypt(buf, sizeof(air_type0_t));

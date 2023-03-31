@@ -97,8 +97,9 @@ void setup()
 
     sys.lora_cycle = cfg.lora_nodes * cfg.slot_spacing;
     sys.cycle_stats = sys.lora_cycle * 2;
-
+#ifdef IO_LED_PIN
     pinMode(IO_LED_PIN, OUTPUT);
+#endif
     sys.io_led_blink = 0;
 #ifdef PIN_BUTTON
     pinMode(PIN_BUTTON, INPUT);
@@ -345,7 +346,9 @@ void loop()
         sys.stats_updated = sys.next_tx + sys.lora_cycle - 15;
         sys.pps = 0;
         sys.ppsc = 0;
+#ifdef IO_LED_PIN
         digitalWrite(IO_LED_PIN, LOW);
+#endif
         sys.phase = MODE_OTA_RX;
     }
 
@@ -478,7 +481,7 @@ void loop()
     }
 
     // ---------------------- LED blinker
-
+#ifdef IO_LED_PIN
     if (sys.ota_nonce % 6 == 0)
     {
         if (PeerManager::getSingleton()->count_active() > 0)
@@ -509,4 +512,5 @@ void loop()
             sys.io_led_blink = 0;
         }
     }
+#endif
 }
