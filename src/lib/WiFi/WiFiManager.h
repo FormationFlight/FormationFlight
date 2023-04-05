@@ -2,11 +2,18 @@
 
 #include <ESPAsyncWebServer.h>
 
-class WiFiManager {
-    public:
+class WiFiManager
+{
+public:
     WiFiManager();
-    static WiFiManager* getSingleton();
+    static WiFiManager *getSingleton();
     void loop();
-    private:
+    void setOTAActive();
+    bool getOTAActive();
+
+private:
     AsyncWebServer *server;
+    bool otaActive;
 };
+
+void OnOTAStart();

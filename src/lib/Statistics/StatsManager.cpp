@@ -1,13 +1,13 @@
 #include "StatsManager.h"
 
 const char* keyFriendlyNames[StatsKeyCount] = {
-    "radiomanager_looptime_ms",
-    "wifimanager_looptime_ms",
-    "peermanager_looptime_ms",
-    "gnssmanager_looptime_ms",
-    "display_updatetime_ms",
-    "msp_sendtime_ms",
-    "ota_sendtime_ms",
+    "radiomanager_looptime_us",
+    "wifimanager_looptime_us",
+    "peermanager_looptime_us",
+    "gnssmanager_looptime_us",
+    "display_updatetime_us",
+    "msp_sendtime_us",
+    "ota_sendtime_us",
 };
 
 StatsManager::StatsManager()
@@ -31,12 +31,12 @@ void StatsManager::setValue(StatsKey key, unsigned long value)
 }
 void StatsManager::storeTimerAndRestart(StatsKey key)
 {
-    setValue(key, millis() - runTimer);
+    setValue(key, micros() - runTimer);
     startTimer();
 }
 void StatsManager::startTimer()
 {
-    runTimer = millis();
+    runTimer = micros();
 }
 void StatsManager::startEpoch()
 {
@@ -44,7 +44,7 @@ void StatsManager::startEpoch()
     {
         for (uint8_t j = STATS_SAMPLES_COUNT - 1; j > 0; j--)
         {
-            values[i][j + 1] = values[i][j];
+            values[i][j] = values[i][j - 1];
         }
     }
 }

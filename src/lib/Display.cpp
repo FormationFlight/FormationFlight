@@ -96,7 +96,7 @@ void display_draw_status(system_t *sys)
             }
         }
 
-        int rect_l = StatsManager::getSingleton()->getLatest(STATS_KEY_OTA_SENDTIME_MS) * 128 / sys->lora_cycle;
+        int rect_l = StatsManager::getSingleton()->getLatest(STATS_KEY_OTA_SENDTIME_US) * 128 / sys->lora_cycle;
 
         for (int i = 0; i < cfg.lora_nodes; i++)
         {
@@ -156,9 +156,9 @@ void display_draw_status(system_t *sys)
         display.drawString(0, 40, "SLOTS");
         display.drawString(0, 50, "UPTIME");
 
-        display.drawString(112, 0, "ms");
-        display.drawString(112, 10, "ms");
-        display.drawString(112, 20, "ms");
+        display.drawString(112, 0, "us");
+        display.drawString(112, 10, "us");
+        display.drawString(112, 20, "us");
         display.drawString(112, 30, "ms");
         display.drawString(112, 40, "ms");
         display.drawString(112, 50, "s");
@@ -166,14 +166,14 @@ void display_draw_status(system_t *sys)
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
         StatsManager *statsManager = StatsManager::getSingleton();
         display.drawString(111, 0,
-                           String(statsManager->getAverage(STATS_KEY_OTA_SENDTIME_MS)) + "/" +
-                               String(statsManager->getHighest(STATS_KEY_OTA_SENDTIME_MS)));
+                           String(statsManager->getAverage(STATS_KEY_OTA_SENDTIME_US)) + "/" +
+                               String(statsManager->getHighest(STATS_KEY_OTA_SENDTIME_US)));
         display.drawString(111, 10,
-                           String(statsManager->getAverage(STATS_KEY_MSP_SENDTIME_MS)) + "/" +
-                               String(statsManager->getHighest(STATS_KEY_MSP_SENDTIME_MS)));
+                           String(statsManager->getAverage(STATS_KEY_MSP_SENDTIME_US)) + "/" +
+                               String(statsManager->getHighest(STATS_KEY_MSP_SENDTIME_US)));
         display.drawString(111, 20,
-                           String(statsManager->getAverage(STATS_KEY_DISPLAY_UPDATETIME_MS)) + "/" +
-                               String(statsManager->getHighest(STATS_KEY_DISPLAY_UPDATETIME_MS)));
+                           String(statsManager->getAverage(STATS_KEY_DISPLAY_UPDATETIME_US)) + "/" +
+                               String(statsManager->getHighest(STATS_KEY_DISPLAY_UPDATETIME_US)));
         display.drawString(111, 30, String(sys->lora_cycle));
         display.drawString(111, 40, String(cfg.lora_nodes) + " x " + String(cfg.slot_spacing));
         display.drawString(111, 50, String((int)millis() / 1000));

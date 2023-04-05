@@ -4,6 +4,10 @@
 
 #define MAX_RADIOS 4
 
+enum PACKETTYPE {
+    PACKET_TYPE_RADAR_POSITION = 0
+};
+
 enum RadioState
 {
     RADIO_STATE_DISABLED,

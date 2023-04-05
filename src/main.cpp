@@ -163,6 +163,7 @@ void setup()
 
     DBGLN("[main] RadioManager::addRadio ESPNOW");
     radioManager->addRadio(ESPNOW::getSingleton());
+    ESPNOW::getSingleton()->setEnabled(false);
 
 #ifdef LORA_FAMILY_SX128X
     DBGLN("[main] RadioManager::addRadio LoRa_SX128X");
@@ -189,6 +190,10 @@ void setup()
 
 void loop()
 {
+    if (WiFiManager::getSingleton()->getOTAActive()) {
+        WiFiManager::getSingleton()->loop();
+        return;
+    }
     sys.now = millis();
     // Setup timers
     StatsManager *statsManager = StatsManager::getSingleton();
@@ -197,16 +202,16 @@ void loop()
     statsManager->startTimer();
     // Run our periodic radio tasks
     RadioManager::getSingleton()->loop();
-    statsManager->storeTimerAndRestart(STATS_KEY_RADIOMANAGER_LOOPTIME_MS);
+    statsManager->storeTimerAndRestart(STATS_KEY_RADIOMANAGER_LOOPTIME_US);
     // Periodic WiFi Tasks
     WiFiManager::getSingleton()->loop();
-    statsManager->storeTimerAndRestart(STATS_KEY_WIFIMANAGER_LOOPTIME_MS);
+    statsManager->storeTimerAndRestart(STATS_KEY_WIFIMANAGER_LOOPTIME_US);
     // Periodic peer tasks
     PeerManager::getSingleton()->loop();
-    statsManager->storeTimerAndRestart(STATS_KEY_PEERMANAGER_LOOPTIME_MS);
+    statsManager->storeTimerAndRestart(STATS_KEY_PEERMANAGER_LOOPTIME_US);
     // Periodic GNSS tasks
     GNSSManager::getSingleton()->loop();
-    statsManager->storeTimerAndRestart(STATS_KEY_GNSSMANAGER_LOOPTIME_MS);
+    statsManager->storeTimerAndRestart(STATS_KEY_GNSSMANAGER_LOOPTIME_US);
 
     // ---------------------- IO BUTTON
 
@@ -384,7 +389,7 @@ void loop()
             statsManager->startTimer();
             //DBGLN("[main] begin transmit");
             RadioManager::getSingleton()->transmit(&packet);
-            statsManager->storeTimerAndRestart(STATS_KEY_OTA_SENDTIME_MS);
+            statsManager->storeTimerAndRestart(STATS_KEY_OTA_SENDTIME_US);
             // DBGLN("[main] end transmit");
         }
 
@@ -432,7 +437,7 @@ void loop()
 
         display_draw_status(&sys);
         sys.message[0] = 0;
-        statsManager->storeTimerAndRestart(STATS_KEY_DISPLAY_UPDATETIME_MS);
+        statsManager->storeTimerAndRestart(STATS_KEY_DISPLAY_UPDATETIME_US);
         sys.display_updated = sys.now;
     }
 
@@ -474,7 +479,7 @@ void loop()
                 }
             }
         }
-        statsManager->storeTimerAndRestart(STATS_KEY_MSP_SENDTIME_MS);
+        statsManager->storeTimerAndRestart(STATS_KEY_MSP_SENDTIME_US);
 
         sys.msp_next_cycle += cfg.slot_spacing;
         sys.ota_slot++;

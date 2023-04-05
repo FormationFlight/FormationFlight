@@ -34,6 +34,7 @@ WiFiManager::WiFiManager()
         StaticJsonDocument<512> doc;
         doc["target"] = CFG_TARGET_FULLNAME;
         doc["version"] = VERSION;
+        doc["heap"] = ESP.getFreeHeap();
 #ifdef LORA_BAND
         doc["lora_band"] = LORA_BAND;
 #endif
@@ -48,6 +49,10 @@ WiFiManager::WiFiManager()
     server->on("/system/shutdown", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
         ESP.deepSleep(UINT32_MAX);
+    });
+    server->on("/system/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "OK");
+        ESP.reset();
     });
     // RadioManager
     server->on("/radiomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -102,6 +107,7 @@ WiFiManager::WiFiManager()
     server->begin();
     // Setup OTA updates
     ArduinoOTA.begin();
+    ArduinoOTA.onStart(OnOTAStart);
 }
 
 WiFiManager *wifiManager = nullptr;
@@ -119,4 +125,19 @@ void WiFiManager::loop()
 {
     // OTA update loop
     ArduinoOTA.handle();
+}
+
+void OnOTAStart()
+{
+    WiFiManager::getSingleton()->setOTAActive();
+}
+
+bool WiFiManager::getOTAActive()
+{
+    return otaActive;
+}
+
+void WiFiManager::setOTAActive()
+{
+    otaActive = true;
 }

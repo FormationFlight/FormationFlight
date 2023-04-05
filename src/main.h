@@ -124,9 +124,6 @@ struct curr_t {
     uint8_t crc;
 };*/
 
-enum PACKETTYPE {
-    PACKET_TYPE_RADAR_POSITION = 0
-};
 
 // For encryption reasons, the packet must be 16 bytes or greater
 struct __attribute__((packed)) air_type0_t {
