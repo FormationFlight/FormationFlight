@@ -9,7 +9,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
     - id: set-targets
-      run: echo "targets=[$( (grep '\[env:.*UART\]' targets/*.ini) | sed 's/.*://' | sed s/.$// | egrep "(STLINK|UART)" | grep -v DEPRECATED | tr '\n' ','  | sed 's/,$/"\n/' | sed 's/,/","/'g | sed 's/^/"/')]" >> $GITHUB_OUTPUT
+      run: echo "targets=[$( (grep '\[env:.*UART\]' targets/*.ini) | sed 's/.*://' | sed s/.$// | egrep "(STLINK|UART)" | grep -v DEPRECATED | tr '\n' ','  | sed 's/,$/"\n/' | sed 's/,/","/'g | sed 's/^/"/')]" >> $GITHUB_OUTPUT && echo $GITHUB_OUTPUT
 
   build:
     needs: targets
