@@ -1,9 +1,6 @@
 #include "RadioManager.h"
 #include "LoRa_SX128X.h"
-#include "../CryptoManager.h"
-#include <WiFiUdp.h>
-
-#define RADIOLIB_GODMODE
+#include "../Cryptography/CryptoManager.h"
 
 void IRAM_ATTR onSX128XPacketReceive(void)
 {
@@ -26,11 +23,14 @@ LoRa_SX128X* LoRa_SX128X::getSingleton()
     return lora128XInstance;
 }
 
-void LoRa_SX128X::transmit(air_type0_t *air_0)
+void LoRa_SX128X::transmit(air_type0_t *air_0, uint8_t ota_nonce)
 {
     if (!getEnabled()) {
         return;
     }
+#ifdef LORA_PIN_ANT
+    digitalWrite(LORA_PIN_ANT, ota_nonce % 2);
+#endif
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
@@ -52,11 +52,11 @@ int LoRa_SX128X::begin() {
 #endif
     radio = new SX1281(new Module(LORA_PIN_CS, LORA_PIN_DIO, LORA_PIN_RST, LORA_PIN_BUSY));
     radio->begin(FREQUENCY, BANDWIDTH, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, LORA_POWER, PREAMBLE_LENGTH);
-    radio->setCRC(0);
+    //radio->setCRC(0);
     #ifdef LORA_PIN_RXEN
     radio->setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
     #endif
-    radio->implicitHeader(sizeof(air_type0_t));
+    //radio->implicitHeader(sizeof(air_type0_t));
     radio->setDio1Action(onSX128XPacketReceive);
     radio->startReceive();
 
@@ -69,7 +69,7 @@ void LoRa_SX128X::flagPacketReceived()
     if (!getEnabled()) {
         return;
     }
-    if (radio->getIrqStatus() & RADIOLIB_SX128X_IRQ_RX_DONE) {
+    if (radio->getIrqStatus() == RADIOLIB_SX128X_IRQ_RX_DONE) {
         packetReceived = true;
     }
 }
@@ -77,13 +77,12 @@ void LoRa_SX128X::flagPacketReceived()
 void LoRa_SX128X::receive()
 {
     uint8_t buf[sizeof(air_type0_t)];
-    memset(buf, 0xaa, sizeof(buf));
+    memset(buf, 0, sizeof(buf));
     int state = radio->readData(buf, sizeof(air_type0_t));
-    DBGF("LEN: %d\n", radio->getPacketLength());
-    for (uint8_t i = 0; i < sizeof(air_type0_t); i++) {
-        Serial.print(buf[i], HEX);
-    }    
-    Serial.println();
+    if (state != RADIOLIB_ERR_NONE) {
+        DBGF("[SX1280] readData result: %d\n", state);
+        return;
+    }
     radio->startReceive();
     CryptoManager::getSingleton()->decrypt(buf, sizeof(air_type0_t));
     handleReceiveCounters(RadioManager::getSingleton()->receive(buf, sizeof(air_type0_t), radio->getRSSI()));

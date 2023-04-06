@@ -5,6 +5,7 @@
 #include <AES.h>
 #include <XTS.h>
 #include <SHAKE.h>
+#include <ArduinoJson.h>
 
 #ifndef GROUPKEY
 #define GROUPKEY "opensesame"
@@ -20,6 +21,7 @@ public:
     static CryptoManager* getSingleton();
     bool getEnabled();
     void setEnabled(bool enabled);
+    void statusJson(JsonDocument *doc);
 private:
     XTSCommon *cipher;
     bool enabled = true;

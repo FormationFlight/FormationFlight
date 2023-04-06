@@ -4,13 +4,13 @@
 #endif
 #include "Display.h"
 #include "targets.h"
-#include "ConfigStrings.h"
+#include "../ConfigStrings.h"
 #include "pixel.h"
-#include "Helpers.h"
-#include "Peers/PeerManager.h"
-#include "MSP/MSPManager.h"
-#include "CryptoManager.h"
-#include "Statistics/StatsManager.h"
+#include "../Helpers.h"
+#include "../Peers/PeerManager.h"
+#include "../MSP/MSPManager.h"
+#include "../Cryptography/CryptoManager.h"
+#include "../Statistics/StatsManager.h"
 
 #ifdef HAS_OLED
 SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);

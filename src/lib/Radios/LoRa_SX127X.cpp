@@ -1,6 +1,6 @@
 #include "LoRa_SX127X.h"
 #include "RadioManager.h"
-#include "../CryptoManager.h"
+#include "../Cryptography/CryptoManager.h"
 
 void IRAM_ATTR onSX127XPacketReceive(void)
 {
@@ -23,11 +23,14 @@ LoRa_SX127X* LoRa_SX127X::getSingleton()
     return lora127XInstance;
 }
 
-void LoRa_SX127X::transmit(air_type0_t *air_0)
+void LoRa_SX127X::transmit(air_type0_t *air_0, uint8_t ota_nonce)
 {
     if (!getEnabled()) {
         return;
     }
+#ifdef LORA_PIN_ANT
+    digitalWrite(LORA_PIN_ANT, ota_nonce % 2);
+#endif
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
@@ -52,12 +55,12 @@ int LoRa_SX127X::begin() {
         Serial.printf("failed to init radio: %d\n", result);
         while (true) {}
     }
-    radio->setCRC(0);
+    //radio->setCRC(0);
     #ifdef LORA_PIN_RXEN
     radio->setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
     #endif
     radio->setCurrentLimit(0);
-    radio->implicitHeader(sizeof(air_type0_t));
+    //radio->implicitHeader(sizeof(air_type0_t));
     radio->setDio0Action(onSX127XPacketReceive);
     radio->startReceive(sizeof(air_type0_t));
 #endif

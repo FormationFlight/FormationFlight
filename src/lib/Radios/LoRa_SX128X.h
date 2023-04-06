@@ -20,7 +20,7 @@ public:
     static LoRa_SX128X *getSingleton();
 
     int begin();
-    void transmit(air_type0_t *air_0);
+    void transmit(air_type0_t *air_0, uint8_t ota_nonce);
     void receive();
     void flagPacketReceived();
     void loop();

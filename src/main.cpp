@@ -10,15 +10,13 @@
 #ifdef PLATFORM_ESP32
 #include <esp_system.h>
 #endif
-#include <lib/Display.h>
-#include <EEPROM.h>
 #include <main.h>
 #include <lib/Helpers.h>
 #include <lib/ConfigHandler.h>
 // Power
 #include <lib/Power/PowerManager.h>
 // Internals
-#include <lib/CryptoManager.h>
+#include <lib/Cryptography/CryptoManager.h>
 #include <lib/Peers/PeerManager.h>
 #include <lib/MSP/MSPManager.h>
 #include <lib/Statistics/StatsManager.h>
@@ -34,6 +32,9 @@
 #include <lib/Radios/ESPNOW.h>
 #include <lib/Radios/LoRa_SX128X.h>
 #include <lib/Radios/LoRa_SX127X.h>
+// User interface
+#include <lib/Display/Display.h>
+
 
 // -------- VARS
 
@@ -130,7 +131,7 @@ void setup()
     // Create CryptoManager
     DBGLN("[main] start CryptoManager");
     CryptoManager *cryptoManager = CryptoManager::getSingleton();
-    cryptoManager->setEnabled(false);
+    cryptoManager->setEnabled(true);
 
     // Create WiFiManager
     DBGLN("[main] start WiFiManager");
@@ -213,6 +214,11 @@ void loop()
     GNSSManager::getSingleton()->loop();
     statsManager->storeTimerAndRestart(STATS_KEY_GNSSMANAGER_LOOPTIME_US);
 
+#ifdef IO_LED_PIN
+    if (millis() - sys.last_tx > cfg.slot_spacing) {
+        digitalWrite(IO_LED_PIN, LOW);
+    }
+#endif
     // ---------------------- IO BUTTON
 
     if ((sys.now > sys.io_button_released + 150) && (sys.io_button_pressed == 1))
@@ -298,7 +304,8 @@ void loop()
         {
             // End of the scan, set the ID then sync
             if (PeerManager::getSingleton()->count() >= cfg.lora_nodes || curr.host == HOST_GCS)
-            { // Too many nodes already, or connected to a ground station: go to silent mode
+            {
+                // Too many nodes already, or connected to a ground station: go to silent mode
                 sys.lora_no_tx = 1;
             }
             else
@@ -385,10 +392,11 @@ void loop()
         if (curr.id != 0)
         {
             sys.last_tx = millis();
+            digitalWrite(IO_LED_PIN, HIGH);
             air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
             statsManager->startTimer();
             //DBGLN("[main] begin transmit");
-            RadioManager::getSingleton()->transmit(&packet);
+            RadioManager::getSingleton()->transmit(&packet, sys.ota_nonce);
             statsManager->storeTimerAndRestart(STATS_KEY_OTA_SENDTIME_US);
             // DBGLN("[main] end transmit");
         }
@@ -484,38 +492,4 @@ void loop()
         sys.msp_next_cycle += cfg.slot_spacing;
         sys.ota_slot++;
     }
-
-    // ---------------------- LED blinker
-#ifdef IO_LED_PIN
-    if (sys.ota_nonce % 6 == 0)
-    {
-        if (PeerManager::getSingleton()->count_active() > 0)
-        {
-            sys.io_led_changestate = millis() + IO_LEDBLINK_DURATION;
-            sys.io_led_count = 0;
-            sys.io_led_blink = 1;
-        }
-    }
-
-    if (sys.io_led_blink && millis() > sys.io_led_changestate)
-    {
-
-        sys.io_led_count++;
-        sys.io_led_changestate += IO_LEDBLINK_DURATION;
-
-        if (sys.io_led_count % 2 == 0)
-        {
-            digitalWrite(IO_LED_PIN, LOW);
-        }
-        else
-        {
-            digitalWrite(IO_LED_PIN, HIGH);
-        }
-
-        if (sys.io_led_count >= PeerManager::getSingleton()->count_active() * 2)
-        {
-            sys.io_led_blink = 0;
-        }
-    }
-#endif
 }

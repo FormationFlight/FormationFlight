@@ -16,6 +16,7 @@
 #include "../GNSS/GNSSManager.h"
 #include "../Power/PowerManager.h"
 #include "../Statistics/StatsManager.h"
+#include "../Cryptography/CryptoManager.h"
 
 WiFiManager::WiFiManager()
 {
@@ -100,6 +101,14 @@ WiFiManager::WiFiManager()
         server->on("/statsmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;
         StatsManager::getSingleton()->statusJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
+    // CryptoManager
+    server->on("/cryptomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<1024> doc;
+        CryptoManager::getSingleton()->statusJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);

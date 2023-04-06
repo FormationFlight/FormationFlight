@@ -12,7 +12,7 @@ class ESPNOW : public Radio
 public:
     ESPNOW();
     int begin();
-    void transmit(air_type0_t *air_0);
+    void transmit(air_type0_t *air_0, uint8_t ota_nonce);
     void loop();
     static ESPNOW* getSingleton();
     String getStatusString();

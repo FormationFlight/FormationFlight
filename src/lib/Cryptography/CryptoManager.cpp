@@ -17,6 +17,7 @@ CryptoManager::CryptoManager()
     // The goal of this is to keep disparate groups from seeing each other and to prevent passive snooping, not to prevent coordinated attacks
     // Coordinated attack prevention would necessitate a stream cipher which requires keeping & sending counters and nonces
     // which just aren't worth it for this project.
+    // We could maybe leave the ID field unencrypted and use that as a tweak value? Worth looking at later maybe.
     */
     cipher = new XTS<AES128>();
     cipher->setKey(key, KEY_LENGTH_BYTES);
@@ -61,4 +62,10 @@ bool CryptoManager::getEnabled()
 void CryptoManager::setEnabled(bool enabled)
 {
     this->enabled = enabled;
+}
+
+void CryptoManager::statusJson(JsonDocument *doc)
+{
+    (*doc)["key"] = GROUPKEY;
+    (*doc)["enabled"] = getEnabled();
 }

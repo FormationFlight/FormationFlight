@@ -6,7 +6,7 @@
 #ifdef HAS_LORA
 #include <RadioLib.h>
 #endif
-#include "../CryptoManager.h"
+#include "../Cryptography/CryptoManager.h"
 #include <ArduinoJson.h>
 #include "../Peers/PeerManager.h"
 #include "../GNSS/GNSSManager.h"
@@ -15,9 +15,9 @@ RadioManager::RadioManager()
 {
 }
 
-RadioManager* radioManager = nullptr;
+RadioManager *radioManager = nullptr;
 
-RadioManager* RadioManager::getSingleton()
+RadioManager *RadioManager::getSingleton()
 {
     if (radioManager == nullptr)
     {
@@ -34,7 +34,7 @@ air_type0_t RadioManager::prepare_packet()
     GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
     air_0.lat = loc.lat / 100;
     air_0.lon = loc.lon / 100;
-    air_0.alt = loc.alt; // m
+    air_0.alt = loc.alt;
     air_0.extra_type = sys.ota_nonce % 5;
 
     switch (air_0.extra_type)
@@ -105,6 +105,10 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         DBGF("Received bad ID: %d\n", air_0.id);
         return RECEIVE_RESULT_BAD_ID;
     }
+    if (air_0.extra_type > 4)
+    {
+        return RECEIVE_RESULT_BAD_FIELD;
+    }
 
     peer_t *peer = PeerManager::getSingleton()->getPeer(air_0.id - 1);
 
@@ -122,7 +126,8 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
     peer->state = 0;
     peer->lost = 0;
     peer->updated = millis();
-    if (rssi != 0) {
+    if (rssi != 0)
+    {
         peer->rssi = int(rssi);
     }
 
@@ -157,48 +162,37 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         break;
     }
 
-    if (peer->gps.lat != 0 && peer->gps.lon != 0)
-    {
-        // Restore the last known coordinates
-        peer->gps_rec.lat = peer->gps.lat;
-        peer->gps_rec.lon = peer->gps.lon;
-        peer->gps_rec.alt = peer->gps.alt;
-        peer->gps_rec.groundCourse = peer->gps.groundCourse;
-        peer->gps_rec.groundSpeed = peer->gps.groundSpeed;
-    }
-
     sys.num_peers = PeerManager::getSingleton()->count();
 
     if ((sys.air_last_received_id == curr.id) && (sys.phase > MODE_OTA_SYNC) && !sys.lora_no_tx)
     {
-        // Slot conflict
-        uint32_t cs1 = peer->name[0] + peer->name[1] * 26 + peer->name[2] * 26 * 26;
-        uint32_t cs2 = curr.name[0] + curr.name[1] * 26 + curr.name[2] * 26 * 26 + 1;
-        if (cs1 < cs2)
-        { // Pick another slot
-            sprintf(sys.message, "%s", "ID CONFLICT");
-            pick_id();
-            DBGF("Received packet with our own ID %s, moving to %s\n", peer_slotname[air_0.id], peer_slotname[curr.id]);
-            resync_tx_slot(cfg.lora_timing_delay);
-        }
+        // Pick another slot
+        sprintf(sys.message, "%s", "ID CONFLICT");
+        pick_id();
+        DBGF("Received packet with our own ID %s, moving to %s\n", peer_slotname[air_0.id], peer_slotname[curr.id]);
+        resync_tx_slot(cfg.lora_timing_delay);
     }
     peer->packetsReceived++;
     return RECEIVE_RESULT_OK;
 }
 
-void RadioManager::transmit(air_type0_t *packet)
+void RadioManager::transmit(air_type0_t *packet, uint8_t ota_nonce)
 {
-    for (uint8_t i = 0; i < MAX_RADIOS; i++) {
-        if (radios[i] != nullptr) {
-            radios[i]->transmit(packet);
+    for (uint8_t i = 0; i < MAX_RADIOS; i++)
+    {
+        if (radios[i] != nullptr)
+        {
+            radios[i]->transmit(packet, ota_nonce);
         }
     }
 }
 
 void RadioManager::addRadio(Radio *radio)
 {
-    for (uint8_t i = 0; i < MAX_RADIOS; i++) {
-        if (radios[i] == nullptr) {
+    for (uint8_t i = 0; i < MAX_RADIOS; i++)
+    {
+        if (radios[i] == nullptr)
+        {
             radios[i] = radio;
             radios[i]->begin();
             return;
@@ -208,8 +202,10 @@ void RadioManager::addRadio(Radio *radio)
 
 void RadioManager::loop()
 {
-    for (uint8_t i = 0; i < MAX_RADIOS; i++) {
-        if (radios[i] == nullptr) {
+    for (uint8_t i = 0; i < MAX_RADIOS; i++)
+    {
+        if (radios[i] == nullptr)
+        {
             continue;
         }
         radios[i]->loop();
@@ -221,7 +217,8 @@ void RadioManager::statusJson(JsonDocument *doc)
     JsonArray radiosArray = doc->createNestedArray("radios");
     for (uint8_t i = 0; i < MAX_RADIOS; i++)
     {
-        if (radios[i] != nullptr) {
+        if (radios[i] != nullptr)
+        {
             Radio *radio = radios[i];
             JsonObject o = radiosArray.createNestedObject();
             o["status"] = radio->getStatusString();
@@ -232,7 +229,8 @@ void RadioManager::statusJson(JsonDocument *doc)
 
 void RadioManager::setRadioStatus(uint8_t index, bool status)
 {
-    if (radios[index] == nullptr) {
+    if (radios[index] == nullptr)
+    {
         return;
     }
     radios[index]->setEnabled(status);

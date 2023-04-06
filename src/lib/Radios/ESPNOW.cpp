@@ -1,7 +1,7 @@
 
 #include "ESPNOW.h"
 #include "RadioManager.h"
-#include "../CryptoManager.h"
+#include "../Cryptography/CryptoManager.h"
 #include "../Helpers.h"
 #include "../WiFi/WiFiManager.h"
 #if defined(PLATFORM_ESP8266)
@@ -34,7 +34,7 @@ ESPNOW* ESPNOW::getSingleton()
     return espnowInstance;
 }
 
-void ESPNOW::transmit(air_type0_t *air_0)
+void ESPNOW::transmit(air_type0_t *air_0, uint8_t ota_nonce)
 {
     if (!getEnabled()) {
         return;

@@ -29,7 +29,7 @@ void config_init(bool forcedefault) {
     if (cfg.version != VERSION_CONFIG || FORCE_DEFAULT_CONFIG || forcedefault)
         {
         cfg.version = VERSION_CONFIG;
-        strcpy(cfg.target_name, CFG_TARGET_NAME);
+        strncpy(cfg.target_name, CFG_TARGET_NAME, sizeof(cfg.target_name));
         #ifdef HAS_LORA
         cfg.lora_power = LORA_POWER;
         cfg.lora_band = LORA_BAND;
