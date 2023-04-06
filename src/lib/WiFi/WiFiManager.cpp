@@ -53,7 +53,11 @@ WiFiManager::WiFiManager()
     });
     server->on("/system/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
+#ifdef PLATFORM_ESP8266
         ESP.reset();
+#elif defined(PLATFORM_ESP32)
+        ESP.restart();
+#endif
     });
     // RadioManager
     server->on("/radiomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
