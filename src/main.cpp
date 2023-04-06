@@ -358,9 +358,6 @@ void loop()
         sys.stats_updated = sys.next_tx + sys.lora_cycle - 15;
         sys.pps = 0;
         sys.ppsc = 0;
-#ifdef IO_LED_PIN
-        digitalWrite(IO_LED_PIN, LOW);
-#endif
         sys.phase = MODE_OTA_RX;
     }
 
@@ -392,7 +389,9 @@ void loop()
         if (curr.id != 0)
         {
             sys.last_tx = millis();
+#ifdef IO_LED_PIN
             digitalWrite(IO_LED_PIN, HIGH);
+#endif
             air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
             statsManager->startTimer();
             //DBGLN("[main] begin transmit");
