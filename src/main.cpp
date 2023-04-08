@@ -5,7 +5,6 @@
 //
 // -------------------------------------------------------------------------------------------
 
-#include <targets.h>
 #include <Arduino.h>
 #ifdef PLATFORM_ESP32
 #include <esp_system.h>
@@ -34,8 +33,6 @@
 #include <lib/Radios/LoRa_SX127X.h>
 // User interface
 #include <lib/Display/Display.h>
-
-#define DEBUG 1
 
 
 // -------- VARS
