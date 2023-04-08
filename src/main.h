@@ -73,15 +73,15 @@
 #define LORA_M3_SPREADING_FACTOR 6
 #define LORA_M3_NODES 6
 #define LORA_M3_SLOT_SPACING 1000/LORA_M3_NODES/10 // ms
-#define LORA_M3_TIMING_DELAY -5 // ms
+#define LORA_M3_TIMING_DELAY -10 // ms, roughly the length of an OTA transmission
 #define LORA_M3_MSP_AFTER_TX_DELAY 1 // ms
 
 // --- All modes common
 
 #define LORA_CYCLE_SCAN 5000 // 5s
 #define LORA_PEER_TIMEOUT 6000 // 6s
-#define LORA_DRIFT_THRESHOLD 4 // Min for action
-#define LORA_DRIFT_CORRECTION 12 // Max to correct
+#define LORA_DRIFT_THRESHOLD 2 // Min for action
+#define LORA_DRIFT_CORRECTION 1 // Max to correct
 
 // --------- IO AND DISPLAY
 
@@ -186,7 +186,8 @@ struct system_t {
 
     bool lora_no_tx = 0;
     uint8_t ota_slot = 0;
-    uint32_t last_tx = 0;
+    uint32_t last_tx_start = 0;
+    uint32_t last_tx_end = 0;
     uint32_t lora_last_rx = 0;
     uint32_t next_tx = 0;
     int32_t drift = 0;

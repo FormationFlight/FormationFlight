@@ -8,6 +8,7 @@
 
 void pick_id()
 {
+    DBGF("Selecting new ID\n");
     curr.id = 0;
     for (int i = 0; i < cfg.lora_nodes; i++)
     {

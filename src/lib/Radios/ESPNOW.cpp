@@ -44,7 +44,6 @@ void ESPNOW::transmit(air_type0_t *air_0, uint8_t ota_nonce)
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
     esp_now_send(broadcastAddress, buf, sizeof(air_type0_t));
     packetsTransmitted++;
-    lastTransmitTime = millis();
 }
 
 int ESPNOW::begin()
@@ -75,6 +74,15 @@ void ESPNOW::loop()
 String ESPNOW::getStatusString()
 {
     char buf[64];
-    sprintf(buf, "ESPNOW [%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
+    sprintf(buf, "ESPNOW @ CH%d", WiFi.channel());
+    return String(buf);
+}
+
+
+
+String ESPNOW::getCounterString()
+{
+    char buf[128];
+    sprintf(buf, "[%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
     return String(buf);
 }

@@ -59,6 +59,10 @@ WiFiManager::WiFiManager()
         ESP.restart();
 #endif
     });
+    server->on("/system/delay", HTTP_POST, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "OK");
+        delayMicroseconds(1000);
+    });
     // RadioManager
     server->on("/radiomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<512> doc;

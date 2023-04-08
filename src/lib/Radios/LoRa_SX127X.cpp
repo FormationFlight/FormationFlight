@@ -34,10 +34,11 @@ void LoRa_SX127X::transmit(air_type0_t *air_0, uint8_t ota_nonce)
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
-    radio->transmit(buf, sizeof(air_type0_t));
+    int state = radio->startTransmit(buf, sizeof(air_type0_t));
+    if (state != RADIOLIB_ERR_NONE) {
+        DBGF("[SX127X]: TX Status %d\n", state);
+    }
     packetsTransmitted++;
-    lastTransmitTime = millis();
-    radio->startReceive(sizeof(air_type0_t));
 }
 
 int LoRa_SX127X::begin() {
@@ -72,9 +73,8 @@ void LoRa_SX127X::flagPacketReceived()
     if (!getEnabled()) {
         return;
     }
-    if (radio->getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE) {
-        packetReceived = true;
-    }
+    packetReceived = true;
+
 }
 
 void LoRa_SX127X::receive()
@@ -89,19 +89,38 @@ void LoRa_SX127X::receive()
 
 void LoRa_SX127X::loop()
 {
-    if (packetReceived)
-    {
-        receive();
-        packetReceived = false;
+    if (packetReceived) {
+        uint16_t flags = radio->getIRQFlags();
+        if (flags & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE)
+        {
+            receive();
+        }
+        if (flags & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_TX_DONE) {
+            sys.last_tx_end = millis();
+            radio->finishTransmit();
+            // We need to clear IRQ flags and start a new RX cycle
+            radio->startReceive(sizeof(air_type0_t));
+        }
     }
+    packetReceived = false;
 }
 
 String LoRa_SX127X::getStatusString()
 {
     char buf[128];
 #ifdef LORA_FAMILY_SX127X
-    sprintf(buf, "LoRa SX127X @ %fMHz (%ddBm) [%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", FREQUENCY, LORA_POWER, packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
+    sprintf(buf, "LoRa SX127X @ %.02fMHz (%ddBm)", FREQUENCY, LORA_POWER);
 #endif
     return String(buf);
+}
 
+
+
+String LoRa_SX127X::getCounterString()
+{
+    char buf[128];
+#ifdef LORA_FAMILY_SX127X
+    sprintf(buf, "[%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
+#endif
+    return String(buf);
 }

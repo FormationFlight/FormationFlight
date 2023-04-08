@@ -84,7 +84,7 @@ void display_draw_status(system_t *sys)
             peer_t *peer = PeerManager::getSingleton()->getPeer(i);
             if (peer->id > 0 && peer->lost == 0)
             {
-                diff = sys->last_tx - peer->updated;
+                diff = sys->last_tx_end - peer->updated;
                 if (diff > 0 && diff < sys->lora_cycle)
                 {
                     pos[i] = 128 - round(128 * diff / sys->lora_cycle);
@@ -120,22 +120,23 @@ void display_draw_status(system_t *sys)
 
                 if (peer->lost == 1)
                 { // Peer timed out, short
-                    display.drawString(127, line, "x:" + String((int)((sys->last_tx - peer->updated) / 1000)) + "s");
+                    display.drawString(127, line, "x:" + String((int)((millis() - peer->updated) / 1000)) + "s");
                 }
                 else if (peer->lost == 2)
                 { // Peer timed out, long
-                    display.drawString(127, line, "L:" + String((int)((sys->last_tx - peer->updated) / 1000)) + "s");
+                    display.drawString(127, line, "L:" + String((int)((millis() - peer->updated) / 1000)) + "s");
                 }
                 else
                 {
-                    if (sys->last_tx > peer->updated)
+                    if (sys->last_tx_end > peer->updated)
                     {
-                        display.drawString(119, line, String(sys->last_tx - peer->updated));
+                        display.drawString(119, line, String(sys->last_tx_end - peer->updated));
                         display.drawString(127, line, "-");
                     }
                     else
                     {
-                        display.drawString(119, line, String(sys->lora_cycle + sys->last_tx - peer->updated));
+                        display.drawString(119, line, String(sys->lora_cycle + sys->last_tx_end - peer->updated));
+                        //display.drawString(119, line, String(peer->updated - sys->last_tx_end));
                         display.drawString(127, line, "+");
                     }
                 }

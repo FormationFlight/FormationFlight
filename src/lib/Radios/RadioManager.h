@@ -24,6 +24,7 @@ enum ReceiveResult {
     RECEIVE_RESULT_BAD_PACKET_TYPE,
     RECEIVE_RESULT_BAD_CRC,
     RECEIVE_RESULT_BAD_ID,
+    RECEIVE_RESULT_BAD_ID_DUPLICATE,
     RECEIVE_RESULT_BAD_FIELD,
 };
 
@@ -34,6 +35,7 @@ public:
     virtual void transmit(air_type0_t *packet, uint8_t ota_nonce);
     virtual void loop();
     virtual String getStatusString();
+    virtual String getCounterString();
     bool getEnabled() {
         return enabled;
     }
@@ -49,6 +51,7 @@ public:
             packetsBadSize++;
             break;
             case RECEIVE_RESULT_BAD_ID:
+            case RECEIVE_RESULT_BAD_ID_DUPLICATE:
             case RECEIVE_RESULT_BAD_PACKET_TYPE:
             case RECEIVE_RESULT_BAD_FIELD:
             packetsBadValidation++;
@@ -66,7 +69,7 @@ protected:
     uint32_t packetsBadSize = 0;
     uint32_t packetsBadValidation = 0;
     bool enabled = true;
-    uint32_t lastTransmitTime;
+
 };
 
 class RadioManager

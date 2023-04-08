@@ -16,6 +16,7 @@ public:
     void loop();
     static ESPNOW* getSingleton();
     String getStatusString();
+    String getCounterString();
     void onPacketReceived();
 private:
     uint8_t broadcastAddress[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};

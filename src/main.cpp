@@ -35,6 +35,8 @@
 // User interface
 #include <lib/Display/Display.h>
 
+#define DEBUG 1
+
 
 // -------- VARS
 
@@ -164,8 +166,9 @@ void setup()
 
     DBGLN("[main] RadioManager::addRadio ESPNOW");
     radioManager->addRadio(ESPNOW::getSingleton());
+#ifdef LORA_BAND
     ESPNOW::getSingleton()->setEnabled(false);
-
+#endif
 #ifdef LORA_FAMILY_SX128X
     DBGLN("[main] RadioManager::addRadio LoRa_SX128X");
     radioManager->addRadio(LoRa_SX128X::getSingleton());
@@ -215,7 +218,7 @@ void loop()
     statsManager->storeTimerAndRestart(STATS_KEY_GNSSMANAGER_LOOPTIME_US);
 
 #ifdef IO_LED_PIN
-    if (millis() - sys.last_tx > cfg.slot_spacing) {
+    if (millis() - sys.last_tx_start > cfg.slot_spacing) {
         digitalWrite(IO_LED_PIN, LOW);
     }
 #endif
@@ -388,7 +391,7 @@ void loop()
     {
         if (curr.id != 0)
         {
-            sys.last_tx = millis();
+            sys.last_tx_start = millis();
 #ifdef IO_LED_PIN
             digitalWrite(IO_LED_PIN, HIGH);
 #endif
@@ -397,31 +400,12 @@ void loop()
             //DBGLN("[main] begin transmit");
             RadioManager::getSingleton()->transmit(&packet, sys.ota_nonce);
             statsManager->storeTimerAndRestart(STATS_KEY_OTA_SENDTIME_US);
+            //sys.last_tx_end = millis();
             // DBGLN("[main] end transmit");
         }
 
-        // Drift correction
-
-        if (curr.id > 1 && PeerManager::getSingleton()->count_active() > 0)
-        {
-            int prev = curr.id - 2;
-            peer_t *peer = PeerManager::getSingleton()->getPeer(prev);
-            if (peer->id > 0)
-            {
-                sys.drift = sys.last_tx - peer->updated - cfg.slot_spacing;
-
-                if ((abs(sys.drift) > LORA_DRIFT_THRESHOLD) && (abs(sys.drift) < cfg.slot_spacing))
-                {
-                    sys.drift_correction = constrain(sys.drift, -LORA_DRIFT_CORRECTION, LORA_DRIFT_CORRECTION);
-                    sys.next_tx -= sys.drift_correction;
-                    DBGF("[main] Adjusting timing by %d\n", sys.drift_correction);
-                    sprintf(sys.message, "%s", "TIMING ADJUST");
-                }
-            }
-        }
-
         sys.ota_slot = 0;
-        sys.msp_next_cycle = sys.last_tx + cfg.msp_after_tx_delay;
+        sys.msp_next_cycle = sys.last_tx_end + cfg.msp_after_tx_delay;
         sys.phase = MODE_OTA_RX;
     }
 
@@ -491,4 +475,28 @@ void loop()
         sys.msp_next_cycle += cfg.slot_spacing;
         sys.ota_slot++;
     }
+    static uint32_t lastDriftCalculation = 0;
+    // Drift correction
+    if (curr.id > 1 && PeerManager::getSingleton()->count_active() > 0)
+    {
+        int prev = curr.id - 2;
+        peer_t *peer = PeerManager::getSingleton()->getPeer(prev);
+        if (peer->id > 0 && millis() - peer->updated < sys.lora_cycle && millis() - lastDriftCalculation > sys.lora_cycle)
+        {
+            if (sys.last_tx_end > peer->updated)
+            {
+                sys.drift = sys.last_tx_end - peer->updated - cfg.slot_spacing;
+                lastDriftCalculation = millis();
+                DBGF("D: %d\n", sys.drift);
+                if ((abs(sys.drift) > LORA_DRIFT_THRESHOLD)) // && (abs(sys.drift) < cfg.slot_spacing))
+                {
+                    sys.drift_correction = constrain(sys.drift, -LORA_DRIFT_CORRECTION, LORA_DRIFT_CORRECTION);
+                    sys.next_tx -= sys.drift_correction;
+                    DBGF("[main] Adjusting timing by %d\n", sys.drift_correction);
+                    sprintf(sys.message, "%s", "TIMING ADJUST");
+                }
+            }
+        }
+    }
+
 }

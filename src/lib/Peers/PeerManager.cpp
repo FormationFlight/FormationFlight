@@ -112,6 +112,8 @@ uint8_t PeerManager::count_active()
 void PeerManager::statusJson(JsonDocument *doc)
 {
     (*doc)["myID"] = peer_slotname[curr.id];
+    (*doc)["count"] = count();
+    (*doc)["countActive"] = count_active();
     JsonArray peerArray = doc->createNestedArray("peers");
     for (uint8_t i = 0; i < NODES_MAX; i++)
     {

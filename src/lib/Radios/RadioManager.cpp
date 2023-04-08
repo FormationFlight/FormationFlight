@@ -105,6 +105,12 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         DBGF("Received bad ID: %d\n", air_0.id);
         return RECEIVE_RESULT_BAD_ID;
     }
+    // TODO: use this radio's OTA time
+    if (air_0.id == curr.id && millis() - sys.last_tx_end < 4)
+    {
+        DBGF("IGNORING packet with our own ID %s. Last TX was %u-%u\n", peer_slotname[air_0.id], sys.last_tx_start, sys.last_tx_end);
+        return RECEIVE_RESULT_BAD_ID_DUPLICATE;
+    }
     if (air_0.extra_type > 4)
     {
         return RECEIVE_RESULT_BAD_FIELD;
@@ -169,7 +175,7 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         // Pick another slot
         sprintf(sys.message, "%s", "ID CONFLICT");
         pick_id();
-        DBGF("Received packet with our own ID %s, moving to %s\n", peer_slotname[air_0.id], peer_slotname[curr.id]);
+        DBGF("Received packet with our own ID %s, moving to %s. Last TX was %lu-%lu\n", peer_slotname[air_0.id], peer_slotname[curr.id], sys.last_tx_start, sys.last_tx_end);
         resync_tx_slot(cfg.lora_timing_delay);
     }
     peer->packetsReceived++;
@@ -222,6 +228,7 @@ void RadioManager::statusJson(JsonDocument *doc)
             Radio *radio = radios[i];
             JsonObject o = radiosArray.createNestedObject();
             o["status"] = radio->getStatusString();
+            o["counters"] = radio->getCounterString();
             o["enabled"] = radio->getEnabled();
         }
     }

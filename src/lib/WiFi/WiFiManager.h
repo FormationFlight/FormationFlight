@@ -13,7 +13,7 @@ public:
 
 private:
     AsyncWebServer *server;
-    bool otaActive;
+    bool otaActive = false;
 };
 
 void OnOTAStart();

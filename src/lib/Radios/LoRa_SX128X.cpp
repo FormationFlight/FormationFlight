@@ -34,13 +34,11 @@ void LoRa_SX128X::transmit(air_type0_t *air_0, uint8_t ota_nonce)
     uint8_t buf[sizeof(air_type0_t)];
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
-    int state = radio->transmit(buf, sizeof(air_type0_t));
+    int state = radio->startTransmit(buf, sizeof(air_type0_t));
     if (state != RADIOLIB_ERR_NONE) {
         DBGF("[SX128X]: TX Status %d\n", state);
     }
     packetsTransmitted++;
-    lastTransmitTime = millis();
-    radio->startReceive();
 }
 
 int LoRa_SX128X::begin() {
@@ -69,9 +67,7 @@ void LoRa_SX128X::flagPacketReceived()
     if (!getEnabled()) {
         return;
     }
-    if (radio->getIrqStatus() == RADIOLIB_SX128X_IRQ_RX_DONE) {
-        packetReceived = true;
-    }
+    packetReceived = true;
 }
 
 void LoRa_SX128X::receive()
@@ -92,17 +88,35 @@ void LoRa_SX128X::loop()
 {
     if (packetReceived)
     {
-        packetReceived = false;
-        receive();
+        uint16_t flags = radio->getIrqStatus();
+        if (flags == RADIOLIB_SX128X_IRQ_RX_DONE) {
+            receive();
+        }
+        if (flags & RADIOLIB_SX128X_IRQ_TX_DONE) {
+            sys.last_tx_end = millis();
+            radio->finishTransmit();
+            // We need to clear IRQ flags and start a new RX cycle
+            radio->startReceive();
+        }
     }
+    packetReceived = false;
 }
 
 String LoRa_SX128X::getStatusString()
 {
     char buf[128];
 #ifdef LORA_FAMILY_SX128X
-    sprintf(buf, "LoRa SX128X @ %fMHz (%ddBm) [%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", FREQUENCY, LORA_POWER, packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
+    sprintf(buf, "LoRa SX128X @ %.02fMHz (%ddBm)", FREQUENCY, LORA_POWER);
 #endif
     return String(buf);
+}
 
+
+String LoRa_SX128X::getCounterString()
+{
+    char buf[128];
+#ifdef LORA_FAMILY_SX128X
+    sprintf(buf, "[%uTX/%uRX] [%uCRC/%uSIZE/%uVAL]", packetsTransmitted, packetsReceived, packetsBadCrc, packetsBadSize, packetsBadValidation);
+#endif
+    return String(buf);
 }
