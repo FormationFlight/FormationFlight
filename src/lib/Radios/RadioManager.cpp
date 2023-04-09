@@ -32,8 +32,8 @@ air_type0_t RadioManager::prepare_packet()
     air_0.packet_type = PACKET_TYPE_RADAR_POSITION;
     air_0.id = curr.id;
     GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
-    air_0.lat = loc.lat / 100;
-    air_0.lon = loc.lon / 100;
+    air_0.lat = (int32_t)(loc.lat * 10000000.0);
+    air_0.lon = (int32_t)(loc.lon * 10000000.0);
     air_0.alt = loc.alt;
     air_0.extra_type = sys.ota_nonce % 5;
 
@@ -136,9 +136,8 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
     {
         peer->rssi = int(rssi);
     }
-
-    peer->gps.lat = air_0.lat * 100;
-    peer->gps.lon = air_0.lon * 100;
+    peer->gps.lat = air_0.lat;// * 100;
+    peer->gps.lon = air_0.lon;// * 100;
     peer->gps.alt = air_0.alt; // m
 
     switch (air_0.extra_type)

@@ -40,8 +40,8 @@ GNSSLocation MSP_GNSS::getLocation()
     loc.groundSpeed = rawLocation.groundSpeed * cms_to_kmh;
     loc.hdop = rawLocation.hdop;
     loc.lastUpdate = lastUpdate;
-    loc.lat = rawLocation.lat * 10000000;
-    loc.lon = rawLocation.lon * 10000000;
+    loc.lat = (double)rawLocation.lat * 10000000.0;
+    loc.lon = (double)rawLocation.lon * 10000000.0;
     loc.numSat = rawLocation.numSat;
     return loc;
 }

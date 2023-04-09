@@ -458,9 +458,6 @@ void loop()
                 // Only send if the peer has been seen and it's not us
                 if (peer->id > 0 && i + 1 != curr.id)
                 {
-                    peer->gps_comp.lat = peer->gps.lat;
-                    peer->gps_comp.lon = peer->gps.lon;
-                    peer->gps_comp.alt = peer->gps.alt;
                     if (!DEBUG) {
                         MSPManager::getSingleton()->sendRadar(peer);
                     }

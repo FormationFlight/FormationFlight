@@ -20,10 +20,8 @@ struct peer_t {
    int16_t direction;
    int16_t relalt;
    msp_raw_gps_t gps;
-   msp_raw_gps_t gps_rec;
    msp_raw_gps_t gps_pre;
    uint32_t gps_pre_updated;
-   msp_raw_gps_t gps_comp;
    msp_analog_t fcanalog;
    char name[NAME_LENGTH + 1];
    uint32_t packetsReceived;

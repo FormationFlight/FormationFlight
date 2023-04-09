@@ -258,8 +258,8 @@ void display_draw_status(system_t *sys)
             }
             else
             {
-                display.drawString(128, 24, "LA " + String((float)peer->gps_rec.lat / 10000000, 5));
-                display.drawString(128, 34, "LO " + String((float)peer->gps_rec.lon / 10000000, 5));
+                display.drawString(128, 24, "LA " + String((float)peer->gps.lat / 10000000, 5));
+                display.drawString(128, 34, "LO " + String((float)peer->gps.lon / 10000000, 5));
             }
 
             display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -272,9 +272,9 @@ void display_draw_status(system_t *sys)
             }
             else
             {
-                display.drawString(0, 24, "A " + String(peer->gps_rec.alt) + "m");
-                display.drawString(0, 34, "S " + String(peer->gps_rec.groundSpeed / 100) + "m/s");
-                display.drawString(0, 44, "C " + String(peer->gps_rec.groundCourse / 10) + "°");
+                display.drawString(0, 24, "A " + String(peer->gps.alt) + "m");
+                display.drawString(0, 34, "S " + String(peer->gps.groundSpeed / 100) + "m/s");
+                display.drawString(0, 44, "C " + String(peer->gps.groundCourse / 10) + "°");
             }
 
             if (peer->gps.lat != 0 && peer->gps.lon != 0 && loc.lat != 0 && loc.lon != 0 && !iscurrent)
@@ -282,8 +282,8 @@ void display_draw_status(system_t *sys)
 
                 double lat1 = (double)loc.lat / 10000000;
                 double lon1 = (double)loc.lon / 10000000;
-                double lat2 = (double)peer->gps_rec.lat / 10000000;
-                double lon2 = (double)peer->gps_rec.lon / 10000000;
+                double lat2 = (double)peer->gps.lat / 10000000;
+                double lon2 = (double)peer->gps.lon / 10000000;
 
                 display.drawString(0, 54, "R " + String(peer->relalt) + "m");
                 display.drawString(50, 54, "B " + String(peer->direction) + "°");

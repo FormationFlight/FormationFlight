@@ -76,7 +76,7 @@ void PeerManager::loop()
             {
                 peer_t *peer = &peers[i];
 
-                GNSSLocation peerLocation{.lat = peer->gps.lat * 10000000.0, .lon = peer->gps.lon * 10000000.0, .alt = (double)peer->gps.alt};
+                GNSSLocation peerLocation{.lat = peer->gps.lat / 10000000.0, .lon = peer->gps.lon / 10000000.0, .alt = (double)peer->gps.alt};
                 peer->distance = gnssManager->horizontalDistanceTo(peerLocation);
                 peer->direction = gnssManager->courseTo(peerLocation);
                 peer->relalt = peerLocation.alt - loc.alt;
