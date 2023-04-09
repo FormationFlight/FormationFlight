@@ -461,9 +461,9 @@ void loop()
                     peer->gps_comp.lat = peer->gps.lat;
                     peer->gps_comp.lon = peer->gps.lon;
                     peer->gps_comp.alt = peer->gps.alt;
-#ifndef DEBUG
-                    MSPManager::getSingleton()->sendRadar(peer);
-#endif
+                    if (!DEBUG) {
+                        MSPManager::getSingleton()->sendRadar(peer);
+                    }
                 }
             }
         }
