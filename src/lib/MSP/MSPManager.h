@@ -5,7 +5,7 @@
 #include "../GNSS/GNSSManager.h"
 #include "../Peers/PeerManager.h"
 
-#define HOST_MSP_TIMEOUT 1000
+#define HOST_MSP_TIMEOUT 8500
 
 enum MSPHost {
     HOST_NONE = 0,
