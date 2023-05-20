@@ -40,24 +40,29 @@ void MSPManager::getName(char *name, size_t length)
 
 MSPHost MSPManager::getFCVariant()
 {
-    char variant[5] = "";
-    if (variant[0] != '\0') {
+    static char variant[5] = "";
+    static bool cached = false;
+    if (!cached) {
         msp->request(MSP_FC_VARIANT, variant, sizeof(variant));
     }
     if (strncmp(variant, "INAV", 4) == 0)
     {
+        cached = true;
         return HOST_INAV;
     }
     else if (strncmp(variant, "GCS", 3) == 0)
     {
+        cached = true;
         return HOST_GCS;
     }
     else if (strncmp(variant, "ARDU", 4) == 0)
     {
+        cached = true;
         return HOST_ARDU;
     }
     else if (strncmp(variant, "BTFL", 4) == 0)
     {
+        cached = true;
         return HOST_BTFL;
     }
     return HOST_NONE;
