@@ -19,7 +19,7 @@ INAV-Radar is an addition to the [INAV](https://github.com/iNavFlight/inav) flig
 # * FormationFlight Information
 
 # Targets:
-This is a work in progress... For now please check contents of .ini files within the targets folder.
+This is a work in progress and there is no guarantee your target will work... However, please check contents of .ini files within the targets folder to see some of the boards that are being tested.
 
 # Building:
 Visual Studio Code with PlatformIO is required.
