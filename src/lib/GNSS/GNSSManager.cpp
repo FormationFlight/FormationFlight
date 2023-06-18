@@ -28,6 +28,7 @@ GNSSLocation GNSSManager::getLocation()
                 if (providerLoc.fixType != 0) {
                     loc = providerLoc;
                     currentProvider = i;
+                    lastUpdate = millis();
                     break;
                 }
             }
