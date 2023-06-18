@@ -48,7 +48,11 @@ int LoRa_SX127X::begin() {
 #else
     SPI.begin();
 #endif
+#if LORA_BAND==915 || LORA_BAND==868
     radio = new SX1276(new Module(LORA_PIN_CS, LORA_PIN_DIO0, LORA_PIN_RST));
+#elif LORA_BAND==433
+    radio = new SX1278(new Module(LORA_PIN_CS, LORA_PIN_DIO0, LORA_PIN_RST));
+#endif
     radio->reset();
     //Serial.printf("Radio version: %d\n", radio->getChipVersion());
     int16_t result = radio->begin(FREQUENCY, BANDWIDTH, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, LORA_POWER, PREAMBLE_LENGTH, LNA_GAIN);

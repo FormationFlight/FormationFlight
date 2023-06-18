@@ -32,8 +32,8 @@ air_type0_t RadioManager::prepare_packet()
     air_0.packet_type = PACKET_TYPE_RADAR_POSITION;
     air_0.id = curr.id;
     GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
-    air_0.lat = (int32_t)(loc.lat * 10000000.0);
-    air_0.lon = (int32_t)(loc.lon * 10000000.0);
+    air_0.lat = (int32_t)(loc.lat * 100.0);
+    air_0.lon = (int32_t)(loc.lon * 100.0);
     air_0.alt = loc.alt;
     air_0.extra_type = sys.ota_nonce % 5;
 
@@ -174,7 +174,7 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         // Pick another slot
         sprintf(sys.message, "%s", "ID CONFLICT");
         pick_id();
-        DBGF("Received packet with our own ID %s, moving to %s. Last TX was %lu-%lu\n", peer_slotname[air_0.id], peer_slotname[curr.id], sys.last_tx_start, sys.last_tx_end);
+        DBGF("Received packet with our own ID %s, moving to %s. Last TX was %u-%u\n", peer_slotname[air_0.id], peer_slotname[curr.id], sys.last_tx_start, sys.last_tx_end);
         resync_tx_slot(cfg.lora_timing_delay);
     }
     peer->packetsReceived++;

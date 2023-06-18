@@ -4,7 +4,8 @@
 #include <RadioLib.h>
 
 #ifdef LORA_FAMILY_SX128X
-#define FREQUENCY 2500.0f // MHz
+//#define FREQUENCY 2500.0f // MHz
+#define FREQUENCY (float)LORA_FREQUENCY / 1000000.0
 #define BANDWIDTH 406 // kHz
 #define SPREADING_FACTOR 5 // SF5
 #define CODING_RATE 6 // 4/6 CR

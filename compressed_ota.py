@@ -7,7 +7,7 @@ Import("env")
 def compressFirmware(source, target, env):
     """ Compress ESP8266 firmware using gzip for 'compressed OTA upload' """
     SOURCE_FILE = env.subst("$BUILD_DIR") + os.sep + env.subst("$PROGNAME") + ".bin"
-    if not os.path.exists(SOURCE_FILE+'.bak'):
+    if True or not os.path.exists(SOURCE_FILE+'.bak'):
         print("Compressing firmware for upload...")
         shutil.move(SOURCE_FILE, SOURCE_FILE + '.bak')
         with open(SOURCE_FILE + '.bak', 'rb') as f_in:

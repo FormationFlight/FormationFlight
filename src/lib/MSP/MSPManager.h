@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "MSP.h"
 #include "../GNSS/GNSSManager.h"
 #include "../Peers/PeerManager.h"
@@ -29,6 +30,8 @@ public:
     void sendLocation(GNSSLocation location);
     static MSPManager* getSingleton();
     void begin(Stream &stream);
+    void statusJson(JsonDocument *doc);
+
 private:
     MSP *msp = nullptr;
     bool ready = false;

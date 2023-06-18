@@ -18,11 +18,10 @@ SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);
 void display_init()
 {
 #ifdef HAS_OLED
-    pinMode(16, OUTPUT);
-    pinMode(2, OUTPUT);
-    digitalWrite(16, LOW);
+    pinMode(OLED_RST, OUTPUT);
+    digitalWrite(OLED_RST, LOW);
     delay(50);
-    digitalWrite(16, HIGH);
+    digitalWrite(OLED_RST, HIGH);
     display.init();
     display.flipScreenVertically();
     display.setFont(ArialMT_Plain_10);

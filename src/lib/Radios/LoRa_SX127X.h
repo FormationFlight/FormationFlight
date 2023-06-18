@@ -3,7 +3,7 @@
 #include "RadioManager.h"
 #include <RadioLib.h>
 #ifdef LORA_FAMILY_SX127X
-#define FREQUENCY 915.0 // MHz
+#define FREQUENCY (float)LORA_FREQUENCY / 1000000.0
 #define BANDWIDTH 500 // kHz
 #define SPREADING_FACTOR 7 // SF6
 #define CODING_RATE 5 // 4/5 CR
@@ -27,6 +27,13 @@ public:
     String getStatusString();
     String getCounterString();
 private:
+#if LORA_BAND==915 || LORA_BAND==868
     SX1276* radio = nullptr;
+#elif LORA_BAND==433
+    SX1278* radio = nullptr;
+#else
+    // Just to make this compile
+    SX1276* radio = nullptr;
+#endif
     volatile bool packetReceived = false;
 };

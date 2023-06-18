@@ -94,7 +94,6 @@ void setup()
     sys.debug = 0;
 
     config_init();
-
     sys.lora_cycle = cfg.lora_nodes * cfg.slot_spacing;
     sys.cycle_stats = sys.lora_cycle * 2;
 #ifdef IO_LED_PIN
@@ -110,7 +109,6 @@ void setup()
     {
         display_draw_intro();
     }
-
     delay(START_DELAY);
 
     // Create PowerManager

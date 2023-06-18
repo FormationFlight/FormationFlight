@@ -89,6 +89,14 @@ WiFiManager::WiFiManager()
         serializeJson(doc, *response);
         request->send(response);
     });
+    // MSPManager
+    server->on("/mspmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<1024> doc;
+        MSPManager::getSingleton()->statusJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
     // GNSSManager
     server->on("/gnssmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;

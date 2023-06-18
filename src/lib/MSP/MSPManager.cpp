@@ -38,7 +38,7 @@ void MSPManager::getName(char *name, size_t length)
     msp->request(MSP_NAME, name, length);
 }
 
-MSPHost MSPManager::getFCVariant()
+MSPHost MSPManager::    getFCVariant()
 {
     static char variant[5] = "";
     static bool cached = false;
@@ -128,4 +128,8 @@ void MSPManager::sendRadar(peer_t *peer)
     position.speed = peer->gps.groundSpeed;         // cm/s
     position.lq = peer->lq;
     msp->command2(MSP2_COMMON_SET_RADAR_POS, &position, sizeof(position), 0);
+}
+
+void MSPManager::statusJson(JsonDocument *doc)
+{
 }
