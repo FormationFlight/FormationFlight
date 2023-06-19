@@ -32,8 +32,8 @@ air_type0_t RadioManager::prepare_packet()
     air_0.packet_type = PACKET_TYPE_RADAR_POSITION;
     air_0.id = curr.id;
     GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
-    air_0.lat = (int32_t)(loc.lat * 100.0);
-    air_0.lon = (int32_t)(loc.lon * 100.0);
+    air_0.lat = (int32_t)(loc.lat * 1000000.0);
+    air_0.lon = (int32_t)(loc.lon * 1000000.0);
     air_0.alt = loc.alt;
     air_0.extra_type = sys.ota_nonce % 5;
 

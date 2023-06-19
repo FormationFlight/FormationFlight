@@ -20,11 +20,21 @@ CryptoManager::CryptoManager()
     // We could maybe leave the ID field unencrypted and use that as a tweak value? Worth looking at later maybe.
     */
     cipher = new XTS<AES128>();
-    cipher->setKey(key, KEY_LENGTH_BYTES);
-    cipher->setSectorSize(sizeof(air_type0_t));
+    bool result = true;
+    result = cipher->setSectorSize(sizeof(air_type0_t));
+    if (!result) {
+        DBGLN("[CryptoManager] failed to set sector size");
+    }
+    result = cipher->setKey(key, KEY_LENGTH_BYTES);
+    if (!result) {
+        DBGLN("[CryptoManager] failed to set key");
+    }
     uint8_t tweak[TWEAK_LENGTH_BYTES];
     memset(tweak, 0, TWEAK_LENGTH_BYTES);
-    cipher->setTweak(tweak, TWEAK_LENGTH_BYTES);
+    result = cipher->setTweak(tweak, TWEAK_LENGTH_BYTES);
+    if (!result) {
+        DBGLN("[CryptoManager] failed to set tweak");
+    }
 }
 
 void CryptoManager::encrypt(uint8_t *buf, size_t length)
@@ -66,6 +76,6 @@ void CryptoManager::setEnabled(bool enabled)
 
 void CryptoManager::statusJson(JsonDocument *doc)
 {
-    (*doc)["key"] = GROUPKEY;
+    (*doc)["keyString"] = GROUPKEY;
     (*doc)["enabled"] = getEnabled();
 }

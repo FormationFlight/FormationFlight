@@ -76,7 +76,7 @@ void PeerManager::loop()
             {
                 peer_t *peer = &peers[i];
 
-                GNSSLocation peerLocation{.lat = peer->gps.lat / 10000000.0, .lon = peer->gps.lon / 10000000.0, .alt = (double)peer->gps.alt};
+                GNSSLocation peerLocation{.lat = peer->gps.lat / 1000000.0, .lon = peer->gps.lon / 1000000.0, .alt = (double)peer->gps.alt};
                 peer->distance = gnssManager->horizontalDistanceTo(peerLocation);
                 peer->direction = gnssManager->courseTo(peerLocation);
                 peer->relalt = peerLocation.alt - loc.alt;
@@ -128,8 +128,10 @@ void PeerManager::statusJson(JsonDocument *doc)
             o["updated"] = peer->updated;
             o["age"] = millis() - peer->updated;
             o["lost"] = peer->lost;
-            o["lat"] = peer->gps.lat;
-            o["lon"] = peer->gps.lon;
+            o["lat"] = peer->gps.lat / 1000000.0;
+            o["lon"] = peer->gps.lon / 1000000.0;
+            o["latRaw"] = peer->gps.lat;
+            o["lonRaw"] = peer->gps.lon;
             o["alt"] = peer->gps.alt;
             o["groundSpeed"] = peer->gps.groundSpeed;
             o["groundCourse"] = peer->gps.groundCourse;

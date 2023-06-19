@@ -125,11 +125,6 @@ void setup()
     PeerManager *peerManager = PeerManager::getSingleton();
     peerManager->reset();
 
-    // Create CryptoManager
-    DBGLN("[main] start CryptoManager");
-    CryptoManager *cryptoManager = CryptoManager::getSingleton();
-    cryptoManager->setEnabled(true);
-
     // Create WiFiManager
     DBGLN("[main] start WiFiManager");
     WiFiManager::getSingleton();
@@ -144,6 +139,11 @@ void setup()
     mspManager->begin(Serial);
     Serial.begin(SERIAL_SPEED, SERIAL_8N1);
 #endif
+
+    // Create CryptoManager
+    DBGLN("[main] start CryptoManager");
+    CryptoManager *cryptoManager = CryptoManager::getSingleton();
+    cryptoManager->setEnabled(true);
 
     // Create GNSSManager
     DBGLN("[main] start GNSSManager");
@@ -162,7 +162,7 @@ void setup()
     DBGLN("[main] RadioManager::addRadio ESPNOW");
     radioManager->addRadio(ESPNOW::getSingleton());
 #ifdef LORA_BAND
-    ESPNOW::getSingleton()->setEnabled(false);
+    //ESPNOW::getSingleton()->setEnabled(false);
 #endif
 #ifdef LORA_FAMILY_SX128X
     DBGLN("[main] RadioManager::addRadio LoRa_SX128X");

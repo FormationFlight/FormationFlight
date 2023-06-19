@@ -10,7 +10,7 @@
 #ifndef GROUPKEY
 #define GROUPKEY "opensesame"
 #endif
-#define KEY_LENGTH_BYTES 64
+#define KEY_LENGTH_BYTES 32
 #define TWEAK_LENGTH_BYTES 16
 
 class CryptoManager {

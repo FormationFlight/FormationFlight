@@ -43,6 +43,7 @@ void ESPNOW::transmit(air_type0_t *air_0, uint8_t ota_nonce)
     memcpy_P(buf, air_0, sizeof(air_type0_t));
     CryptoManager::getSingleton()->encrypt(buf, sizeof(air_type0_t));
     esp_now_send(broadcastAddress, buf, sizeof(air_type0_t));
+    sys.last_tx_end = millis();
     packetsTransmitted++;
 }
 
