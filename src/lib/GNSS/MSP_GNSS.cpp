@@ -50,7 +50,7 @@ String MSP_GNSS::getStatusString()
 {
     GNSSLocation loc = getLocation();
     char buf[128];
-    sprintf(buf, "MSP GNSS [%dSAT/%uUPD] (%f,%f) (%fm)", loc.numSat, locationUpdates, loc.lat, loc.lon, loc.alt);
+    sprintf(buf, "MSP GNSS [%dSAT/%uUPD] (%f,%f) (%.0fm) (%.0f° %.0fkm/h)", loc.numSat, locationUpdates, loc.lat, loc.lon, loc.alt, loc.groundCourse / 10, loc.groundSpeed);
     return String(buf);
 }
 
