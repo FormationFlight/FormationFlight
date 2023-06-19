@@ -20,6 +20,9 @@ GNSSLocation GNSSManager::getLocation()
 {
     static uint32_t lastUpdate = 0;
     static GNSSLocation loc;
+    if (spoofLocationEnabled) {
+        return spoofedLocation;
+    }
     if (millis() - lastUpdate > GNSS_FRESH_INTERVAL_MS) {
         // Fetch the first provider that has a good fix
         for (uint8_t i = 0; i < GNSS_MAX_PROVIDERS; i++) {

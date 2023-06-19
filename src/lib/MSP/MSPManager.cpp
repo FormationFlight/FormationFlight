@@ -121,8 +121,8 @@ void MSPManager::sendRadar(peer_t *peer)
     msp_radar_pos_t position;
     position.id = peer->id;
     position.state = (peer->lost == 2) ? 2 : peer->state;
-    position.lat = peer->gps.lat;              // x 10E7
-    position.lon = peer->gps.lon;              // x 10E7
+    position.lat = peer->gps.lat / 10;              // x 10E7
+    position.lon = peer->gps.lon / 10;              // x 10E7
     position.alt = peer->gps.alt * 100;        // cm
     position.heading = peer->gps.groundCourse / 10; // From ° x 10 to °
     position.speed = peer->gps.groundSpeed;         // cm/s
@@ -132,4 +132,8 @@ void MSPManager::sendRadar(peer_t *peer)
 
 void MSPManager::statusJson(JsonDocument *doc)
 {
+    msp_analog_t analog = getAnalogValues();
+    (*doc)["vbat"] = analog.vbat * 0.1;
+    (*doc)["mahDrawn"] = analog.mAhDrawn;
+    (*doc)["amps"] = analog.amperage * 0.01;
 }

@@ -105,6 +105,18 @@ WiFiManager::WiFiManager()
         serializeJson(doc, *response);
         request->send(response);
     });
+    server->on("/gnssmanager/spoof", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("lat", true) || !request->hasParam("lon", true)) {
+            request->send(400, "text/plain", "need parameters lat & lon");
+            return;
+        }
+        double lat = request->getParam("lat", true)->value().toDouble();
+        double lon = request->getParam("lon", true)->value().toDouble();
+        GNSSManager::getSingleton()->spoofedLocation.lat = lat;
+        GNSSManager::getSingleton()->spoofedLocation.lon = lon;
+
+        request->send(200, "text/plain", "OK");
+    });
     // PowerManager
     server->on("/powermanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;

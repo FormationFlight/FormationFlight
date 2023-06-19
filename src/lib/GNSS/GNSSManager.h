@@ -63,6 +63,8 @@ public:
     void statusJson(JsonDocument *doc);
     double horizontalDistanceTo(GNSSLocation b);
     int16_t courseTo(GNSSLocation b);
+    GNSSLocation spoofedLocation;
+    bool spoofLocationEnabled = false;
 private:
     GNSSProvider* providers[GNSS_MAX_PROVIDERS] = {nullptr};
     uint8_t currentProvider = 0;
