@@ -76,6 +76,10 @@ jobs:
     needs: [build]
     if: startsWith(github.event.ref, 'refs/tags/v')
     steps:
+    - name: Download Artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: ~/artifacts/
     - name: Create Release
       uses: "marvinpinto/action-automatic-releases@latest"
       with:
@@ -85,7 +89,4 @@ jobs:
         prerelease: true
         title: "${{ steps.vars.outputs.tag }}"
         files: |
-          ~/artifacts/*
-    
-    
-    
+          ~/artifacts/**
