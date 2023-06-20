@@ -71,3 +71,21 @@ jobs:
         name: firmware
         path: ~/artifacts/**
       continue-on-error: true
+  release:
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: startsWith(github.event.ref, 'refs/tags/v')
+    steps:
+    - name: Create Release
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "latest"
+        # TODO: When we're ready to call it v1, change this.
+        prerelease: true
+        title: "${{ steps.vars.outputs.tag }}"
+        files: |
+          ~/artifacts/*
+    
+    
+    
