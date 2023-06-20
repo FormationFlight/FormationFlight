@@ -90,8 +90,4 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
-    - name: Upload
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ steps.create_release.outputs.tag-name }}
         files: "${{ steps.download.outputs.download-path }}/*"
