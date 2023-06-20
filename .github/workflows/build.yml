@@ -83,12 +83,15 @@ jobs:
       with:
         path: ~/artifacts/
     - name: Create Release
-      uses: "marvinpinto/action-automatic-releases@latest"
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+    - name: Upload
+      uses: softprops/action-gh-release@v1
       with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        automatic_release_tag: "latest"
-        # TODO: When we're ready to call it v1, change this.
-        prerelease: true
-        title: "${{ steps.vars.outputs.tag }}"
-        files: |
-          "{{ steps.download.outputs.download-path }}/*"
+        tag_name: ${{ steps.create_release.outputs.tag-name }}
+        files: "{{ steps.download.outputs.download-path }}/*"
