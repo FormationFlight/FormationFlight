@@ -79,6 +79,7 @@ jobs:
     if: startsWith(github.event.ref, 'refs/tags/v')
     steps:
     - name: Download Artifacts
+      id: download
       uses: actions/download-artifact@v3
       with:
         path: ~/artifacts/
@@ -91,4 +92,4 @@ jobs:
         prerelease: true
         title: "${{ steps.vars.outputs.tag }}"
         files: |
-          ~/artifacts/**
+          "{{ steps.download.outputs.download-path }}/*"
