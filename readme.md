@@ -1,5 +1,7 @@
 # FormationFlight  
 
+[![Build](https://github.com/FormationFlight/FormationFlight/actions/workflows/build.yml/badge.svg)](https://github.com/FormationFlight/FormationFlight/actions/workflows/build.yml)
+
 FormationFlight provides FPV pilots with inter-UAS positioning & telemetry enabling formation flights, chase footage, and ground station coordination with ease. Spiritual successor to the [iNav Radar](https://github.com/OlivierC-FR/ESP32-INAV-Radar) project, FormationFlight adds many improvements including faster update rates, more users, encryption, and smaller, lighter hardware originally developed for the [ExpressLRS project](https://github.com/ExpressLRS/ExpressLRS).
 
 ## Website
