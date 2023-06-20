@@ -1,6 +1,5 @@
 name: Build FormationFlight
-permissions:
-  contents: write
+permissions: write-all
 on: [push, pull_request]
 jobs:
   targets:
