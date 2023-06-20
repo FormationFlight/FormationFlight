@@ -56,7 +56,7 @@ jobs:
         platformio pkg update
         pio run -e ${{ matrix.target }}
         OUTNAME=`echo ${{ matrix.target }} | sed s/_via.*//`
-        mkdir -p $OUTDIR
+        mkdir -p ~/artifacts/
         mv .pio/build/${{ matrix.target }}/firmware.bin ~/artifacts/$OUTNAME.bin >& /dev/null || :
         # copy the common ESP32 files
         #if [[ ${{matrix.target}} == *ESP32* ]] ; then
