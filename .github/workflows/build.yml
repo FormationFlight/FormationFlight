@@ -55,15 +55,15 @@ jobs:
         platformio pkg install --platform native
         platformio pkg update
         pio run -e ${{ matrix.target }}
-        OUTDIR=~/artifacts/`echo ${{ matrix.target }} | sed s/_via.*//`
+        OUTNAME=`echo ${{ matrix.target }} | sed s/_via.*//`
         mkdir -p $OUTDIR
-        mv .pio/build/${{ matrix.target }}/firmware.bin $OUTDIR >& /dev/null || :
+        mv .pio/build/${{ matrix.target }}/firmware.bin ~/artifacts/$OUTNAME.bin >& /dev/null || :
         # copy the common ESP32 files
-        if [[ ${{matrix.target}} == *ESP32* ]] ; then
-          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin ~/artifacts/firmware/
-          mv .pio/build/${{ matrix.target }}/partitions.bin ~/artifacts/firmware/
-          mv .pio/build/${{ matrix.target }}/bootloader.bin ~/artifacts/firmware/bootloader_dio_40m.bin
-        fi
+        #if [[ ${{matrix.target}} == *ESP32* ]] ; then
+        #  cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin ~/artifacts/firmware/
+        #  mv .pio/build/${{ matrix.target }}/partitions.bin ~/artifacts/firmware/
+        #  mv .pio/build/${{ matrix.target }}/bootloader.bin ~/artifacts/firmware/bootloader_dio_40m.bin
+        #fi
 
     - name: Store Artifacts
       uses: actions/upload-artifact@v3
