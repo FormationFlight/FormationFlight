@@ -162,7 +162,7 @@ void setup()
     DBGLN("[main] RadioManager::addRadio ESPNOW");
     radioManager->addRadio(ESPNOW::getSingleton());
 #ifdef LORA_BAND
-    //ESPNOW::getSingleton()->setEnabled(false);
+    ESPNOW::getSingleton()->setEnabled(false);
 #endif
 #ifdef LORA_FAMILY_SX128X
     DBGLN("[main] RadioManager::addRadio LoRa_SX128X");
