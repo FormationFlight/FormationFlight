@@ -59,6 +59,14 @@ WiFiManager::WiFiManager()
         ESP.restart();
 #endif
     });
+    server->on("/system/bootloader", HTTP_POST, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "OK");
+#ifdef PLATFORM_ESP8266
+        ESP.rebootIntoUartDownloadMode();
+#elif defined(PLATFORM_ESP32)
+        ESP.restart();
+#endif
+    });
     server->on("/system/delay", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
         delayMicroseconds(1000);
