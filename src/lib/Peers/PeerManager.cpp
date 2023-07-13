@@ -139,6 +139,7 @@ void PeerManager::statusJson(JsonDocument *doc)
             o["courseTo"] = peer->direction;
             o["relativeAltitude"] = peer->relalt;
             o["packetsReceived"] = peer->packetsReceived;
+            o["lq"] = peer->lq;
             if (peer->rssi != 0) {
                 o["rssi"] = peer->rssi;
             }
