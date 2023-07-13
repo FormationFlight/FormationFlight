@@ -10,7 +10,7 @@ void MSP_GNSS::loop()
 {
     // Skip requesting MSP from non-capable hosts
     MSPHost host = MSPManager::getSingleton()->getFCVariant();
-    if (!MSPManager::getSingleton()->hostTXCapable(host)) {
+    if (!MSPManager::getSingleton()->hostIsFlightController(host)) {
         return;
     }
     // Don't update every loop

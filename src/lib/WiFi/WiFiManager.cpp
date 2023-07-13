@@ -105,6 +105,10 @@ WiFiManager::WiFiManager()
         serializeJson(doc, *response);
         request->send(response);
     });
+    server->on("/mspmanager/spoof", HTTP_POST, [](AsyncWebServerRequest *request) {
+        MSPManager::getSingleton()->enableSpoofing(true);
+        request->send(200, "text/plain", "OK");
+    });
     // GNSSManager
     server->on("/gnssmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
         StaticJsonDocument<1024> doc;

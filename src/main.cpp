@@ -211,6 +211,9 @@ void loop()
     // Periodic GNSS tasks
     GNSSManager::getSingleton()->loop();
     statsManager->storeTimerAndRestart(STATS_KEY_GNSSMANAGER_LOOPTIME_US);
+    // Periodic MSP tasks
+    MSPManager::getSingleton()->loop();
+    statsManager->storeTimerAndRestart(STATS_KEY_MSPMANAGER_LOOPTIME_US);
 
 #ifdef IO_LED_PIN
     if (millis() - sys.last_tx_start > cfg.slot_spacing) {
@@ -392,15 +395,13 @@ void loop()
 #endif
             air_type0_t packet = RadioManager::getSingleton()->prepare_packet();
             statsManager->startTimer();
+            MSPManager::getSingleton()->scheduleNextAt(millis() + cfg.slot_spacing);
             //DBGLN("[main] begin transmit");
             RadioManager::getSingleton()->transmit(&packet, sys.ota_nonce);
             statsManager->storeTimerAndRestart(STATS_KEY_OTA_SENDTIME_US);
             //sys.last_tx_end = millis();
             // DBGLN("[main] end transmit");
         }
-
-        sys.ota_slot = 0;
-        sys.msp_next_cycle = sys.last_tx_end + cfg.msp_after_tx_delay;
         sys.phase = MODE_OTA_RX;
     }
 
@@ -426,47 +427,7 @@ void loop()
         statsManager->storeTimerAndRestart(STATS_KEY_DISPLAY_UPDATETIME_US);
         sys.display_updated = sys.now;
     }
-
-    // ---------------------- SERIAL / MSP
-
-    if (sys.now > sys.msp_next_cycle && sys.phase > MODE_OTA_SYNC && sys.ota_slot < cfg.lora_nodes)
-    {
-
-        if (sys.ota_slot == 0 && (curr.host == HOST_INAV || curr.host == HOST_ARDU || curr.host == HOST_BTFL))
-        {
-
-            if (sys.ota_nonce % 6 == 0)
-            {
-                curr.state = MSPManager::getSingleton()->getState();
-            }
-
-            if ((sys.ota_nonce + 1) % 6 == 0)
-            {
-                curr.fcanalog = MSPManager::getSingleton()->getAnalogValues();
-            }
-        }
-
-        statsManager->startTimer();
-        // ----------------Send MSP to FC
-        if (sys.ota_slot == 0)
-        {
-            for (int i = 0; i < cfg.lora_nodes; i++)
-            {
-                peer_t *peer = PeerManager::getSingleton()->getPeer(i);
-                // Only send if the peer has been seen and it's not us
-                if (peer->id > 0 && i + 1 != curr.id)
-                {
-                    if (!DEBUG) {
-                        MSPManager::getSingleton()->sendRadar(peer);
-                    }
-                }
-            }
-        }
-        statsManager->storeTimerAndRestart(STATS_KEY_MSP_SENDTIME_US);
-
-        sys.msp_next_cycle += cfg.slot_spacing;
-        sys.ota_slot++;
-    }
+   
     static uint32_t lastDriftCalculation = 0;
     // Drift correction
     if (curr.id > 1 && PeerManager::getSingleton()->count_active() > 0)

@@ -5,6 +5,7 @@
 #define NAME_LENGTH 3
 #define NODES_MAX 6
 
+// Defines an internal representation of a peer
 struct peer_t {
    uint8_t id;
    uint8_t host;

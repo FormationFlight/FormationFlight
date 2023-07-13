@@ -5,6 +5,7 @@ const char* keyFriendlyNames[StatsKeyCount] = {
     "wifimanager_looptime_us",
     "peermanager_looptime_us",
     "gnssmanager_looptime_us",
+    "mspmanager_looptime_us",
     "display_updatetime_us",
     "msp_sendtime_us",
     "ota_sendtime_us",
