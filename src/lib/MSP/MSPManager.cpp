@@ -189,17 +189,25 @@ void MSPManager::loop()
         StatsManager::getSingleton()->startTimer();
         if (this->spoofingPeers)
         {
+            GNSSLocation spoofOrigin = GNSSManager::getSingleton()->getLocation();
+            if (spoofOrigin.fixType == GNSS_FIX_TYPE_NONE) {
+                // Pick an arbitrary point to spoof peers at if we don't know where we are
+                // 45.171546, 5.722387 is Grenoble, France where OlivierC-FR comes from as an homage to his project iNav Radar
+                spoofOrigin.lat = 45.171546;
+                spoofOrigin.lon = 5.722387;
+            }
             uint8_t id = peerIndex + 1;
+            // Generate peers in 100m offsets away in a circle around the user 
+            GNSSLocation peerLocation = GNSSManager::generatePointAround(spoofOrigin, peerIndex, cfg.lora_nodes, 100 * (peerIndex + 1));
             peer_t peer{
                 .id = id,
                 .state = 1,
                 .lost = 0,
                 .updated = millis(),
+                .lq = 4,
                 .gps = {
-                    .fixType = MSP_GPS_FIX_3D,
-                    .numSat = 12,
-                    .lat = (int)(38.8977 * 100),
-                    .lon = (int)(-77.0365 * 100),
+                    .lat = (int)(peerLocation.lat * 1000000),
+                    .lon = (int)(peerLocation.lon * 1000000),
                     .alt = 100,
                     .groundSpeed = 0,
                     .groundCourse = 0,
@@ -225,9 +233,11 @@ void MSPManager::loop()
         }
         StatsManager::getSingleton()->storeTimerAndRestart(STATS_KEY_MSP_SENDTIME_US);
         // Move to the next peer
-        peerIndex++;
-        // Schedule a new transmission after the current one
-        nextSendTime = nextSendTime + cfg.slot_spacing;
+        if (peerIndex < cfg.lora_nodes - 1) {
+            peerIndex++;
+            // Schedule a new transmission after the current one
+            nextSendTime = nextSendTime + cfg.slot_spacing;
+        }
     }
 }
 

@@ -16,6 +16,7 @@ GNSSManager* GNSSManager::getSingleton()
     return gnssManager;
 }
 
+// Returns the system's understanding of its current location
 GNSSLocation GNSSManager::getLocation()
 {
     static uint32_t lastUpdate = 0;
@@ -145,4 +146,35 @@ int16_t GNSSManager::courseTo(GNSSLocation b)
 {
     GNSSLocation loc = this->getLocation();
     return courseDegrees(loc.lat, loc.lon, b.lat, b.lon);
+}
+
+// Returns the calculated point at a distance and bearing from the given coordinates
+GNSSLocation GNSSManager::calculatePointAtDistance(GNSSLocation loc, double distanceMeters, double bearing) {
+    double lat1 = radians(loc.lat); // Convert latitude to radians
+    double lon1 = radians(loc.lon); // Convert longitude to radians
+
+    double angularDistance = distanceMeters / 6371000; // Calculate the angular distance
+    double bearingRadians = deg2rad(bearing); // Convert bearing to radians
+
+    double lat2 = asin(sin(lat1) * cos(angularDistance) +
+                       cos(lat1) * sin(angularDistance) * cos(bearingRadians));
+    double lon2 = lon1 + atan2(sin(bearingRadians) * sin(angularDistance) * cos(lat1),
+                               cos(angularDistance) - sin(lat1) * sin(lat2));
+
+    // Convert back to degrees
+    lat2 = degrees(lat2);
+    lon2 = degrees(lon2);
+
+    GNSSLocation point;
+    point.lat = lat2;
+    point.lon = lon2;
+
+    return point;
+}
+
+// Generates a single point focused around loc offset by a subset of the bearing circle
+// for example if count = 3, n=0 will be at bearing 0°, n=1 will be at bearing 120°, n=2 will be at bearing 240°
+GNSSLocation GNSSManager::generatePointAround(GNSSLocation loc, int n, int count, double distance) {
+    double bearing = (360.0 / count) * n; // Calculate the bearing between each point
+    return calculatePointAtDistance(loc, distance, bearing);
 }
