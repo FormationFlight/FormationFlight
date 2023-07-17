@@ -237,6 +237,10 @@ void MSPManager::loop()
             peerIndex++;
             // Schedule a new transmission after the current one
             nextSendTime = nextSendTime + cfg.slot_spacing;
+        } else {
+            // Avoid running the last slot twice; push our next send out 1 full cycle
+            // this will be reduced by the next TX event
+            nextSendTime = cfg.slot_spacing * cfg.lora_nodes;
         }
     }
 }
