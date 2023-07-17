@@ -50,6 +50,8 @@ int LoRa_SX128X::begin() {
 #endif
     radio = new SX1281(new Module(LORA_PIN_CS, LORA_PIN_DIO, LORA_PIN_RST, LORA_PIN_BUSY));
     radio->begin(FREQUENCY, BANDWIDTH, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, LORA_POWER, PREAMBLE_LENGTH);
+    // We appear to need to set this twice
+    radio->setOutputPower(LORA_POWER);
     //radio->setCRC(0);
     #ifdef LORA_PIN_RXEN
     radio->setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
