@@ -43,6 +43,7 @@ WiFiManager::WiFiManager()
         doc["name"] = curr.name;
         doc["longName"] = generate_id();
         doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
+        doc["state"] = MSPManager::getSingleton()->getState();
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);
