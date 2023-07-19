@@ -18,7 +18,7 @@
 // -------- GENERAL
 
 #define PRODUCT_NAME "FormationFlight"
-#define VERSION "4.0.0"
+#define VERSION "4.1.1"
 #define VERSION_CONFIG 400
 #define FORCE_DEFAULT_CONFIG 1
 #define CFG_AUTOSTART_BT 0
