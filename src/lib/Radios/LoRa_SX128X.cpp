@@ -53,7 +53,7 @@ int LoRa_SX128X::begin() {
     // We appear to need to set this twice
     radio->setOutputPower(LORA_POWER);
     //radio->setCRC(0);
-    #ifdef LORA_PIN_RXEN
+    #ifdef LORA_PIN_TXEN
     radio->setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
     #endif
     //radio->implicitHeader(sizeof(air_type0_t));
