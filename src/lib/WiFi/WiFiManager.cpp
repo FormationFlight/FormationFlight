@@ -179,6 +179,13 @@ void WiFiManager::loop()
 {
     // OTA update loop
     ArduinoOTA.handle();
+    if (this->getOTAComplete()) {
+#ifdef PLATFORM_ESP8266
+        ESP.reset();
+#elif defined(PLATFORM_ESP32)
+        ESP.restart();
+#endif
+    }
 }
 
 void OnOTAStart()
@@ -196,8 +203,27 @@ void WiFiManager::setOTAActive()
     otaActive = true;
 }
 
+bool WiFiManager::getOTAComplete()
+{
+    return otaCompleteAt > 0 && millis() - otaCompleteAt > 500;
+}
+
+void WiFiManager::setOTAComplete()
+{
+    otaCompleteAt = millis();
+}
+
+
 void handleFileUploadResponse(AsyncWebServerRequest *request)
 {
+        AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "Please wait while the device reboots...");
+        // We can send them back to the homepage once we have a homepage :)
+        /*response->addHeader("Refresh", "15");
+        response->addHeader("Location", "/");
+        response->addHeader("Connection", "close");*/
+        request->send(response);
+        request->client()->close();
+
 }
 
 void handleFileUploadData(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len, bool final)
@@ -246,10 +272,6 @@ void handleFileUploadData(AsyncWebServerRequest *request, const String &filename
 
     if (final)
     {
-        AsyncWebServerResponse *response = request->beginResponse(302, "text/plain", "Please wait while the device reboots...");
-        response->addHeader("Refresh", "15");
-        response->addHeader("Location", "/");
-        request->send(response);
         if (!Update.end(true))
         {
             Update.printError(Serial);
@@ -257,11 +279,7 @@ void handleFileUploadData(AsyncWebServerRequest *request, const String &filename
         else
         {
             DBGLN("Update complete");
-#ifdef PLATFORM_ESP8266
-        ESP.reset();
-#elif defined(PLATFORM_ESP32)
-        ESP.restart();
-#endif
+            WiFiManager::getSingleton()->setOTAComplete();
         }
     }
 }
