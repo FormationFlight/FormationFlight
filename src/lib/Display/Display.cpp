@@ -45,7 +45,7 @@ void display_draw_status(system_t *sys)
         display.setFont(ArialMT_Plain_24);
         display.setTextAlignment(TEXT_ALIGN_RIGHT);
         display.drawString(26, 11, String(loc.numSat));
-        display.drawString(13, 42, String(PeerManager::getSingleton()->count_active() + 1 - sys->lora_no_tx));
+        display.drawString(13, 42, String(PeerManager::getSingleton()->count_active() + 1 - sys->disable_tx));
         display.drawString(125, 11, String(peer_slotname[curr.id]));
         display.setFont(ArialMT_Plain_10);
         display.drawString(126, 29, "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ ");
@@ -289,8 +289,9 @@ void display_draw_status(system_t *sys)
 
             if (iscurrent)
             {
-                display.drawString(0, 54, String((float)curr.fcanalog.vbat / 10) + "v");
-                display.drawString(50, 54, String((int)curr.fcanalog.mAhDrawn) + "mah");
+                msp_analog_t analogValues = MSPManager::getSingleton()->getAnalogValues();
+                display.drawString(0, 54, String((float)analogValues.vbat / 10) + "v");
+                display.drawString(50, 54, String((int)analogValues.mAhDrawn) + "mah");
             }
 
             display.setTextAlignment(TEXT_ALIGN_RIGHT);
@@ -361,7 +362,8 @@ void display_draw_scan(system_t *sys)
 
     if (curr.host != HOST_NONE)
     {
-        display.drawString(35, 29, String(host_name[curr.host]) + " " + String(curr.fcversion.versionMajor) + "." + String(curr.fcversion.versionMinor) + "." + String(curr.fcversion.versionPatchLevel));
+        msp_fc_version_t version = MSPManager::getSingleton()->getFCVersion();
+        display.drawString(35, 29, String(host_name[curr.host]) + " " + String(version.versionMajor) + "." + String(version.versionMinor) + "." + String(version.versionPatchLevel));
     }
     else
     {

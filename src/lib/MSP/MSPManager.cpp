@@ -173,16 +173,7 @@ void MSPManager::loop()
     {
         if (hostIsFlightController(getFCVariant()))
         {
-
-            if (sys.ota_nonce % 6 == 0)
-            {
-                curr.state = this->getState();
-            }
-
-            if ((sys.ota_nonce + 1) % 6 == 0)
-            {
-                curr.fcanalog = this->getAnalogValues();
-            }
+            // We used to get state & analog values here; necessary?
         }
 
         // Send MSP radar positions to the FC

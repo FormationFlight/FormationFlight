@@ -59,18 +59,9 @@ void IRAM_ATTR handleInterrupt()
     if (sys.io_button_pressed == 0)
     {
         sys.io_button_pressed = 1;
-
         if (sys.phase > MODE_OTA_SYNC)
         {
             sys.display_page++;
-        }
-        else if (sys.phase == MODE_HOST_SCAN || sys.phase == MODE_OTA_SCAN)
-        {
-            sys.io_bt_enabled = 1; // Enable the Bluetooth if button pressed during host scan or lora scan
-        }
-        else if (sys.phase == MODE_START)
-        {
-            sys.forcereset = 1;
         }
         sys.io_button_released = millis();
     }
@@ -89,17 +80,12 @@ void setup()
     DBGF("%s version %s UID %s\n", PRODUCT_NAME, VERSION, generate_id().c_str());
 
     sys.phase = MODE_START;
-    sys.forcereset = 0;
-    sys.io_bt_enabled = CFG_AUTOSTART_BT;
-    sys.debug = 0;
 
     config_init();
     sys.lora_cycle = cfg.lora_nodes * cfg.slot_spacing;
-    sys.cycle_stats = sys.lora_cycle * 2;
 #ifdef IO_LED_PIN
     pinMode(IO_LED_PIN, OUTPUT);
 #endif
-    sys.io_led_blink = 0;
 #ifdef PIN_BUTTON
     pinMode(PIN_BUTTON, INPUT);
     attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), handleInterrupt, RISING);
@@ -231,14 +217,6 @@ void loop()
 
     if (sys.phase == MODE_START)
     {
-
-        if (sys.forcereset)
-        {
-            display_draw_clearconfig();
-            config_clear();
-            delay(3000);
-            ESP.restart();
-        }
         sys.phase = MODE_HOST_SCAN;
     }
 
@@ -282,7 +260,6 @@ void loop()
             {
                 delay(100);
                 curr.host = MSPManager::getSingleton()->getFCVariant();
-                curr.fcversion = MSPManager::getSingleton()->getFCVersion();
                 if (cfg.force_gs)
                 {
                     curr.host = HOST_GCS;
@@ -307,11 +284,11 @@ void loop()
             if (PeerManager::getSingleton()->count() >= cfg.lora_nodes || curr.host == HOST_GCS)
             {
                 // Too many nodes already, or connected to a ground station: go to silent mode
-                sys.lora_no_tx = 1;
+                sys.disable_tx = 1;
             }
             else
             {
-                sys.lora_no_tx = 0;
+                sys.disable_tx = 0;
                 pick_id();
             }
             sys.display_page = 0;
@@ -344,7 +321,7 @@ void loop()
     if (sys.phase == MODE_OTA_SYNC)
     {
 
-        if (PeerManager::getSingleton()->count(false) == 0 || sys.lora_no_tx)
+        if (PeerManager::getSingleton()->count(false) == 0 || sys.disable_tx)
         {
             // Alone or Silent mode, no need to sync
             sys.next_tx = millis() + sys.lora_cycle;
@@ -356,9 +333,6 @@ void loop()
         }
 
         sys.display_updated = sys.next_tx + sys.lora_cycle - 30;
-        sys.stats_updated = sys.next_tx + sys.lora_cycle - 15;
-        sys.pps = 0;
-        sys.ppsc = 0;
         sys.phase = MODE_OTA_RX;
     }
 
@@ -372,7 +346,7 @@ void loop()
             sys.next_tx += sys.lora_cycle;
         }
 
-        if (sys.lora_no_tx)
+        if (sys.disable_tx)
         {
             sprintf(sys.message, "%s", "SILENT MODE (NO TX)");
         }

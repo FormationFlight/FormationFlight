@@ -35,6 +35,8 @@ WiFiManager::WiFiManager()
         StaticJsonDocument<512> doc;
         doc["target"] = CFG_TARGET_FULLNAME;
         doc["version"] = VERSION;
+        doc["buildTime"] = BUILDTIME;
+        doc["cloudBuild"] = CLOUD_BUILD;
         doc["heap"] = ESP.getFreeHeap();
 #ifdef LORA_BAND
         doc["lora_band"] = LORA_BAND;
