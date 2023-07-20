@@ -194,7 +194,7 @@ bool MSP::recv2(uint16_t * messageID, void * payload, uint8_t maxSize, uint8_t *
 
 
 
-        return true;
+      return true;
 
 
 
