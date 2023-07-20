@@ -167,9 +167,7 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         break;
     }
 
-    sys.num_peers = PeerManager::getSingleton()->count();
-
-    if ((sys.air_last_received_id == curr.id) && (sys.phase > MODE_OTA_SYNC) && !sys.lora_no_tx)
+    if ((sys.air_last_received_id == curr.id) && (sys.phase > MODE_OTA_SYNC) && !sys.disable_tx)
     {
         // Pick another slot
         sprintf(sys.message, "%s", "ID CONFLICT");

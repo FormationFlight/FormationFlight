@@ -18,55 +18,21 @@
 // -------- GENERAL
 
 #define PRODUCT_NAME "FormationFlight"
-#define VERSION "4.0.0"
 #define VERSION_CONFIG 400
-#define FORCE_DEFAULT_CONFIG 1
-#define CFG_AUTOSTART_BT 0
 #define START_DELAY 1000
-// #define CFG_TARGET_NAME < (platformio.ini)
-// #define CFG_TARGET_FULLNAME < (platformio.ini)
 
-// -------- LORA DEFAULTS
-#define LORA_MODE 0
-#define LORA_AUTOMODE 0
-#define LORA_FORCE_GS 0
-// #define LORA_BAND 433 < (platformio.ini)
-// #define LORA_FREQUENCY 433375000 < (platformio.ini)
-#define LORA_FREQUENCY_433 433375000 // Hz
-#define LORA_FREQUENCY_868 868500000 // Hz
-#define LORA_FREQUENCY_915 915000000 // Hz
+// These are injected at build time by build_flags.py, these are here to make syntax highlighting happy
+#ifndef VERSION
+#define VERSION "vX.X.X"
+#endif
+#ifndef BUILDTIME
+#define BUILDTIME "2000-01-01"
+#endif
+#ifndef CLOUD_BUILD
+#define CLOUD_BUILD false
+#endif
 
-// --- Mode 0 (Standard)
-
-#define LORA_M0_BANDWIDTH 250000 // Hz
-#define LORA_M0_CODING_RATE 5
-#define LORA_M0_SPREADING_FACTOR 10
-#define LORA_M0_NODES 4
-#define LORA_M0_SLOT_SPACING 250 // ms
-#define LORA_M0_TIMING_DELAY -150 // ms
-#define LORA_M0_MSP_AFTER_TX_DELAY 150 // ms
-
-// --- Mode 1 (Long range)
-
-#define LORA_M1_BANDWIDTH 250000 // Hz
-#define LORA_M1_CODING_RATE 5
-#define LORA_M1_SPREADING_FACTOR 11
-#define LORA_M1_NODES 4
-#define LORA_M1_SLOT_SPACING 500 // ms
-#define LORA_M1_TIMING_DELAY -300 // ms
-#define LORA_M1_MSP_AFTER_TX_DELAY 300 // ms
-
-// --- Mode 2 (Fast)
-
-#define LORA_M2_BANDWIDTH 250000 // Hz
-#define LORA_M2_CODING_RATE 5
-#define LORA_M2_SPREADING_FACTOR 9
-#define LORA_M2_NODES 3
-#define LORA_M2_SLOT_SPACING 166 // ms
-#define LORA_M2_TIMING_DELAY -75 // ms
-#define LORA_M2_MSP_AFTER_TX_DELAY 75 // ms
-
-// --- Mode 3 (Ultrafast)
+// Timing parameters
 
 #define LORA_M3_BANDWIDTH 250000 // Hz
 #define LORA_M3_CODING_RATE 4
@@ -85,8 +51,9 @@
 
 // --------- IO AND DISPLAY
 
+// Interval in ms between display updates
 #define DISPLAY_CYCLE 250
-#define IO_LEDBLINK_DURATION 300
+// Standard MSP serial speed
 #define SERIAL_SPEED 115200
 
 // -------- PHASES
@@ -100,30 +67,16 @@ enum MODE {
     MODE_OTA_TX = 5
 };
 
-// -------- HOST
-
-
 struct curr_t {
+    // Our timeslot ID
     uint8_t id;
+    // MSP FC state
     uint8_t state;
+    // What MSP FC type we're connected to
     MSPHost host;
+    // Our own name
     char name[16];
-    uint8_t tick;
-    msp_raw_gps_t gps;
-    msp_fc_version_t fcversion;
-    msp_analog_t fcanalog;
 };
-
-/*struct air_type0_t {
-    unsigned int id : 3;
-    signed int lat : 25; // -9 000 000 to +9 000 000 (5 decimals)
-    signed int lon : 26; // -18 000 000 to +18 000 000 (5 decimals)
-    unsigned int alt : 13; // 0 to +8192m
-    unsigned int extra_type : 3;
-    signed int extra_value : 10;
-    uint8_t crc;
-};*/
-
 
 // For encryption reasons, the packet must be 16 bytes or greater
 struct __attribute__((packed)) air_type0_t {
@@ -165,57 +118,42 @@ struct config_t {
 };
 
 struct system_t {
-    bool debug;
-    bool forcereset;
-    uint8_t phase;
-
+    MODE phase;
+    // Time in ms for all peers to transmit one interval
     uint16_t lora_cycle;
+    // Incremented every packet sent
     uint8_t ota_nonce = 0;
-
+    // Current millis() at beginning of each loop
     uint32_t now = 0;
-    uint32_t now_sec = 0;
+    // Last OTA packet received ID field
     uint8_t air_last_received_id = 0;
-    int last_rssi;
-    float last_snr;
-    long last_freqerror;
-
-    uint8_t pps = 0;
-    uint8_t ppsc = 0;
-    uint8_t num_peers = 0;
-    uint8_t num_peers_active = 0;
-
-    bool lora_no_tx = 0;
-    uint8_t ota_slot = 0;
+    // Set enabled when there are too many peers, disables transmission
+    bool disable_tx = false;
+    // millis() when last TX began
     uint32_t last_tx_start = 0;
+    // millis() when last TX ended
     uint32_t last_tx_end = 0;
-    uint32_t lora_last_rx = 0;
+    // millis() when next TX is scheduled for
     uint32_t next_tx = 0;
+    // Offset from peer in ms
     int32_t drift = 0;
+    // Amount by which we'll offset our next transmission
     int drift_correction = 0;
-
-    uint32_t msp_next_cycle = 0;
-
+    // If display is enabled
+    bool display_enable = true;
+    // Current page on OLED
     uint8_t display_page = 0;
-    bool display_enable = 1;
+    // millis() when the display contents were last updated
     uint32_t display_updated = 0;
-
+    // millis() when the button was last released
     uint32_t io_button_released = 0;
-    bool io_button_pressed = 0;
+    // Whether button is pressed
+    bool io_button_pressed = false;
 
-    uint16_t cycle_stats;
+    // Timestamp when the last scan cycle began
     uint32_t cycle_scan_begin;
 
-    uint32_t menu_begin;
-    uint16_t menu_timeout = 4000;
-    uint8_t menu_line = 1;
-
-    uint32_t io_led_changestate;
-    uint8_t io_led_count;
-    uint8_t io_led_blink;
-    uint32_t stats_updated = 0;
-
-    bool io_bt_enabled = 0;
-
+    // Message to display to the user
     char message[20];
 };
 
