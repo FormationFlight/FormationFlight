@@ -10,10 +10,13 @@ public:
     void loop();
     void setOTAActive();
     bool getOTAActive();
+    void setOTAComplete();
+    bool getOTAComplete();
 
 private:
     AsyncWebServer *server;
     bool otaActive = false;
+    unsigned long otaCompleteAt = 0;
 };
 
 void OnOTAStart();
