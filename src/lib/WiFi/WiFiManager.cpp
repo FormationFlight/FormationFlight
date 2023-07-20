@@ -154,6 +154,8 @@ WiFiManager::WiFiManager()
         serializeJson(doc, *response);
         request->send(response);
     });
+    // OTA firmware updates
+    server->on("/update", HTTP_POST, handleFileUploadResponse, handleFileUploadData);
     server->begin();
     // Setup OTA updates
     ArduinoOTA.begin();
@@ -190,4 +192,74 @@ bool WiFiManager::getOTAActive()
 void WiFiManager::setOTAActive()
 {
     otaActive = true;
+}
+
+void handleFileUploadResponse(AsyncWebServerRequest *request)
+{
+}
+
+void handleFileUploadData(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+    if (!filename.endsWith(".bin") && !filename.endsWith(".elf")) {
+        request->send(400, "text/plain", "must upload .bin or .elf");
+    }
+    if (!index)
+    {
+        size_t updateLength = request->contentLength();
+        DBGF("HTTP update started with filename %s and size %d bytes\n", filename.c_str(), updateLength);
+#ifdef PLATFORM_ESP8266
+        Update.runAsync(true);
+#endif
+        if (!Update.begin(updateLength, U_FLASH))
+        {
+            Update.printError(Serial);
+#ifdef PLATFORM_ESP8266
+            request->send(500, "text/plain", Update.getErrorString());
+#elif defined(PLATFORM_ESP32)
+            request->send(500, "text/plain", Update.errorString());
+#endif
+            return;
+        }
+    }
+
+    if (Update.write(data, len) != len)
+    {
+        Update.printError(Serial);
+#ifdef PLATFORM_ESP8266
+        request->send(500, "text/plain", Update.getErrorString());
+#elif defined(PLATFORM_ESP32)
+        request->send(500, "text/plain", Update.errorString());
+#endif
+        return;
+    }
+    else
+    {
+        static uint8_t previousPercentComplete = 255;
+        uint8_t percentComplete = Update.progress() * 100 / Update.size();
+        if (percentComplete != previousPercentComplete) {
+            DBGF("Progress: %d%%\n", percentComplete);
+            previousPercentComplete = percentComplete;
+        }
+    }
+
+    if (final)
+    {
+        AsyncWebServerResponse *response = request->beginResponse(302, "text/plain", "Please wait while the device reboots...");
+        response->addHeader("Refresh", "15");
+        response->addHeader("Location", "/");
+        request->send(response);
+        if (!Update.end(true))
+        {
+            Update.printError(Serial);
+        }
+        else
+        {
+            DBGLN("Update complete");
+#ifdef PLATFORM_ESP8266
+        ESP.reset();
+#elif defined(PLATFORM_ESP32)
+        ESP.restart();
+#endif
+        }
+    }
 }
