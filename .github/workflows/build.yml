@@ -1,6 +1,13 @@
 name: Build FormationFlight
 permissions: write-all
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - v*
+  pull_request:
+    types: [review_requested]
 jobs:
   targets:
     runs-on: ubuntu-latest
