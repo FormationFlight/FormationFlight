@@ -15,7 +15,7 @@ def format_define_bool(key, value):
     return format_define(key, bool_string)
 def get_git_version():
     git_version_string = "ver unknown"
-    git_version_result = subprocess.run("git describe --all --dirty", capture_output=True, encoding='utf-8')
+    git_version_result = subprocess.run("git describe --all --dirty", capture_output=True, encoding='utf-8', shell=True)
     if git_version_result.returncode == 0:
         git_version_string = git_version_result.stdout
     return git_version_string
