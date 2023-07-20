@@ -1,8 +1,11 @@
 # FormationFlight  
 
+![GitHub release (with filter)](https://img.shields.io/github/v/release/FormationFlight/FormationFlight?logo=github)
 [![Build](https://github.com/FormationFlight/FormationFlight/actions/workflows/build.yml/badge.svg)](https://github.com/FormationFlight/FormationFlight/actions/workflows/build.yml)
+![License](https://img.shields.io/github/license/FormationFlight/FormationFlight)
+[![Chat](https://img.shields.io/discord/1120104184725905443?logo=discord)](https://discord.gg/npaX3VxQjh)
 
-FormationFlight provides FPV pilots with inter-UAS positioning & telemetry enabling formation flights, chase footage, and ground station coordination with ease. Spiritual successor to the [iNav Radar](https://github.com/OlivierC-FR/ESP32-INAV-Radar) project, FormationFlight adds many improvements including faster update rates, more users, encryption, and smaller, lighter hardware originally developed for the [ExpressLRS project](https://github.com/ExpressLRS/ExpressLRS).
+FormationFlight provides FPV pilots with inter-UAS positioning & telemetry, enabling formation flights, chase footage, and ground station coordination with ease. Spiritual successor to the [iNav Radar](https://github.com/OlivierC-FR/ESP32-INAV-Radar) project, FormationFlight adds many improvements including faster update rates, more users, encryption, and smaller, lighter hardware originally developed for the [ExpressLRS project](https://github.com/ExpressLRS/ExpressLRS).
 
 ## Getting Started
 
