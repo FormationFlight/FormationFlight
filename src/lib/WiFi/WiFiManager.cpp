@@ -17,6 +17,7 @@
 #include "../Power/PowerManager.h"
 #include "../Statistics/StatsManager.h"
 #include "../Cryptography/CryptoManager.h"
+#include "webcontent.h"
 
 WiFiManager::WiFiManager()
 {
@@ -31,25 +32,10 @@ WiFiManager::WiFiManager()
     ssid += chipIDString;
     WiFi.softAP(ssid.c_str(), "inavradar");
     server = new AsyncWebServer(80);
-    server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        StaticJsonDocument<512> doc;
-        doc["target"] = CFG_TARGET_FULLNAME;
-        doc["version"] = VERSION;
-        doc["buildTime"] = BUILDTIME;
-        doc["cloudBuild"] = CLOUD_BUILD;
-        doc["heap"] = ESP.getFreeHeap();
-#ifdef LORA_BAND
-        doc["lora_band"] = LORA_BAND;
-#endif
-        doc["uptimeMilliseconds"] = millis();
-        doc["name"] = curr.name;
-        doc["longName"] = generate_id();
-        doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
-        doc["state"] = MSPManager::getSingleton()->getState();
-        AsyncResponseStream *response = request->beginResponseStream("application/json");
-        serializeJson(doc, *response);
-        request->send(response);
-    });
+    // Permit cross-origin requests
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
     server->on("/system/shutdown", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
         ESP.deepSleep(UINT32_MAX);
@@ -158,6 +144,16 @@ WiFiManager::WiFiManager()
     });
     // OTA firmware updates
     server->on("/update", HTTP_POST, handleFileUploadResponse, handleFileUploadData);
+    // 404
+    server->onNotFound([](AsyncWebServerRequest *request) {
+        // Handle CORS Preflight
+        if (request->method() == HTTP_OPTIONS) {
+            request->send(200);
+        } else {
+            request->send(404, "text/plain", "Not found");
+        }
+    });
+    #include "staticfilehandler.inc"
     server->begin();
     // Setup OTA updates
     ArduinoOTA.begin();
@@ -211,6 +207,32 @@ bool WiFiManager::getOTAComplete()
 void WiFiManager::setOTAComplete()
 {
     otaCompleteAt = millis();
+}
+
+void handleSystemStatus(AsyncWebServerRequest *request)
+{
+    StaticJsonDocument<512> doc;
+    doc["target"] = CFG_TARGET_FULLNAME;
+#ifdef PLATFORM_ESP8266
+    doc["platform"] = "ESP8266";
+#elif defined(PLATFORM_ESP32)
+    doc["platform"] = "ESP32";
+#endif
+    doc["version"] = VERSION;
+    doc["buildTime"] = BUILDTIME;
+    doc["cloudBuild"] = CLOUD_BUILD;
+    doc["heap"] = ESP.getFreeHeap();
+#ifdef LORA_BAND
+    doc["lora_band"] = LORA_BAND;
+#endif
+    doc["uptimeMilliseconds"] = millis();
+    doc["name"] = curr.name;
+    doc["longName"] = generate_id();
+    doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
+    doc["state"] = MSPManager::getSingleton()->getState();
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    request->send(response);
 }
 
 
