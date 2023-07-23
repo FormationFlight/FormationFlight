@@ -59,47 +59,20 @@ function Sidebar({url, show, systemStatus}) {
     <div class="flex flex-1 flex-col">
       <${NavLink} title="Dashboard" icon=${Icons.home} href="/" url=${url} />
       <${NavLink} title="Settings" icon=${Icons.settings} href="/settings" url=${url} />
+      <${NavLink} title="Update" icon=${Icons.upArrowBox} href="/update" url=${url} />
     <//>
   <//>
 <//>`;
 };
 
-function Chart({data}) {
-  const n = data.length /* entries */, w = 20 /* entry width */, ls = 15/* left space */;
-  const h = 100 /* graph height */, yticks = 5 /* Y axis ticks */, bs = 10 /* bottom space */;
-  const ymax = 25;
-  const yt = i => (h - bs) / yticks * (i + 1);
-  const bh = p => (h - bs) * p / 100; // Bar height
-  const by = p => (h - bs) - bh(p);
-  const range = (start, size, step) => Array.from({length: size}, (_, i) => i * (step || 1) + start);
-  // console.log(ds);
-  return html`
-<div class="my-4 divide-y divide-gray-200 overflow-auto rounded bg-white">
-  <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-  Temperature, last 24h
-  <//>
-  <div class="relative">
-    <svg class="bg-yellow-x50 w-full p-4" viewBox="0 0 ${n*w+ls} ${h}">
-      ${range(0, yticks).map(i => html`
-        <line x1=0 y1=${yt(i)} x2=${ls+n*w} y2=${yt(i)} stroke-width=0.3 class="stroke-slate-300" stroke-dasharray="1,1" />
-        <text x=0 y=${yt(i)-2} class="text-[6px] fill-slate-400">${ymax-ymax/yticks*(i+1)}<//>
-      `)}
-      ${range(0, n).map(x => html`
-        <rect x=${ls+x*w} y=${by(data[x]*100/ymax)} width=12 height=${bh(data[x]*100/ymax)} rx=2 class="fill-cyan-500" />
-        <text x=${ls+x*w} y=100 class="text-[6px] fill-slate-400">${x*2}:00<//>
-      `)}
-    <//>
-  <//>
-<//>`;
-};
-
-function DeveloperNote({text}) {
+// .map(v => html` <p class="my-2 text-slate-500">${v}<//>`)
+function Note({title = "Note", textBlocks}) {
   return html`
 <div class="flex p-4 gap-2">
   <${Icons.info} class="self-start basis-[30px] grow-0 shrink-0 text-green-600" />
   <div class="text-sm">
-    <div class="font-semibold mt-1">Developer Note<//>
-    ${text.split('.').map(v => html` <p class="my-2 text-slate-500">${v}<//>`)}
+    <div class="font-semibold mt-1">${title}<//>
+    ${textBlocks}
   <//>
 <//>`;
 };
@@ -123,36 +96,41 @@ function Main({}) {
     refresh();
     setInterval(refresh, 5000);
   }, []);
+
+  const ellipsizeString = (str, n) => {
+    if (str.length <= n) {
+      return str;
+    }
+  
+    const ellipsis = '…';
+    const truncatedLength = n - ellipsis.length;
+    
+    // Return the shortened string with an ellipsis
+    return str.substring(0, truncatedLength) + ellipsis;
+  }
+
+  const fixType = (index) => {
+    return ['No', '2D', '3D'][index];
+  }
+
   if (!systemStatus || !peermanagerStatus || !gnssmanagerStatus || !cryptomanagerStatus || !radiomanagerStatus) return '';
   return html`
 <div class="p-2">
-  <div class="p-4 sm:p-2 mx-auto grid grid-cols-2 lg:grid-cols-4 gap-4">
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 grid-flow-row">
     <${Stat} title="Flight Controller" text="${systemStatus.host}" tipText="${systemStatus.host == 'NoFC' ? 'bad' : 'good'}" tipIcon=${systemStatus.host == 'NoFC' ? Icons.fail : Icons.ok} tipColors=${systemStatus.host == 'NoFC' ? tipColors.red : tipColors.green} />
+    <${Stat} title="GPS Fix" text="${gnssmanagerStatus.numSat} Sats / ${fixType(gnssmanagerStatus.fixType)} Fix" tipText="${gnssmanagerStatus.lat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.lat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.lat == '0' ? tipColors.yellow : tipColors.green} />
+
     <${Stat} title="GPS Location" text="${gnssmanagerStatus.lat}°N ${gnssmanagerStatus.lon}°W" tipText="${gnssmanagerStatus.lat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.lat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.lat == '0' ? tipColors.yellow : tipColors.green} />
     <${Stat} title="Active Peers" text="${peermanagerStatus.countActive}" tipText="${peermanagerStatus.countActive == 0 ? 'warning' : 'good'}" tipIcon=${peermanagerStatus.countActive == 0 ? Icons.warn : Icons.ok} tipColors=${peermanagerStatus.countActive == 0 ? tipColors.yellow : tipColors.green} />
-    <${Stat} title="Encryption" text="${cryptomanagerStatus.enabled ? cryptomanagerStatus.keyString : 'Open'}" tipText="${cryptomanagerStatus.enabled ? 'Encrypted' : 'Open'}" tipIcon=${cryptomanagerStatus.enabled ? Icons.shield : Icons.exclamationTriangle} tipColors=${cryptomanagerStatus.enabled ? tipColors.green : tipColors.yellow} />
-
-    <div class="bg-white col-span-2 border rounded-md shadow-lg" role="alert">
-    <${PeerTable} systemStatus=${systemStatus} data=${peermanagerStatus} />
-    <//>
-    <div class="bg-white col-span-2 border rounded-md shadow-lg" role="alert">
-    <${RadioTable} data=${radiomanagerStatus} />
-    <//>
+    <${Stat} title="Encryption" text="${cryptomanagerStatus.enabled ? ellipsizeString(cryptomanagerStatus.keyString, 10) : 'Open'}" tipText="${cryptomanagerStatus.enabled ? 'Encrypted' : 'Open'}" tipIcon=${cryptomanagerStatus.enabled ? Icons.shield : Icons.exclamationTriangle} tipColors=${cryptomanagerStatus.enabled ? tipColors.green : tipColors.yellow} />
   <//>
-  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-    <!--<${Chart} data=${status.points} />-->
-    <!--
-    <div class="my-4 hx-24 bg-white border rounded-md shadow-lg" role="alert">
-      <${DeveloperNote}
-        text="This chart is an SVG image, generated on the fly from the
-        data returned by the api/stats/get API call" />
-    <//>
-    
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 grid-flow-row">
     <div class="bg-white col-span-2 border rounded-md shadow-lg" role="alert">
-      <${DeveloperNote} text="Stats data is received from the Mongoose backend" />
+      <${PeerTable} systemStatus=${systemStatus} data=${peermanagerStatus} />
     <//>
-    -->
+    <div class="bg-white col-span-2 border rounded-md shadow-lg" role="alert">
+      <${RadioTable} data=${radiomanagerStatus} />
+    <//>
   <//>
 <//>`;
 };
@@ -192,15 +170,52 @@ function Settings({}) {
       <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.save} onclick=${onsave} title="Save Settings" /><//>
     <//>
   <//>
+<//>`;
+};
+
+function Update({}) {
+  const [updateFile, setUpdateFile] = useState(null);
+  const [uploadResult, setUploadResult] = useState(null);
+
+  const onsubmit = ev => fetch(ENDPOINT_PREFIX + '/update', {
+    method: 'POST', body: updateFile
+  }).then(r => {
+    r.text().then((text) => setUploadResult({ok: r.ok, text: text}));
+  });
+
+  const onchange = ev => {
+    const data = new FormData();
+    data.append('file', ev.target.files[0]);
+    setUpdateFile(data);
+  };
+
+  const onnotificationclose = () => {
+    if (uploadResult.ok) {
+      setTimeout(() => window.location = '/', 10000);
+    }
+    setUploadResult(null);
+  }
+
+  return html`
+<div class="m-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+
+  <div class="py-1 divide-y border rounded bg-white flex flex-col">
+    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
+      Firmware Update
+    <//>
+    <div class="py-2 px-5 flex-1 flex flex-col relative">
+      ${uploadResult && html`<${Notification} ok=${uploadResult.ok} timeout=${uploadResult.ok ? 3000 : 10000}
+        text=${uploadResult.text} close=${onnotificationclose} />`}
+
+      <${Setting} title="Upload Firmware" type="file" onchange=${onchange} />
+      <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.upArrowBox} onclick=${onsubmit} title="Upload File" /><//>
+    <//>
+  <//>
 
   <div class="bg-white border rounded-md text-ellipsis overflow-auto" role="alert">
-    <${DeveloperNote}
-        text="A variety of controls are pre-defined to ease the development:
-          toggle button, dropdown select, input field with left and right
-          addons. Device settings are received by calling
-          api/settings/get API call, which returns settings JSON object.
-          Clicking on the save button calls api/settings/set
-          API call" />
+    <${Note}
+        title="Firmware Downloads"
+        textBlocks=${[html`<p class='my-2 text-slate-500'>Visit the <a class='text-blue-600 dark:text-blue-500 hover:underline' href='https://github.com/FormationFlight/FormationFlight/releases/latest'>FormationFlight GitHub</a> for firmware downloads</p>`]} />
   <//>
 
 <//>`;
@@ -210,7 +225,7 @@ const App = function({}) {
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState('/');
   const [systemStatus, setSystemStatus] = useState('');
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(window.innerWidth > 700);
 
   useEffect(() => fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then((r) => {
     setLoading(false);
@@ -222,12 +237,13 @@ const App = function({}) {
 
   return html`
 <div class="min-h-screen bg-slate-100">
-  <${Sidebar} url=${url} show=${showSidebar}, systemStatus=${systemStatus} />
+  <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
   <${Header} id="${systemStatus.target}/${systemStatus.longName} @ ${systemStatus.version}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
     <${Router} onChange=${ev => setUrl(ev.url)} history=${History.createHashHistory()} >
       <${Main} default=${true} />
       <${Settings} path="settings" />
+      <${Update} path="update" />
     <//>
   <//>
 <//>`;

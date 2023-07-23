@@ -195,6 +195,12 @@ export function SwitchValue({value, setfn}) {
 </button>`;
 };
 
+export function FileValue({onchange}) {
+  return html`
+    <input type="file" onchange=${onchange} />
+  `;
+};
+
 export function Setting(props) {
   return html`
 <div class=${props.cls || 'grid grid-cols-2 gap-2 my-1'}>
@@ -202,6 +208,7 @@ export function Setting(props) {
   <div class="flex items-center">
     ${props.type == 'switch' ? h(SwitchValue, props) : 
       props.type == 'select' ? h(SelectValue, props) :
+      props.type == 'file' ? h(FileValue, props) :
       h(TextValue, props) }
   <//>
 <//>`;

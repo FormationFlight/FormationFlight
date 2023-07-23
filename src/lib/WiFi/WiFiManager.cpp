@@ -36,6 +36,7 @@ WiFiManager::WiFiManager()
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
+    server->on("/system/status", HTTP_GET, handleSystemStatus);
     server->on("/system/shutdown", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
         ESP.deepSleep(UINT32_MAX);
@@ -209,6 +210,11 @@ void WiFiManager::setOTAComplete()
     otaCompleteAt = millis();
 }
 
+OTAResult* WiFiManager::getOTAResult()
+{
+    return &otaResult;
+}
+
 void handleSystemStatus(AsyncWebServerRequest *request)
 {
     StaticJsonDocument<512> doc;
@@ -235,25 +241,38 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     request->send(response);
 }
 
-
 void handleFileUploadResponse(AsyncWebServerRequest *request)
 {
+    OTAResult *r = WiFiManager::getSingleton()->getOTAResult();
+    if (r->statusCode == 0)
+    {
+        return;
+    }
+    else if (r->statusCode == 200)
+    {
         AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "Please wait while the device reboots...");
-        // We can send them back to the homepage once we have a homepage :)
-        /*response->addHeader("Refresh", "15");
+        response->addHeader("Refresh", "15");
         response->addHeader("Location", "/");
-        response->addHeader("Connection", "close");*/
+        response->addHeader("Connection", "close");
         request->send(response);
         request->client()->close();
+    }
+    else
+    {
+        request->send(r->statusCode, "text/plain", r->message);
+    }
 
 }
 
 void handleFileUploadData(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len, bool final)
 {
+    OTAResult *r = WiFiManager::getSingleton()->getOTAResult();
     if (!filename.endsWith(".bin") && !filename.endsWith(".elf")) {
-        request->send(400, "text/plain", "must upload .bin or .elf");
+        r->message = "must upload .bin or .elf";
+        r->statusCode = 400;
+        return;
     }
-    if (!index)
+    if (!index && !Update.isRunning())
     {
         size_t updateLength = request->contentLength();
         DBGF("HTTP update started with filename %s and size %d bytes\n", filename.c_str(), updateLength);
@@ -264,10 +283,11 @@ void handleFileUploadData(AsyncWebServerRequest *request, const String &filename
         {
             Update.printError(Serial);
 #ifdef PLATFORM_ESP8266
-            request->send(500, "text/plain", Update.getErrorString());
+            r->message = Update.getErrorString();
 #elif defined(PLATFORM_ESP32)
-            request->send(500, "text/plain", Update.errorString());
+            r->message = Update.errorString();
 #endif
+            r->statusCode = 500;
             return;
         }
     }
@@ -276,10 +296,11 @@ void handleFileUploadData(AsyncWebServerRequest *request, const String &filename
     {
         Update.printError(Serial);
 #ifdef PLATFORM_ESP8266
-        request->send(500, "text/plain", Update.getErrorString());
+        r->message = Update.getErrorString();
 #elif defined(PLATFORM_ESP32)
-        request->send(500, "text/plain", Update.errorString());
+        r->message = Update.errorString();
 #endif
+        r->statusCode = 500;
         return;
     }
     else
@@ -302,6 +323,8 @@ void handleFileUploadData(AsyncWebServerRequest *request, const String &filename
         {
             DBGLN("Update complete");
             WiFiManager::getSingleton()->setOTAComplete();
+            r->statusCode = 200;
+            return;
         }
     }
 }
