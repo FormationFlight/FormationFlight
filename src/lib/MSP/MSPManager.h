@@ -48,4 +48,6 @@ private:
     unsigned long nextSendTime = 0;
     // Which peer we'll send next
     uint8_t peerIndex = 0;
+
+    uint8_t mapFixType2Msp(GNSS_FIX_TYPE fixType);
 };

@@ -81,6 +81,8 @@
 #define MSP2_COMMON_SET_RADAR_POS       0x100B //SET radar position information
 #define MSP2_COMMON_SET_RADAR_ITD       0x100C //SET radar information to display
 
+#define MSP2_SENSOR_GPS                 0x1F03 // INAV expects this, instead of MSP_SET_RAW_GPS
+
 // bits of getActiveModes() return value
 #define MSP_MODE_ARM          0
 #define MSP_MODE_ANGLE        1
@@ -373,6 +375,7 @@ struct msp_raw_gps_t {
 } __attribute__ ((packed));
 
 
+
 // MSP_COMP_GPS reply
 struct msp_comp_gps_t {
   int16_t  distanceToHome;  // distance to home in meters
@@ -633,6 +636,33 @@ struct msp_set_raw_gps_t {
   int16_t  alt;           // meters
   int16_t  groundSpeed;   // cm/s
 } __attribute__ ((packed));
+
+// MSP2_SENSOR_GPS
+struct msp_sensor_gps_t {
+    uint8_t  instance;                  // sensor instance number to support multi-sensor setups
+    uint16_t gpsWeek;                   // GPS week, 0xFFFF if not available
+    uint32_t msTOW;
+    uint8_t  fixType;
+    uint8_t  satellitesInView;
+    uint16_t horizontalPosAccuracy;     // [cm]
+    uint16_t verticalPosAccuracy;       // [cm]
+    uint16_t horizontalVelAccuracy;     // [cm/s]
+    uint16_t hdop;
+    int32_t  longitude;
+    int32_t  latitude;
+    int32_t  mslAltitude;       // cm
+    int32_t  nedVelNorth;       // cm/s
+    int32_t  nedVelEast;
+    int32_t  nedVelDown;
+    uint16_t groundCourse;      // deg * 100, 0..36000
+    uint16_t trueYaw;           // deg * 100, values of 0..36000 are valid. 65535 = no data available
+    uint16_t year;
+    uint8_t  month;
+    uint8_t  day;
+    uint8_t  hour;
+    uint8_t  min;
+    uint8_t  sec;
+}  __attribute__((packed));
 
 
 // MSP_SET_WP command

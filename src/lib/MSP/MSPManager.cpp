@@ -121,12 +121,25 @@ msp_raw_gps_t MSPManager::getLocation()
     }
     return gps;
 }
+uint8_t MSPManager::mapFixType2Msp(GNSS_FIX_TYPE fixType)
+{
+    switch (fixType) {
+        case GNSS_FIX_TYPE_2D:
+            return 2;
+        case GNSS_FIX_TYPE_3D:
+            return 3;
+        default:
+            return 0;
+    }
+}
 
 void MSPManager::sendLocation(GNSSLocation loc)
 {
+    /*
     msp_raw_gps_t gps;
     gps.alt = loc.alt;
     gps.fixType = loc.fixType;
+    gps.fixType = this->mapFixType2Msp(loc.fixType);
     gps.groundCourse = loc.groundCourse * 10;
     const double kmh_to_cms = 27.77;
     gps.groundSpeed = loc.groundSpeed * kmh_to_cms;
@@ -135,6 +148,27 @@ void MSPManager::sendLocation(GNSSLocation loc)
     gps.lon = loc.lon * (1 / 10000000);
     gps.numSat = loc.numSat;
     msp->command(MSP_SET_RAW_GPS, &gps, sizeof(gps), 0);
+    */
+
+    msp_sensor_gps_t gps2;
+    gps2.gpsWeek = 0xFFFF;
+    gps2.fixType = this->mapFixType2Msp(loc.fixType);
+    gps2.mslAltitude = loc.alt; // cm
+    gps2.groundCourse = loc.groundCourse * 10;
+    gps2.hdop = loc.hdop;
+
+    // TODO: break 3d speed? groundspeed replacement?
+    gps2.nedVelDown = 0;
+    gps2.nedVelEast = 0;
+    gps2.nedVelNorth = 0;
+
+    gps2.latitude = loc.lat * (1 / 10000000);
+    gps2.longitude = loc.lon * (1 / 10000000);
+    gps2.satellitesInView = loc.numSat;
+
+    gps2.instance = 1;
+
+    msp->command2(MSP2_SENSOR_GPS, &gps2, sizeof(gps2), 0);
     gnssUpdatesSent++;
 }
 
