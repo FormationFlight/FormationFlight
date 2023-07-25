@@ -31,25 +31,8 @@ WiFiManager::WiFiManager()
     ssid += chipIDString;
     WiFi.softAP(ssid.c_str(), "inavradar");
     server = new AsyncWebServer(80);
-    server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        StaticJsonDocument<512> doc;
-        doc["target"] = CFG_TARGET_FULLNAME;
-        doc["version"] = VERSION;
-        doc["buildTime"] = BUILDTIME;
-        doc["cloudBuild"] = CLOUD_BUILD;
-        doc["heap"] = ESP.getFreeHeap();
-#ifdef LORA_BAND
-        doc["lora_band"] = LORA_BAND;
-#endif
-        doc["uptimeMilliseconds"] = millis();
-        doc["name"] = curr.name;
-        doc["longName"] = generate_id();
-        doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
-        doc["state"] = MSPManager::getSingleton()->getState();
-        AsyncResponseStream *response = request->beginResponseStream("application/json");
-        serializeJson(doc, *response);
-        request->send(response);
-    });
+    // Leaving system status on / for now, we'll likely put a webui here.
+    server->on("/", HTTP_GET, handleSystemStatus);
     server->on("/system/shutdown", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
         ESP.deepSleep(UINT32_MAX);
@@ -62,6 +45,7 @@ WiFiManager::WiFiManager()
         ESP.restart();
 #endif
     });
+    server->on("/system/status", HTTP_GET, handleSystemStatus);
     server->on("/system/bootloader", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
 #ifdef PLATFORM_ESP8266
@@ -205,12 +189,38 @@ void WiFiManager::setOTAActive()
 
 bool WiFiManager::getOTAComplete()
 {
-    return otaCompleteAt > 0 && millis() - otaCompleteAt > 500;
+    return otaCompleteAt > 0 && millis() - otaCompleteAt > 1500;
 }
 
 void WiFiManager::setOTAComplete()
 {
     otaCompleteAt = millis();
+}
+
+void handleSystemStatus(AsyncWebServerRequest *request)
+{
+    StaticJsonDocument<512> doc;
+    doc["target"] = CFG_TARGET_FULLNAME;
+#ifdef PLATFORM_ESP8266
+    doc["platform"] = "ESP8266";
+#elif defined(PLATFORM_ESP32)
+    doc["platform"] = "ESP32";
+#endif
+    doc["version"] = VERSION;
+    doc["buildTime"] = BUILDTIME;
+    doc["cloudBuild"] = CLOUD_BUILD;
+    doc["heap"] = ESP.getFreeHeap();
+#ifdef LORA_BAND
+    doc["lora_band"] = LORA_BAND;
+#endif
+    doc["uptimeMilliseconds"] = millis();
+    doc["name"] = curr.name;
+    doc["longName"] = generate_id();
+    doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
+    doc["state"] = MSPManager::getSingleton()->getState();
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    request->send(response);
 }
 
 
