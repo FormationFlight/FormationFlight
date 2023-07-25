@@ -5,6 +5,9 @@ import mimetypes
 import os
 import sys
 
+from external.minify import (html_minifier, rcssmin, rjsmin)
+
+total_pre_size = 0
 total_size = 0
 num_files = 0
 
@@ -14,16 +17,28 @@ def compress(data):
         f.write(data)
     return buf.getvalue()
 
-def get_byte_array(file_path):
+def minify(file_path):
+    if file_path.endswith('.html'):
+        with open(file_path, "r") as file:
+            return bytes(html_minifier.html_minify(file.read()), 'utf-8')
+    if file_path.endswith('.js'):
+        with open(file_path, "r") as file:
+            return bytes(rjsmin.jsmin(file.read()), 'utf-8')
+    if file_path.endswith('.css'):
+        with open(file_path, "r") as file:
+            return bytes(rcssmin.cssmin(file.read()), 'utf-8')
     with open(file_path, "rb") as file:
-        byte_data = compress(file.read())
-        return bytearray(byte_data)
+        return file.read()
+
+def get_byte_array(file_path):
+    file = minify(file_path)
+    byte_data = compress(file)
+
+    return bytearray(byte_data)
 
 def generate_c_byte_array(file_path, byte_array):
-    file_name = (file_path)
+    file_name = file_path
     array_name = file_name.replace(".", "_").replace("-", "_").replace("/", "_").replace("\\", "_") + "_gz"
-    global total_size
-    total_size += len(byte_array)
     global num_files
     num_files += 1
 
@@ -35,18 +50,6 @@ def generate_c_byte_array(file_path, byte_array):
 
     c_code += "};\n\n"
     return array_name, c_code
-
-def process_folder(folder_path, isRecursive=False):
-    c_code = "#pragma once\n#include <Arduino.h>\n"
-    for filename in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, filename)
-        if os.path.isfile(file_path):
-            byte_array = get_byte_array(file_path)
-            c_code += generate_c_byte_array(file_path, byte_array)
-        elif os.path.isdir(file_path):
-            c_code += process_folder(file_path, True)
-
-    return c_code
 
 def generate_handler(file_path, file_array_name):
     file_path = file_path.lstrip("html")
@@ -79,6 +82,14 @@ def process_folder(folder_path, isRecursive=False):
             array_name, file_c_code = generate_c_byte_array(file_path, byte_array)
             c_code += file_c_code
             handler_code += generate_handler(file_path, array_name)
+            
+            global total_pre_size
+            pre_size = os.stat(file_path).st_size
+            total_pre_size += pre_size
+            print(f'{file_path} {pre_size} => {len(byte_array)} bytes')
+            global total_size
+            total_size += len(byte_array)
+            
         elif os.path.isdir(file_path):
             subdir_c_code, subdir_handler_code = process_folder(file_path, True)
             c_code += subdir_c_code
@@ -97,7 +108,7 @@ c_code, handler_code = process_folder(folder_path)
 if c_code and handler_code:
     with open("src/lib/WiFi/webcontent.h", "w") as output_file:
         output_file.write(c_code)
-    print(f"HTML content from {num_files} files compressed to {total_size} bytes and written to webcontent.h")
+    print(f"HTML content from {num_files} files, {total_pre_size} bytes minified & compressed to {total_size} bytes, written to webcontent.h")
     with open("src/lib/WiFi/staticfilehandler.inc", "w") as output_file:
         output_file.write(handler_code)
     print(f"HTML handlers for {num_files} files written to staticfilehandler.inc")
