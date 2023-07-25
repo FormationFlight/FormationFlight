@@ -58,7 +58,7 @@ function Sidebar({url, show, systemStatus}) {
 
     <div class="flex flex-1 flex-col">
       <${NavLink} title="Dashboard" icon=${Icons.home} href="/" url=${url} />
-      <${NavLink} title="Settings" icon=${Icons.settings} href="/settings" url=${url} />
+      <!--<${NavLink} title="Settings" icon=${Icons.settings} href="/settings" url=${url} />-->
       <${NavLink} title="Update" icon=${Icons.upArrowBox} href="/update" url=${url} />
     <//>
   <//>
@@ -118,8 +118,7 @@ function Main({}) {
 <div class="p-2">
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 grid-flow-row">
     <${Stat} title="Flight Controller" text="${systemStatus.host}" tipText="${systemStatus.host == 'NoFC' ? 'bad' : 'good'}" tipIcon=${systemStatus.host == 'NoFC' ? Icons.fail : Icons.ok} tipColors=${systemStatus.host == 'NoFC' ? tipColors.red : tipColors.green} />
-    <${Stat} title="GPS Fix" text="${gnssmanagerStatus.numSat} Sats / ${fixType(gnssmanagerStatus.fixType)} Fix" tipText="${gnssmanagerStatus.lat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.lat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.lat == '0' ? tipColors.yellow : tipColors.green} />
-
+    <${Stat} title="GPS Fix" text="${gnssmanagerStatus.numSat} Sats / ${fixType(gnssmanagerStatus.fixType)} Fix" tipText="${gnssmanagerStatus.numSat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.numSat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.numSat == '0' ? tipColors.yellow : tipColors.green} />
     <${Stat} title="GPS Location" text="${gnssmanagerStatus.lat}°N ${gnssmanagerStatus.lon}°W" tipText="${gnssmanagerStatus.lat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.lat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.lat == '0' ? tipColors.yellow : tipColors.green} />
     <${Stat} title="Active Peers" text="${peermanagerStatus.countActive}" tipText="${peermanagerStatus.countActive == 0 ? 'warning' : 'good'}" tipIcon=${peermanagerStatus.countActive == 0 ? Icons.warn : Icons.ok} tipColors=${peermanagerStatus.countActive == 0 ? tipColors.yellow : tipColors.green} />
     <${Stat} title="Encryption" text="${cryptomanagerStatus.enabled ? ellipsizeString(cryptomanagerStatus.keyString, 10) : 'Open'}" tipText="${cryptomanagerStatus.enabled ? 'Encrypted' : 'Open'}" tipIcon=${cryptomanagerStatus.enabled ? Icons.shield : Icons.exclamationTriangle} tipColors=${cryptomanagerStatus.enabled ? tipColors.green : tipColors.yellow} />
@@ -208,7 +207,7 @@ function Update({}) {
         text=${uploadResult.text} close=${onnotificationclose} />`}
 
       <${Setting} title="Upload Firmware" type="file" onchange=${onchange} />
-      <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.upArrowBox} onclick=${onsubmit} title="Upload File" /><//>
+      <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.upArrowBox} onclick=${onsubmit} title="Upload & Install" /><//>
     <//>
   <//>
 
@@ -242,7 +241,7 @@ const App = function({}) {
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
     <${Router} onChange=${ev => setUrl(ev.url)} history=${History.createHashHistory()} >
       <${Main} default=${true} />
-      <${Settings} path="settings" />
+      <!--<${Settings} path="settings" />-->
       <${Update} path="update" />
     <//>
   <//>

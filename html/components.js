@@ -197,7 +197,7 @@ export function SwitchValue({value, setfn}) {
 
 export function FileValue({onchange}) {
   return html`
-    <input type="file" onchange=${onchange} />
+  <input type="file" class="block w-full text-sm text-gray-500" onchange=${onchange} />
   `;
 };
 
