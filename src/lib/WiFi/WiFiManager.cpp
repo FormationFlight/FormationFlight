@@ -113,6 +113,11 @@ WiFiManager::WiFiManager()
         double lon = request->getParam("lon", true)->value().toDouble();
         GNSSManager::getSingleton()->spoofedLocation.lat = lat;
         GNSSManager::getSingleton()->spoofedLocation.lon = lon;
+        GNSSManager::getSingleton()->spoofedLocation.fixType = GNSS_FIX_TYPE_3D;
+        GNSSManager::getSingleton()->spoofedLocation.alt = 100;
+        GNSSManager::getSingleton()->spoofedLocation.numSat = 69;
+        GNSSManager::getSingleton()->spoofedLocation.hdop = 1.1;
+
 
         request->send(200, "text/plain", "OK");
     });
