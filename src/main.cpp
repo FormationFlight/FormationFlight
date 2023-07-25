@@ -134,13 +134,18 @@ void setup()
     // Create GNSSManager
     DBGLN("[main] start GNSSManager");
     GNSSManager *gnssManager = GNSSManager::getSingleton();
+#ifndef GNSS_INJECT
     // Use MSP GNSS as our primary provider
     gnssManager->addProvider(new MSP_GNSS());
+#endif
     // Use Direct GNSS if MSP isn't available
 #ifdef GNSS_ENABLED
     gnssManager->addProvider(new Direct_GNSS());
 #endif
-
+#ifdef GNSS_INJECT
+    // Send GNSS updates to a listening FC over MSP (an F411 for example)
+    gnssManager->addListener(new MSP_GNSS());
+#endif
     // Create RadioManager
     DBGLN("[main] start RadioManager");
     RadioManager *radioManager = RadioManager::getSingleton();

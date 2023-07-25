@@ -69,11 +69,20 @@ void GNSSManager::loop()
         }
         providers[i]->loop();
     }
+    for (uint8_t i = 0; i < GNSS_MAX_LISTENERS; i++) {
+        if (listeners[i] == nullptr) {
+            continue;
+        }
+        listeners[i]->update(this->getLocation());
+    }
 }
 
 void GNSSManager::statusJson(JsonDocument *doc)
 {
     (*doc)["activeProvider"] = getCurrentProviderNameShort();
+#ifdef GNSS_INJECT
+    (*doc)["injectingGNSS"] = true;
+#endif
     (*doc)["lat"] = getLocation().lat;
     (*doc)["lon"] = getLocation().lon;
     (*doc)["alt"] = getLocation().alt;
