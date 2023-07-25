@@ -8,6 +8,9 @@ import sys
 from external.minify import (html_minifier, rcssmin, rjsmin)
 
 total_pre_size = 0
+from external.minify import (html_minifier, rcssmin, rjsmin)
+
+total_pre_size = 0
 total_size = 0
 num_files = 0
 
