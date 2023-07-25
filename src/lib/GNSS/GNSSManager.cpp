@@ -69,6 +69,12 @@ void GNSSManager::loop()
         }
         providers[i]->loop();
     }
+    for (uint8_t i = 0; i < GNSS_MAX_LISTENERS; i++) {
+        if (listeners[i] == nullptr) {
+            continue;
+        }
+        listeners[i]->update(this->getLocation());
+    }
 }
 
 void GNSSManager::statusJson(JsonDocument *doc)
@@ -82,6 +88,9 @@ void GNSSManager::statusJson(JsonDocument *doc)
     (*doc)["groundCourse"] = loc.groundCourse;
     (*doc)["numSat"] = loc.numSat;
     (*doc)["fixType"] = loc.fixType;
+#ifdef GNSS_INJECT
+    (*doc)["injectingGNSS"] = true;
+#endif
 
     JsonArray providersArray = doc->createNestedArray("providers");
     for (uint8_t i = 0; i < GNSS_MAX_PROVIDERS; i++)

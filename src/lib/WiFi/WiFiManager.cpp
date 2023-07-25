@@ -49,6 +49,7 @@ WiFiManager::WiFiManager()
         ESP.restart();
 #endif
     });
+    server->on("/system/status", HTTP_GET, handleSystemStatus);
     server->on("/system/bootloader", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
 #ifdef PLATFORM_ESP8266
@@ -202,7 +203,7 @@ void WiFiManager::setOTAActive()
 
 bool WiFiManager::getOTAComplete()
 {
-    return otaCompleteAt > 0 && millis() - otaCompleteAt > 500;
+    return otaCompleteAt > 0 && millis() - otaCompleteAt > 1500;
 }
 
 void WiFiManager::setOTAComplete()
