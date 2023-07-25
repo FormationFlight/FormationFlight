@@ -1,6 +1,7 @@
 #Import("env")
 import gzip
 import io
+import mimetypes
 import os
 import sys
 
@@ -50,15 +51,9 @@ def process_folder(folder_path, isRecursive=False):
 def generate_handler(file_path, file_array_name):
     file_path = file_path.lstrip("html")
     file_path = file_path.replace("\\", "/")
-    mime_type = "text/plain"
-    if file_path.endswith(".html"):
-        mime_type = "text/html"
-    if file_path.endswith(".js"):
-        mime_type = "text/javascript"
-    if file_path.endswith(".css"):
-        mime_type = "text/css"
-    if file_path.endswith(".png"):
-        mime_type = "image/png"
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if mime_type is None:
+        mime_type = "application/octet-stream"
     handler_base = '''
     server->on("{file_path}", HTTP_GET, [](AsyncWebServerRequest *request) {{
         AsyncWebServerResponse *response = request->beginResponse_P(200, "{mime_type}", (uint8_t *){file_array_name}, sizeof({file_array_name}));
