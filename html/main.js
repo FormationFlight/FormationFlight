@@ -1,12 +1,12 @@
 'use strict';
-import { h, render, useState, useEffect, useRef, html, Router } from  './bundle.js';
-import { Icons, Login, Setting, Button, Stat, tipColors, Colored, Notification, Pagination, PeerTable, RadioTable } from './components.js';
+import { h, render, useState, useEffect, html, Router } from './bundle.js';
+import LoadingSpinner, { Icons, Setting, Button, Stat, tipColors, Notification, PeerTable, RadioTable } from './components.js';
 
-//const Logo = props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12.87 12.85"><defs><style>.ll-cls-1{fill:none;stroke:#000;stroke-miterlimit:10;stroke-width:0.5px;}</style></defs><g id="Layer_2" data-name="Layer 2"><g id="Layer_1-2" data-name="Layer 1"><path class="ll-cls-1" d="M12.62,1.82V8.91A1.58,1.58,0,0,1,11,10.48H4a1.44,1.44,0,0,1-1-.37A.69.69,0,0,1,2.84,10l-.1-.12a.81.81,0,0,1-.15-.48V5.57a.87.87,0,0,1,.86-.86H4.73V7.28a.86.86,0,0,0,.86.85H9.42a.85.85,0,0,0,.85-.85V3.45A.86.86,0,0,0,10.13,3,.76.76,0,0,0,10,2.84a.29.29,0,0,0-.12-.1,1.49,1.49,0,0,0-1-.37H2.39V1.82A1.57,1.57,0,0,1,4,.25H11A1.57,1.57,0,0,1,12.62,1.82Z"/><path class="ll-cls-1" d="M10.48,10.48V11A1.58,1.58,0,0,1,8.9,12.6H1.82A1.57,1.57,0,0,1,.25,11V3.94A1.57,1.57,0,0,1,1.82,2.37H8.9a1.49,1.49,0,0,1,1,.37l.12.1a.76.76,0,0,1,.11.14.86.86,0,0,1,.14.47V7.28a.85.85,0,0,1-.85.85H8.13V5.57a.86.86,0,0,0-.85-.86H3.45a.87.87,0,0,0-.86.86V9.4a.81.81,0,0,0,.15.48l.1.12a.69.69,0,0,0,.13.11,1.44,1.44,0,0,0,1,.37Z"/></g></g></svg>`;
 const Logo = props => html`<img class=${props.class} src="/images/logo.png"></img>`
-const ENDPOINT_PREFIX = "http://192.168.4.1"
+// Permit using the web ui locally for development
+const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
 
-function Header({id, setShowSidebar, showSidebar}) {
+function Header({ id, setShowSidebar, showSidebar }) {
   const [rebootResult, setRebootResult] = useState(null);
   const rebootAction = () => {
     fetch(ENDPOINT_PREFIX + "/system/reboot", { method: "POST" })
@@ -17,7 +17,7 @@ function Header({id, setShowSidebar, showSidebar}) {
   return html`
 <div class="bg-white sticky top-0 z-[48] xw-full border-b py-2 ${showSidebar && 'pl-72'} transition-all duration-300 transform">
   <div class="px-2 w-full py-0 my-0 flex items-center">
-    <button type="button" onclick=${ev => setShowSidebar(v => !v)} class="text-slate-400">
+    <button type="button" onclick=${() => setShowSidebar(v => !v)} class="text-slate-400">
       <${Icons.bars3} class="h-6" />
     <//>
     <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
@@ -32,10 +32,10 @@ function Header({id, setShowSidebar, showSidebar}) {
     <//>
   <//>
 <//>`;
-};
+}
 
-function Sidebar({url, show, systemStatus}) {
-  const NavLink = ({title, icon, href, url}) => html`
+function Sidebar({ url, show, systemStatus }) {
+  const NavLink = ({ title, icon, href, url }) => html`
   <div>
     <a href="#${href}" class="${href == url ? 'bg-slate-50 text-blue-600 group' : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50 group'} flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold">
       <${icon} class="w-6 h-6"/>
@@ -63,10 +63,10 @@ function Sidebar({url, show, systemStatus}) {
     <//>
   <//>
 <//>`;
-};
+}
 
 // .map(v => html` <p class="my-2 text-slate-500">${v}<//>`)
-function Note({title = "Note", textBlocks}) {
+function Note({ title = "Note", textBlocks }) {
   return html`
 <div class="flex p-4 gap-2">
   <${Icons.info} class="self-start basis-[30px] grow-0 shrink-0 text-green-600" />
@@ -75,15 +75,15 @@ function Note({title = "Note", textBlocks}) {
     ${textBlocks}
   <//>
 <//>`;
-};
+}
 
-
-function Main({}) {
+function Main() {
   const [systemStatus, setSystemStatus] = useState(null);
   const [peermanagerStatus, setPeermanagerStatus] = useState(null);
   const [gnssmanagerStatus, setGnssmanagerStatus] = useState(null);
   const [cryptomanagerStatus, setCryptomanagerStatus] = useState(null);
   const [radiomanagerStatus, setRadiomanagerStatus] = useState(null);
+  const [mspmanagerStatus, setMspmanagerStatus] = useState(null);
 
   const refresh = () => {
     fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then(r => setSystemStatus(r));
@@ -91,7 +91,9 @@ function Main({}) {
     fetch(ENDPOINT_PREFIX + '/gnssmanager/status').then(r => r.json()).then(r => setGnssmanagerStatus(r));
     fetch(ENDPOINT_PREFIX + '/cryptomanager/status').then(r => r.json()).then(r => setCryptomanagerStatus(r));
     fetch(ENDPOINT_PREFIX + '/radiomanager/status').then(r => r.json()).then(r => setRadiomanagerStatus(r));
-  } 
+    fetch(ENDPOINT_PREFIX + '/mspmanager/status').then(r => r.json()).then(r => setMspmanagerStatus(r));
+
+  }
   useEffect(() => {
     refresh();
     setInterval(refresh, 5000);
@@ -101,10 +103,10 @@ function Main({}) {
     if (str.length <= n) {
       return str;
     }
-  
+
     const ellipsis = '…';
     const truncatedLength = n - ellipsis.length;
-    
+
     // Return the shortened string with an ellipsis
     return str.substring(0, truncatedLength) + ellipsis;
   }
@@ -113,15 +115,14 @@ function Main({}) {
     return ['No', '2D', '3D'][index];
   }
 
-  if (!systemStatus || !peermanagerStatus || !gnssmanagerStatus || !cryptomanagerStatus || !radiomanagerStatus) return '';
+  if (!systemStatus || !peermanagerStatus || !gnssmanagerStatus || !cryptomanagerStatus || !radiomanagerStatus || !mspmanagerStatus) return '';
   return html`
 <div class="p-2">
-  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 grid-flow-row">
-    <${Stat} title="Flight Controller" text="${systemStatus.host}" tipText="${systemStatus.host == 'NoFC' ? 'bad' : 'good'}" tipIcon=${systemStatus.host == 'NoFC' ? Icons.fail : Icons.ok} tipColors=${systemStatus.host == 'NoFC' ? tipColors.red : tipColors.green} />
-    <${Stat} title="GPS Fix" text="${gnssmanagerStatus.numSat} Sats / ${fixType(gnssmanagerStatus.fixType)} Fix" tipText="${gnssmanagerStatus.numSat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.numSat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.numSat == '0' ? tipColors.yellow : tipColors.green} />
-    <${Stat} title="GPS Location" text="${gnssmanagerStatus.lat}°N ${gnssmanagerStatus.lon}°W" tipText="${gnssmanagerStatus.lat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.lat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.lat == '0' ? tipColors.yellow : tipColors.green} />
-    <${Stat} title="Active Peers" text="${peermanagerStatus.countActive}" tipText="${peermanagerStatus.countActive == 0 ? 'warning' : 'good'}" tipIcon=${peermanagerStatus.countActive == 0 ? Icons.warn : Icons.ok} tipColors=${peermanagerStatus.countActive == 0 ? tipColors.yellow : tipColors.green} />
-    <${Stat} title="Encryption" text="${cryptomanagerStatus.enabled ? ellipsizeString(cryptomanagerStatus.keyString, 10) : 'Open'}" tipText="${cryptomanagerStatus.enabled ? 'Encrypted' : 'Open'}" tipIcon=${cryptomanagerStatus.enabled ? Icons.shield : Icons.exclamationTriangle} tipColors=${cryptomanagerStatus.enabled ? tipColors.green : tipColors.yellow} />
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 grid-flow-row">
+    <${Stat} title="Flight Controller" text="${systemStatus.host}" tipText="${systemStatus.host == 'NoFC' ? 'bad' : 'good'}" tipIcon=${systemStatus.host == 'NoFC' ? Icons.fail : Icons.ok} tipColors=${systemStatus.host == 'NoFC' ? tipColors.red : tipColors.green} subText="${mspmanagerStatus.vbat}V / ${mspmanagerStatus.mahDrawn} mAh" />
+    <${Stat} title="GPS Fix" text="${gnssmanagerStatus.numSat} Sats / ${fixType(gnssmanagerStatus.fixType)} Fix" tipText="${gnssmanagerStatus.numSat == '0' ? 'warning' : 'good'}" tipIcon=${gnssmanagerStatus.numSat == '0' ? Icons.warn : Icons.ok} tipColors=${gnssmanagerStatus.numSat == '0' ? tipColors.yellow : tipColors.green}, subText="${gnssmanagerStatus.lat}°N ${gnssmanagerStatus.lon}°W / ${gnssmanagerStatus.alt}m" />
+    <${Stat} title="Peers" text="${peermanagerStatus.countActive}/${peermanagerStatus.maxPeers} Active" tipText="${peermanagerStatus.countActive == 0 ? 'warning' : 'good'}" tipIcon=${peermanagerStatus.countActive == 0 ? Icons.warn : Icons.ok} tipColors=${peermanagerStatus.countActive == 0 ? tipColors.yellow : tipColors.green} subText="${peermanagerStatus.count}/${peermanagerStatus.maxPeers} Total" />
+    <${Stat} title="Encryption" text="${cryptomanagerStatus.enabled ? 'Enabled' : 'Open'}" tipText="" tipIcon=${cryptomanagerStatus.enabled ? Icons.shield : Icons.exclamationTriangle} tipColors=${cryptomanagerStatus.enabled ? tipColors.green : tipColors.yellow} subText="${ellipsizeString(cryptomanagerStatus.keyString, 10)}" />
   <//>
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 grid-flow-row">
     <div class="bg-white col-span-2 border rounded-md shadow-lg" role="alert">
@@ -132,9 +133,9 @@ function Main({}) {
     <//>
   <//>
 <//>`;
-};
+}
 
-function Settings({}) {
+function Settings() {
   const [settings, setSettings] = useState(null);
   const [saveResult, setSaveResult] = useState(null);
   const refresh = () => fetch(ENDPOINT_PREFIX + '/system/status')
@@ -142,9 +143,9 @@ function Settings({}) {
     .then(r => setSettings(r));
   useEffect(refresh, []);
 
-  const mksetfn = k => (v => setSettings(x => Object.assign({}, x, {[k]: v}))); 
-  const onsave = ev => fetch(ENDPOINT_PREFIX + '/system/status', {
-    method: 'GET'/*, body: JSON.stringify(settings)*/ 
+  const mksetfn = k => (v => setSettings(x => Object.assign({}, x, { [k]: v })));
+  const onsave = () => fetch(ENDPOINT_PREFIX + '/system/status', {
+    method: 'GET'/*, body: JSON.stringify(settings)*/
   }).then(r => r.json())
     .then(r => setSaveResult(r))
     .then(refresh);
@@ -170,16 +171,16 @@ function Settings({}) {
     <//>
   <//>
 <//>`;
-};
+}
 
-function Update({}) {
+function Update() {
   const [updateFile, setUpdateFile] = useState(null);
   const [uploadResult, setUploadResult] = useState(null);
 
-  const onsubmit = ev => fetch(ENDPOINT_PREFIX + '/update', {
+  const onsubmit = () => fetch(ENDPOINT_PREFIX + '/update', {
     method: 'POST', body: updateFile
   }).then(r => {
-    r.text().then((text) => setUploadResult({ok: r.ok, text: text}));
+    r.text().then((text) => setUploadResult({ ok: r.ok, text: text }));
   });
 
   const onchange = ev => {
@@ -196,7 +197,7 @@ function Update({}) {
   }
 
   return html`
-<div class="m-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+<div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
 
   <div class="py-1 divide-y border rounded bg-white flex flex-col">
     <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
@@ -216,28 +217,40 @@ function Update({}) {
         title="Firmware Downloads"
         textBlocks=${[html`<p class='my-2 text-slate-500'>Visit the <a class='text-blue-600 dark:text-blue-500 hover:underline' href='https://github.com/FormationFlight/FormationFlight/releases/latest'>FormationFlight GitHub</a> for firmware downloads</p>`]} />
   <//>
-
 <//>`;
-};
+}
 
-const App = function({}) {
+const App = function () {
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState('/');
   const [systemStatus, setSystemStatus] = useState('');
-  const [showSidebar, setShowSidebar] = useState(window.innerWidth > 700);
+  const [showSidebar, setShowSidebar] = useState(true);
+
+  const handleWindowResize = () => {
+    if (window.innerWidth < 1200) {
+      setShowSidebar(false);
+    }
+    if (window.innerWidth > 1600) {
+      setShowSidebar(true);
+    }
+  };
 
   useEffect(() => fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then((r) => {
     setLoading(false);
     setSystemStatus(r);
+
+    window.addEventListener('resize', handleWindowResize);
+    handleWindowResize();
   }), []);
 
-  if (loading) return '';  // Show blank page on initial load
+
+  if (loading) return LoadingSpinner();  // Show blank page on initial load
 
 
   return html`
 <div class="min-h-screen bg-slate-100">
   <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
-  <${Header} id="${systemStatus.target}/${systemStatus.longName} @ ${systemStatus.version}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
+  <${Header} id="${systemStatus.target}/${systemStatus.longName} | ${systemStatus.version}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
     <${Router} onChange=${ev => setUrl(ev.url)} history=${History.createHashHistory()} >
       <${Main} default=${true} />

@@ -10,3 +10,4 @@ platformio.ini
 *.json
 src/lib/WiFi/staticfilehandler.inc
 src/lib/WiFi/webcontent.h
+*.pyc

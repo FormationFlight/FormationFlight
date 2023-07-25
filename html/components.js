@@ -1,5 +1,5 @@
 'use strict';
-import { h, render, useState, useEffect, useRef, html, Router } from  './bundle.js';
+import { h, useState, useEffect, useRef, html } from './bundle.js';
 
 export const Icons = {
   heart: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>`,
@@ -42,9 +42,9 @@ export const tipColors = {
   gray: 'bg-gray-200 text-white'
 };
 
-export function Button({title, onclick, disabled, cls, icon, ref, colors, hovercolor, disabledcolor}) {
+export function Button({ title, onclick, disabled, cls, icon, ref, colors }) {
   const [spin, setSpin] = useState(false);
-  const cb = function(ev) {
+  const cb = () => {
     const res = onclick ? onclick() : null;
     if (res && typeof (res.catch) === 'function') {
       setSpin(true);
@@ -53,23 +53,23 @@ export function Button({title, onclick, disabled, cls, icon, ref, colors, hoverc
   };
   if (!colors) colors = 'bg-blue-600 hover:bg-blue-500 disabled:bg-blue-400';
   return html`
-<button type="button" class="inline-flex justify-center items-center gap-1 rounded px-2.5 py-1.5 text-sm font-semibold text-white shadow-sm ${colors} ${cls}"
+  <button type="button" class="inline-flex justify-center items-center gap-1 rounded px-2.5 py-1.5 text-sm font-semibold text-white shadow-sm ${colors} ${cls}"
   ref=${ref} onclick=${cb} disabled=${disabled || spin} >
   ${title}
   <${spin ? Icons.refresh : icon} class="w-4 ${spin ? 'animate-spin' : ''}" />
 <//>`
-};
+}
 
-export function Notification({ok, text, close, timeout = 1500}) {
+export function Notification({ ok, text, close, timeout = 1500 }) {
   const closebtn = useRef(null);
   const from = 'translate-y-2 opacity-0 sm:translate-y-0 sm:translate-x-2';
   const to = 'translate-y-0 opacity-100 sm:translate-x-0';
   const [tr, setTr] = useState(from);
-  useEffect(function() {
-    setTr(to); 
-    setTimeout(ev => closebtn && closebtn.current.click && closebtn.current.click(), timeout);
+  useEffect(function () {
+    setTr(to);
+    setTimeout(() => closebtn && closebtn.current.click && closebtn.current.click(), timeout);
   }, []);
-  const onclose = ev => { setTr(from); setTimeout(close, 300); };
+  const onclose = () => { setTr(from); setTimeout(close, 300); };
   return html`
 <div aria-live="assertive" class="z-10 pointer-events-none absolute inset-0 flex items-end px-4 py-6 sm:items-start sm:p-6">
   <div class="flex w-full flex-col items-center space-y-4 sm:items-end">
@@ -77,7 +77,7 @@ export function Notification({ok, text, close, timeout = 1500}) {
       <div class="p-4">
         <div class="flex items-start">
           <div class="flex-shrink-0">
-            <${ok === true ? Icons.ok : Icons.fail } class="h-6 w-6 ${ok === true ? 'text-green-400' : 'text-red-400'}" />
+            <${ok === true ? Icons.ok : Icons.fail} class="h-6 w-6 ${ok === true ? 'text-green-400' : 'text-red-400'}" />
           <//>
           <div class="ml-3 w-0 flex-1 pt-0.5">
             <p class="text-sm font-medium text-gray-900">${text}</p>
@@ -96,60 +96,23 @@ export function Notification({ok, text, close, timeout = 1500}) {
     <//>
   <//>
 <//>`;
-};
+}
 
-export function Login({loginFn, logoIcon, title, tipText}) {
-  const [user, setUser] = useState('');
-  const [pass, setPass] = useState('');
-  const onsubmit = function(ev) {
-    const authhdr = 'Basic ' + btoa(user + ':' + pass);
-    const headers = {Authorization: authhdr};
-    return fetch('api/login', {headers}).then(loginFn).finally(r => setPass(''));
-  };
-  return html`
-<div class="h-full flex items-center justify-center bg-slate-200">
-  <div class="border rounded bg-white w-96 p-5">
-    <div class="my-5 py-2 flex items-center justify-center gap-x-4">
-      <${logoIcon} class="h-12 stroke-cyan-600 stroke-1" />
-      <h1 class="font-bold text-xl">${title || 'Login'}<//>
-    <//>
-    <div class="my-3">
-      <label class="block text-sm mb-1 dark:text-white">Username</label>
-      <input type="text" autocomplete="current-user" required
-        class="font-normal bg-white rounded border border-gray-300 w-full 
-        flex-1 py-0.5 px-2 text-gray-900 placeholder:text-gray-400
-        focus:outline-none sm:text-sm sm:leading-6 disabled:cursor-not-allowed
-        disabled:bg-gray-100 disabled:text-gray-500"
-        oninput=${ev => setUser(ev.target.value)} value=${user}  />
-    <//>
-    <div class="my-3">
-      <label class="block text-sm mb-1 dark:text-white">Password</label>
-      <input type="password" autocomplete="current-password" required
-        class="font-normal bg-white rounded border border-gray-300 w-full flex-1 py-0.5 px-2 text-gray-900 placeholder:text-gray-400 focus:outline-none sm:text-sm sm:leading-6 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
-        oninput=${ev => setPass(ev.target.value)}
-        value=${pass} onchange=${onsubmit} />
-    <//>
-    <div class="mt-7">
-      <${Button} title="Sign In" icon=${Icons.logout} onclick=${onsubmit} cls="flex w-full justify-center" />
-    <//>
-    <div class="mt-5 text-slate-400 text-xs">${tipText}<//>
-  <//>
-<//>`;
-};
-
-export function Colored({icon, text, colors}) {
+export function Colored({ icon, text, colors }) {
   return html`
 <span class="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-full ${colors || 'bg-slate-100 text-slate-900'}">
   ${icon && html`<${icon} class="w-5 h-5" />`}
+  ${text && html`
   <span class="inline-block text-xs font-medium">${text}<//>
+  `}
 <//>`;
-};
+}
 
-export function Stat({title, text, tipText, tipIcon, tipColors}) {
+export function Stat({ title, text, tipText, tipIcon, tipColors, subText }) {
   return html`
 <div class="flex flex-col bg-white border shadow-sm rounded-xl dark:bg-slate-900 dark:border-gray-800">
   <div class="p-4 md:p-5">
-    <div class="flex items-center gap-x-2">
+    <div class="flex items-center gap-x-2 pb-1">
       <p class="text-xs uppercase tracking-wide text-gray-500"> ${title} </p>
     <//>
     <div class="mt-1 flex items-center gap-x-2">
@@ -159,131 +122,93 @@ export function Stat({title, text, tipText, tipIcon, tipColors}) {
       <span class="flex items-center">
         <${Colored} text=${tipText} icon=${tipIcon} colors=${tipColors} />
       <//>
+
     <//>
+    ${!!subText && html`
+    <div class="mt-1 flex items-center gap-x-2">
+      <h6 class="text-xs sm:text-s font-small text-gray-500 dark:text-gray-200">
+    ${subText}
+      <//>
+    <//>
+    `}
   <//>
 <//>`;
-};
+}
 
-export function TextValue({value, setfn, disabled, placeholder, type, addonRight, addonLeft, attr}) {
+export function TextValue({ value, setfn, disabled, placeholder, type, addonRight, addonLeft, attr }) {
   const f = type == 'number' ? x => setfn(parseInt(x)) : setfn;
   return html`
 <div class="flex w-full items-center rounded border shadow-sm">
-  ${ addonLeft && html`<span class="inline-flex font-normal truncate py-1 border-r bg-slate-100 items-center border-gray-300 px-2 text-gray-500 text-xs">${addonLeft}</>` }
+  ${addonLeft && html`<span class="inline-flex font-normal truncate py-1 border-r bg-slate-100 items-center border-gray-300 px-2 text-gray-500 text-xs">${addonLeft}</>`}
   <input type=${type || 'text'} disabled=${disabled} 
     oninput=${ev => f(ev.target.value)} ...${attr}
     class="font-normal text-sm rounded w-full flex-1 py-0.5 px-2 text-gray-700 placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500" placeholder=${placeholder} value=${value} />
-  ${ addonRight && html`<span class="inline-flex font-normal truncate py-1 border-l bg-slate-100 items-center border-gray-300 px-2 text-gray-500 text-xs">${addonRight}</>` }
+  ${addonRight && html`<span class="inline-flex font-normal truncate py-1 border-l bg-slate-100 items-center border-gray-300 px-2 text-gray-500 text-xs">${addonRight}</>`}
 <//>`;
-};
+}
 
-export function SelectValue({value, setfn, options, disabled}) {
+export function SelectValue({ value, setfn, options, disabled }) {
   const toInt = x => x == parseInt(x) ? parseInt(x) : x;
   const onchange = ev => setfn(toInt(ev.target.value));
   return html`
 <select onchange=${onchange} class="w-full rounded font-normal border py-0.5 px-1 text-gray-600 focus:outline-none text-sm disabled:cursor-not-allowed" disabled=${disabled}>
-  ${options.map(v => html`<option value=${v[0]} selected=${v[0] == value}>${v[1]}<//>`) }
+  ${options.map(v => html`
+    <option value=${v[0]} selected=${v[0] == value}>${v[1]}<//>
+  `)}
 <//>`;
-};
+}
 
-export function SwitchValue({value, setfn}) {
-  const onclick = ev => setfn(!value);
+export function SwitchValue({ value, setfn }) {
+  const onclick = () => setfn(!value);
   const bg = !!value ? 'bg-blue-600' : 'bg-gray-200';
   const tr = !!value ? 'translate-x-5' : 'translate-x-0';
   return html`
 <button type="button" onclick=${onclick} class="${bg} inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-0 ring-0" role="switch" aria-checked=${!!value}>
   <span aria-hidden="true" class="${tr} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 focus:ring-0 transition duration-200 ease-in-out"></span>
 </button>`;
-};
+}
 
-export function FileValue({onchange}) {
+export function FileValue({ onchange }) {
   return html`
   <input type="file" class="block w-full text-sm text-gray-500" onchange=${onchange} />
   `;
-};
+}
 
 export function Setting(props) {
   return html`
 <div class=${props.cls || 'grid grid-cols-2 gap-2 my-1'}>
   <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">${props.title}<//>
   <div class="flex items-center">
-    ${props.type == 'switch' ? h(SwitchValue, props) : 
+    ${props.type == 'switch' ? h(SwitchValue, props) :
       props.type == 'select' ? h(SelectValue, props) :
-      props.type == 'file' ? h(FileValue, props) :
-      h(TextValue, props) }
+        props.type == 'file' ? h(FileValue, props) :
+          h(TextValue, props)}
   <//>
 <//>`;
-};
+}
 
-export function Pagination({ totalItems, itemsPerPage, currentPage, setPageFn }) {
-  const totalPages = Math.ceil(totalItems / itemsPerPage);
-  const maxPageRange = 2;
-  const lessThanSymbol = "<";
-  const greaterThanSymbol = ">";
-  const whiteSpace = " ";
-  const itemcls = 'relative inline-flex items-center px-3 py-1 text-sm focus:z-20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-blue-600';
+const Th = props => html`<th scope="col" class="sticky top-0 z-10 border-b border-slate-300 bg-white bg-opacity-75 py-1.5 pl-4 text-left text-sm font-semibold text-slate-900 backdrop-blur backdrop-filter">${props.title}</th>`;
+const Td = props => html`<td class="whitespace-nowrap border-b border-slate-200 py-2 pl-4 text-sm text-slate-900">${props.text}</td>`;
 
-  const PageItem = ({ page, isActive }) => (
-    html`<a
-      onClick=${() => setPageFn(page)}
-      class="${itemcls} ${isActive ? 'bg-blue-600 text-white' : 'cursor-pointer text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50'}"
-    >
-      ${page}
-    </a>`
-  );
-
-  return html`
-    <div class="flex items-center justify-between bg-white px-3 py-2">
-      <div class="sm:flex sm:flex-1 sm:items-center sm:justify-between space-x-4 whitespace-nowrap select-none">
-          <p class="text-sm text-slate-500 font-medium">
-            showing <span class="font-bold text-slate-700">${(currentPage - 1) * itemsPerPage + 1}</span> - <span class="font-medium">${Math.min(currentPage * itemsPerPage, totalItems)}</span> of ${whiteSpace}
-            <span class="font-bold text-slate-700">${totalItems}</span> results
-          </p>
-        <div>
-          <nav class="isolate inline-flex -space-x-px rounded-md" aria-label="Pagination">
-            <a
-              onClick=${() => setPageFn(Math.max(currentPage - 1, 1))}
-              class="relative inline-flex px-3 items-center text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 ${currentPage != 1 ? 'cursor-pointer' : ''} focus:z-20 focus:outline-offset-0">
-              ${lessThanSymbol}
-            </a>
-
-            <${PageItem} page=${1} isActive=${currentPage === 1} />
-            ${currentPage > maxPageRange + 2 ? html`<span class="${itemcls} ring-1 ring-inset ring-gray-300 text-slate-300">...</span>` : ''}
-            ${Array.from({length: Math.min(totalPages, maxPageRange * 2 + 1)}, (_, i) => Math.max(2, currentPage - maxPageRange) + i).map(page => page > 1 && page < totalPages && html`<${PageItem} page=${page} isActive=${currentPage === page} />`)}
-            ${currentPage < totalPages - (maxPageRange + 1) ? html`<span class="${itemcls} ring-1 ring-inset ring-gray-300 text-slate-300">...</span>` : ''}
-            ${totalPages > 1 ? html`<${PageItem} page=${totalPages} isActive=${currentPage === totalPages} />` : ''}
-
-            <a
-              onClick=${() => setPageFn(Math.min(currentPage + 1, totalPages))}
-              class="relative inline-flex px-3 items-center text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 ${currentPage != totalPages ? 'cursor-pointer' : ''} focus:z-20 focus:outline-offset-0">
-              ${greaterThanSymbol}
-            </a>
-          </nav>
-        </div>
-      </div>
-    </div>`;
-};
-
-export function PeerTable({systemStatus, data}) {
-  const Th = props => html`<th scope="col" class="sticky top-0 z-10 border-b border-slate-300 bg-white bg-opacity-75 py-1.5 px-4 text-left text-sm font-semibold text-slate-900 backdrop-blur backdrop-filter">${props.title}</th>`;
-  const Td = props => html`<td class="whitespace-nowrap border-b border-slate-200 py-2 px-4 pr-3 text-sm text-slate-900">${props.text}</td>`;
-  const PeerStatus = ({lost}) => {
+export function PeerTable({ systemStatus, data }) {
+  const PeerStatus = ({ lost }) => {
     const text = ['good', 'flaky', 'lost'][lost];
     const colors = [tipColors.green, tipColors.yellow, tipColors.red][lost];
     return html`<${Colored} colors=${colors} text=${text} />`;
   };
 
-  const Row = ({e}) => html`
+  const Row = ({ e }) => html`
 <tr>
   <${Td} text=${e.id} />
   <${Td} text=${html`<${PeerStatus} lost=${e.lost}/>`} />
   <${Td} text=${e.name} />
   <${Td} text="${e.distance} m" />
   <${Td} text="${e.rssi ? e.rssi + "dBm" : "N/A"}" />
-  <${Td} text="${e.lq/4}%" />
+  <${Td} text="${e.lq / 4}%" />
 
 <//>`;
 
-const SelfRow = ({e}) => html`
+  const SelfRow = ({ e }) => html`
 <tr>
   <${Td} text=${e.id} />
   <${Td} text=${html`<${Colored} colors=${tipColors.blue} text="self" />`} />
@@ -294,11 +219,11 @@ const SelfRow = ({e}) => html`
 
 <//>`;
 
-return html`
+  return html`
 <div class="m-4 divide-y divide-gray-200 overflow-auto rounded bg-white">
   <div class="font-semibold flex items-center text-gray-600 px-3 justify-between whitespace-nowrap">
     <div class="font-semibold flex items-center text-gray-600">
-      <div class="mr-4">Peers</div>
+      <div class="mr-4 pb-2">Peers</div>
     </div>
   <//>
   <div class="inline-block min-w-full align-middle" style="max-height: 82vh; overflow: auto;">
@@ -314,8 +239,8 @@ return html`
         </tr>
       </thead>
       <tbody>
-        ${h(SelfRow, {e: {id: data.myID, name: systemStatus.name}})}
-        ${(data.peers ? data.peers : []).map(e => h(Row, {e}))}
+        ${h(SelfRow, { e: { id: data.myID, name: systemStatus.name } })}
+        ${(data.peers ? data.peers : []).map(e => h(Row, { e }))}
       </tbody>
     </table>
   <//>
@@ -323,16 +248,14 @@ return html`
 }
 
 
-export function RadioTable({data}) {
-  const Th = props => html`<th scope="col" class="sticky top-0 z-10 border-b border-slate-300 bg-white bg-opacity-75 py-1.5 px-4 text-left text-sm font-semibold text-slate-900 backdrop-blur backdrop-filter">${props.title}</th>`;
-  const Td = props => html`<td class="whitespace-nowrap border-b border-slate-200 py-2 px-4 pr-3 text-sm text-slate-900">${props.text}</td>`;
-  const RadioStatus = ({enabled}) => {
+export function RadioTable({ data }) {
+  const RadioStatus = ({ enabled }) => {
     const text = ['disabled', 'enabled'][enabled];
     const colors = [tipColors.gray, tipColors.green][enabled];
     return html`<${Colored} colors=${colors} text=${text} />`;
   };
 
-  const Row = ({e}) => html`
+  const Row = ({ e }) => html`
 <tr>
   <${Td} text=${html`<${RadioStatus} enabled=${e.enabled ? 1 : 0}/>`} />
   <${Td} text=${e.status} />
@@ -340,11 +263,11 @@ export function RadioTable({data}) {
 
 <//>`;
 
-return html`
+  return html`
 <div class="m-4 divide-y divide-gray-200 overflow-auto rounded bg-white">
   <div class="font-semibold flex items-center text-gray-600 px-3 justify-between whitespace-nowrap">
     <div class="font-semibold flex items-center text-gray-600">
-      <div class="mr-4">Radios</div>
+      <div class="mr-4 pb-2">Radios</div>
     </div>
   <//>
   <div class="inline-block min-w-full align-middle" style="max-height: 82vh; overflow: auto;">
@@ -357,9 +280,28 @@ return html`
         </tr>
       </thead>
       <tbody>
-        ${(data.radios ? data.radios : []).map(e => h(Row, {e}))}
+        ${(data.radios ? data.radios : []).map(e => h(Row, { e }))}
       </tbody>
     </table>
   <//>
 <//>`;
+}
+
+export default function LoadingSpinner() {
+  return html`
+  <div id="root">
+    <div class="loader-container">
+      <div class="loader">
+        <div class="sk-chase">
+          <div class="sk-chase-dot"></div>
+          <div class="sk-chase-dot"></div>
+          <div class="sk-chase-dot"></div>
+          <div class="sk-chase-dot"></div>
+          <div class="sk-chase-dot"></div>
+          <div class="sk-chase-dot"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  `;
 }
