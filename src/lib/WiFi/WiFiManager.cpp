@@ -233,6 +233,7 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     doc["lora_band"] = LORA_BAND;
 #endif
     doc["uptimeMilliseconds"] = millis();
+    doc["phase"] = sys.phase;
     doc["name"] = curr.name;
     doc["longName"] = generate_id();
     doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];

@@ -267,6 +267,7 @@ void loop()
                 curr.host = MSPManager::getSingleton()->getFCVariant();
                 if (cfg.force_gs)
                 {
+                    DBGLN("[main] forcing GCS mode");
                     curr.host = HOST_GCS;
                 }
                 if (cfg.display_enable)
@@ -290,6 +291,7 @@ void loop()
             {
                 // Too many nodes already, or connected to a ground station: go to silent mode
                 sys.disable_tx = 1;
+                DBGLN("[main] disabling TX due to too many nodes or host=GCS");
             }
             else
             {
@@ -424,7 +426,7 @@ void loop()
                 {
                     sys.drift_correction = constrain(sys.drift, -LORA_DRIFT_CORRECTION, LORA_DRIFT_CORRECTION);
                     sys.next_tx -= sys.drift_correction;
-                    DBGF("[main] Adjusting timing by %d\n", sys.drift_correction);
+                    DBGF("[main] adjusting timing by %d\n", sys.drift_correction);
                     sprintf(sys.message, "%s", "TIMING ADJUST");
                 }
             }

@@ -8,7 +8,7 @@
 
 void pick_id()
 {
-    DBGF("Selecting new ID\n");
+    DBGF("[pick_id] selecting new ID\n");
     curr.id = 0;
     for (int i = 0; i < cfg.lora_nodes; i++)
     {
@@ -52,6 +52,10 @@ uint8_t crc8_dvb_s2(uint8_t crc, unsigned char a)
     return crc;
 }
 
+void uint32ToHex(uint32_t num, char* hexStr) {
+    sprintf(hexStr, "%06X", num);
+}
+
 String generate_id()
 {
     uint32_t chipID;
@@ -62,7 +66,10 @@ String generate_id()
     uint32_t high = (ESP.getEfuseMac() >> 32) % 0xFFFFFFFF;
     chipID = (high << 8 | low >> 24) << 8;
 #endif
-    String chipIDString = String(__builtin_bswap32(chipID), HEX);
+    char buf[8];
+    uint32ToHex(__builtin_bswap32(chipID), buf);
+    //String chipIDString = String(__builtin_bswap32(chipID), HEX);
+    String chipIDString = String(buf);
     chipIDString.toUpperCase();
     return chipIDString;
 }

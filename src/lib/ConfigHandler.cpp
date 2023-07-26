@@ -3,38 +3,41 @@
 #include <EEPROM.h>
 #include "ConfigStrings.h"
 
-void config_clear() {
-    for (int i = 0; i < 512; i++) { EEPROM.write(i, 0); }
+void config_clear()
+{
+    for (int i = 0; i < 512; i++)
+    {
+        EEPROM.write(i, 0);
+    }
     EEPROM.commit();
 }
 
-void config_save() {
-    for(size_t i = 0; i < sizeof(cfg); i++) {
+void config_save()
+{
+    for (size_t i = 0; i < sizeof(cfg); i++)
+    {
         char data = ((char *)&cfg)[i];
         EEPROM.write(i, data);
     }
     EEPROM.commit();
 }
 
-void config_init(bool forcedefault) {
+void config_init(bool forcedefault)
+{
 
     size_t size = sizeof(cfg);
     EEPROM.begin(size * 2);
 
-    for(size_t i = 0; i < size; i++)  {
+    for (size_t i = 0; i < size; i++)
+    {
         char data = EEPROM.read(i);
         ((char *)&cfg)[i] = data;
     }
 
-    if (cfg.version != VERSION_CONFIG || forcedefault)
-        {
+    if (true || cfg.version != VERSION_CONFIG || forcedefault)
+    {
         cfg.version = VERSION_CONFIG;
-        strncpy(cfg.target_name, CFG_TARGET_NAME, sizeof(cfg.target_name));
-        #ifdef HAS_LORA
-        cfg.lora_power = LORA_POWER;
-        cfg.lora_band = LORA_BAND;
-        cfg.lora_frequency = LORA_FREQUENCY;
-        #endif
+        cfg.force_gs = false;
 
         cfg.lora_nodes = LORA_M3_NODES;
         cfg.slot_spacing = LORA_M3_SLOT_SPACING;
