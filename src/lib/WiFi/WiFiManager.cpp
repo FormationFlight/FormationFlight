@@ -114,10 +114,10 @@ WiFiManager::WiFiManager()
         GNSSManager::getSingleton()->spoofedLocation.lat = lat;
         GNSSManager::getSingleton()->spoofedLocation.lon = lon;
         GNSSManager::getSingleton()->spoofedLocation.fixType = GNSS_FIX_TYPE_3D;
-        GNSSManager::getSingleton()->spoofedLocation.alt = 100;
-        GNSSManager::getSingleton()->spoofedLocation.numSat = 69;
-        GNSSManager::getSingleton()->spoofedLocation.hdop = 1.1;
-
+        GNSSManager::getSingleton()->spoofedLocation.alt = 42000; // cm
+        GNSSManager::getSingleton()->spoofedLocation.numSat = 42;
+        GNSSManager::getSingleton()->spoofedLocation.hdop = .69;
+        GNSSManager::getSingleton()->spoofLocationEnabled = true;
 
         request->send(200, "text/plain", "OK");
     });

@@ -26,12 +26,6 @@ void MSP_GNSS::loop()
 
 void MSP_GNSS::update(GNSSLocation loc)
 {
-    if (GNSSManager::getSingleton()->spoofLocationEnabled) {
-        GNSSManager::getSingleton()->spoofedLocation.fixType = GNSS_FIX_TYPE_3D;
-        MSPManager::getSingleton()->sendLocation(GNSSManager::getSingleton()->spoofedLocation);
-        return;
-    }
-
     MSPManager::getSingleton()->sendLocation(loc);
 }
 

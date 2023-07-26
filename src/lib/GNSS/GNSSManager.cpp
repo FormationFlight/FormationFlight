@@ -22,6 +22,7 @@ GNSSLocation GNSSManager::getLocation()
     static uint32_t lastUpdate = 0;
     static GNSSLocation loc;
     if (spoofLocationEnabled) {
+        lastUpdate = millis();
         return spoofedLocation;
     }
     if (millis() - lastUpdate > GNSS_FRESH_INTERVAL_MS) {

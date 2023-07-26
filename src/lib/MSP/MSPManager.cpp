@@ -150,25 +150,41 @@ void MSPManager::sendLocation(GNSSLocation loc)
     msp->command(MSP_SET_RAW_GPS, &gps, sizeof(gps), 0);
     */
 
-    msp_sensor_gps_t gps2;
-    gps2.gpsWeek = 0xFFFF;
+    static msp_sensor_gps_t gps2 = {};
+    gps2.gpsWeek = 0xFFFF; // if it is not coming from gps, 0xffff means not supported
     gps2.fixType = this->mapFixType2Msp(loc.fixType);
     gps2.mslAltitude = loc.alt; // cm
     gps2.groundCourse = loc.groundCourse * 10;
     gps2.hdop = loc.hdop;
 
-    // TODO: break 3d speed? groundspeed replacement?
-    gps2.nedVelDown = 0;
-    gps2.nedVelEast = 0;
-    gps2.nedVelNorth = 0;
-
-    gps2.latitude = loc.lat * (1 / 10000000);
-    gps2.longitude = loc.lon * (1 / 10000000);
+    gps2.latitude = loc.lat * 10000000;
+    gps2.longitude = loc.lon * 10000000;
     gps2.satellitesInView = loc.numSat;
 
     gps2.instance = 1;
 
+    // TODO: These are velocity vectors. Update gnss location to include 3d speed?
+    // 2d speed modulus can be computed by using nedVelEast nedVelNorth
+    // cm/s
+    gps2.nedVelDown = 0;
+    gps2.nedVelEast = 0;
+    gps2.nedVelNorth = 0;
+
+    // TODO: time of day from GPS data
+    unsigned long m = millis();
+    gps2.year = 1970;
+    gps2.day = 1;
+    gps2.hour = 0;
+    gps2.month = 1;
+    gps2.hour = (m / (60 * 60 * 1000)) % 24;
+    gps2.min = (m / (60 * 1000)) % 60;
+    gps2.sec = (m / 1000) % 60;
+
+    gps2.horizontalPosAccuracy = 1;
+    gps2.verticalPosAccuracy = 1;
+
     msp->command2(MSP2_SENSOR_GPS, &gps2, sizeof(gps2), 0);
+
     gnssUpdatesSent++;
 }
 
