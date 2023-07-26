@@ -204,7 +204,7 @@ export function PeerTable({ systemStatus, data }) {
   <${Td} text=${e.name} />
   <${Td} text="${e.distance} m" />
   <${Td} text="${e.rssi ? e.rssi + "dBm" : "N/A"}" />
-  <${Td} text="${e.lq / 4}%" />
+  <${Td} text="${e.lq / 4 * 100}%" />
 
 <//>`;
 
