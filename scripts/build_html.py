@@ -143,7 +143,7 @@ if c_code and handler_code:
     with open("src/lib/WiFi/webcontent.h", "w") as output_file:
         output_file.write(c_code)
     print(f"HTML content from {num_files} files, {total_pre_size} bytes minified & compressed to {total_size} bytes, written to webcontent.h")
-    print(f"{br_bytes_saved} bytes saved through brotli")
+    #print(f"{br_bytes_saved} bytes saved through brotli")
 
     with open("src/lib/WiFi/staticfilehandler.inc", "w") as output_file:
         output_file.write(handler_code)
