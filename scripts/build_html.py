@@ -1,18 +1,29 @@
 #Import("env")
 import gzip
 import io
-import mimetypes
 import os
 import sys
 
 from external.minify import (html_minifier, rcssmin, rjsmin)
 
 total_pre_size = 0
-from external.minify import (html_minifier, rcssmin, rjsmin)
-
-total_pre_size = 0
 total_size = 0
 num_files = 0
+
+# We use our own because mimetypes is broken
+# https://bugs.python.org/issue43975
+def get_mime_type(file_path):
+    ext = os.path.splitext(file_path)[1]
+    types = {
+        '.js': 'text/javascript',
+        '.html': 'text/html',
+        '.png': 'image/png',
+        '.woff2': 'application/octet-stream',
+        '.css': 'text/css'
+    }
+    if ext not in types:
+        raise ValueError(f'unable to find mime type for {ext}')
+    return types[ext]
 
 def compress(data):
     buf = io.BytesIO()
@@ -58,9 +69,7 @@ def generate_c_byte_array(file_path, byte_array):
 def generate_handler(file_path, file_array_name):
     file_path = file_path.lstrip("html")
     file_path = file_path.replace("\\", "/")
-    mime_type, _ = mimetypes.guess_type(file_path)
-    if mime_type is None:
-        mime_type = "application/octet-stream"
+    mime_type = get_mime_type(file_path)
     handler_base = '''
     server->on("{file_path}", HTTP_GET, [](AsyncWebServerRequest *request) {{
         AsyncWebServerResponse *response = request->beginResponse_P(200, "{mime_type}", (uint8_t *){file_array_name}, sizeof({file_array_name}));
