@@ -1,0 +1,29 @@
+name: Self-approve PR
+on:
+  issue_comment:
+    types:
+      - created
+jobs:
+  check:
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions-cool/check-user-permission@main
+        id: checkUser
+        with:
+          username: ${{github.triggering_actor}}
+          require: 'write'
+      - uses: actions/github-script@v6
+        name: Approve PR
+        if: ${{ steps.checkUser.outputs.require-result == 'true' && contains(github.event.comment.body, 'LGTM') }}
+        with:
+          script: |
+            github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              review_id: 1,
+              event: 'APPROVE',
+              body: 'Auto approved by LGTM bot'
+            })
