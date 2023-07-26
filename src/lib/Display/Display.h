@@ -8,7 +8,6 @@ void display_init();
 void display_draw_status(system_t *sys);
 void display_draw_intro();
 void display_draw_startup();
-void display_draw_clearconfig();
 void display_draw_scan(system_t *sys);
 void display_draw_progressbar(int progress);
 void display_draw_peername(int position);
