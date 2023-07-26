@@ -155,7 +155,7 @@ void MSPManager::sendLocation(GNSSLocation loc)
     gps2.fixType = this->mapFixType2Msp(loc.fixType);
     gps2.mslAltitude = loc.alt; // cm
     gps2.groundCourse = loc.groundCourse * 10;
-    gps2.hdop = loc.hdop;
+    gps2.hdop = loc.hdop * 100;
 
     gps2.latitude = loc.lat * 10000000;
     gps2.longitude = loc.lon * 10000000;
