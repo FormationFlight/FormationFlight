@@ -6,8 +6,12 @@ const Logo = props => html`<img class=${props.class} src="/images/logo.png"></im
 // Permit using the web ui locally for development
 const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
 
-function Header({ id, setShowSidebar, showSidebar }) {
+function Header({ id, version, setShowSidebar, showSidebar }) {
   const [rebootResult, setRebootResult] = useState(null);
+  const [blurEnabled, setBlurEnabled] = useState(false);
+  const blur = () => {
+    setBlurEnabled(!blurEnabled);
+  }
   const rebootAction = () => {
     fetch(ENDPOINT_PREFIX + "/system/reboot", { method: "POST" })
       .then((r) => {
@@ -23,7 +27,9 @@ function Header({ id, setShowSidebar, showSidebar }) {
     <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
       <div class="relative flex flex-1"><//>
       <div class="flex items-center gap-x-4 lg:gap-x-6">
-        <span class="text-sm text-slate-400">${id}<//>
+        <span class="text-sm text-slate-400 ${blurEnabled ? 'blur' : ''}" onclick=${blur}>${id}<//>
+        <div class="hidden lg:block lg:h-4 lg:w-px lg:bg-gray-200" aria-hidden="true"><//>
+        <span class="text-sm text-slate-400">${version}<//>
         <div class="hidden lg:block lg:h-4 lg:w-px lg:bg-gray-200" aria-hidden="true"><//>
         <${Button} title="Reboot" icon=${Icons.refresh} onclick=${rebootAction} />
         ${rebootResult && html`<${Notification} ok=${rebootResult.status} timeout=${rebootResult.status ? 1500 : 5000}
@@ -250,7 +256,7 @@ const App = function () {
   return html`
 <div class="min-h-screen bg-slate-100">
   <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
-  <${Header} id="${systemStatus.target}/${systemStatus.longName} | ${systemStatus.version}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
+  <${Header} id="${systemStatus.target}/${systemStatus.longName}" version=${systemStatus.version} showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
     <${Router} onChange=${ev => setUrl(ev.url)} history=${History.createHashHistory()} >
       <${Main} default=${true} />

@@ -109,6 +109,10 @@ export function Colored({ icon, text, colors }) {
 }
 
 export function Stat({ title, text, tipText, tipIcon, tipColors, subText }) {
+  const [blurEnabled, setBlurEnabled] = useState(false);
+  const blur = () => {
+    setBlurEnabled(!blurEnabled);
+  }
   return html`
 <div class="flex flex-col bg-white border shadow-sm rounded-xl dark:bg-slate-900 dark:border-gray-800">
   <div class="p-4 md:p-5">
@@ -126,7 +130,7 @@ export function Stat({ title, text, tipText, tipIcon, tipColors, subText }) {
     <//>
     ${!!subText && html`
     <div class="mt-1 flex items-center gap-x-2">
-      <h6 class="text-xs sm:text-s font-small text-gray-500 dark:text-gray-200">
+      <h6 class="text-xs sm:text-s font-small text-gray-500 dark:text-gray-200 ${blurEnabled ? 'blur' : ''}" onclick=${blur}>
     ${subText}
       <//>
     <//>
@@ -188,9 +192,13 @@ export function Setting(props) {
 }
 
 const Th = props => html`<th scope="col" class="sticky top-0 z-10 border-b border-slate-300 bg-white bg-opacity-75 py-1.5 pl-4 text-left text-sm font-semibold text-slate-900 backdrop-blur backdrop-filter">${props.title}</th>`;
-const Td = props => html`<td class="whitespace-nowrap border-b border-slate-200 py-2 pl-4 text-sm text-slate-900">${props.text}</td>`;
+const Td = props => html`<td class="whitespace-nowrap border-b border-slate-200 py-2 pl-4 text-sm text-slate-900 ${props.blur ? 'blur' : ''}" onclick=${props.onclick}>${props.text}</td>`;
 
 export function PeerTable({ systemStatus, data }) {
+  const [blurEnabled, setBlurEnabled] = useState(false);
+  const blur = () => {
+    setBlurEnabled(!blurEnabled);
+  }
   const PeerStatus = ({ lost }) => {
     const text = ['good', 'flaky', 'lost'][lost];
     const colors = [tipColors.green, tipColors.yellow, tipColors.red][lost];
@@ -201,8 +209,8 @@ export function PeerTable({ systemStatus, data }) {
 <tr>
   <${Td} text=${e.id} />
   <${Td} text=${html`<${PeerStatus} lost=${e.lost}/>`} />
-  <${Td} text=${e.name} />
-  <${Td} text="${e.distance} m" />
+  <${Td} text=${e.name} blur=${blurEnabled} onclick=${blur} />
+  <${Td} text="${e.distance.toFixed(1)} m" />
   <${Td} text="${e.rssi ? e.rssi + "dBm" : "N/A"}" />
   <${Td} text="${e.lq / 4 * 100}%" />
 
@@ -212,7 +220,7 @@ export function PeerTable({ systemStatus, data }) {
 <tr>
   <${Td} text=${e.id} />
   <${Td} text=${html`<${Colored} colors=${tipColors.blue} text="self" />`} />
-  <${Td} text=${e.name} />
+  <${Td} text=${e.name} blur=${blurEnabled} onclick=${blur} />
   <${Td} text="N/A" />
   <${Td} text="N/A" />
   <${Td} text="N/A" />

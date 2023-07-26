@@ -10,6 +10,10 @@
     padding-bottom: 0.25rem;
 }
 
+.blur {
+    filter: blur(4px) brightness(0);
+}
+
 /* https://codesandbox.io/s/silly-frog-z7ju3?file=/public/index.html */
 
 #root {
