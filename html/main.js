@@ -1,8 +1,8 @@
 'use strict';
-import { h, render, useState, useEffect, html, Router } from './bundle.js';
+import { h, render, useRef, useState, useEffect, html, Router } from './bundle.js';
 import LoadingSpinner, { Icons, Setting, Button, Stat, tipColors, Notification, PeerTable, RadioTable } from './components.js';
 
-const Logo = props => html`<img class=${props.class} src="/images/logo.png"></img>`
+const Logo = props => html`<img class=${props.class} src="/images/logo.svg"></img>`
 // Permit using the web ui locally for development
 const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
 
@@ -90,19 +90,38 @@ function Main() {
   const [cryptomanagerStatus, setCryptomanagerStatus] = useState(null);
   const [radiomanagerStatus, setRadiomanagerStatus] = useState(null);
   const [mspmanagerStatus, setMspmanagerStatus] = useState(null);
+  const refreshIndex = useRef(0);
+  const initalLoadComplete = useRef(false);
 
   const refresh = () => {
-    fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then(r => setSystemStatus(r));
-    fetch(ENDPOINT_PREFIX + '/peermanager/status').then(r => r.json()).then(r => setPeermanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/gnssmanager/status').then(r => r.json()).then(r => setGnssmanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/cryptomanager/status').then(r => r.json()).then(r => setCryptomanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/radiomanager/status').then(r => r.json()).then(r => setRadiomanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/mspmanager/status').then(r => r.json()).then(r => setMspmanagerStatus(r));
-
+    switch (refreshIndex.current) {
+      case 0:
+        fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then(r => setSystemStatus(r));
+        break;
+      case 1:
+        fetch(ENDPOINT_PREFIX + '/peermanager/status').then(r => r.json()).then(r => setPeermanagerStatus(r));
+        break;
+      case 2:
+        fetch(ENDPOINT_PREFIX + '/gnssmanager/status').then(r => r.json()).then(r => setGnssmanagerStatus(r));
+        break;
+      case 3:
+        fetch(ENDPOINT_PREFIX + '/cryptomanager/status').then(r => r.json()).then(r => setCryptomanagerStatus(r));
+        break;
+      case 4:
+        fetch(ENDPOINT_PREFIX + '/radiomanager/status').then(r => r.json()).then(r => setRadiomanagerStatus(r));
+        break;
+      case 5:
+        fetch(ENDPOINT_PREFIX + '/mspmanager/status').then(r => r.json()).then(r => setMspmanagerStatus(r));
+        break;
+      case 6:
+        initalLoadComplete.current = true;
+        refreshIndex.current = 0;
+    }
+    refreshIndex.current++;
+    setTimeout(refresh, initalLoadComplete.current ? 1000 : 25);
   }
   useEffect(() => {
     refresh();
-    setInterval(refresh, 5000);
   }, []);
 
   const ellipsizeString = (str, n) => {
@@ -256,7 +275,7 @@ const App = function () {
   return html`
 <div class="min-h-screen bg-slate-100">
   <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
-  <${Header} id="${systemStatus.target}/${systemStatus.longName}" version=${systemStatus.version} showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
+  <${Header} id="${systemStatus.target}/${systemStatus.longName}" version="${systemStatus.version}/${systemStatus.gitHash}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
     <${Router} onChange=${ev => setUrl(ev.url)} history=${History.createHashHistory()} >
       <${Main} default=${true} />

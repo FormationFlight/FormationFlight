@@ -210,7 +210,7 @@ export function PeerTable({ systemStatus, data }) {
   <${Td} text=${e.id} />
   <${Td} text=${html`<${PeerStatus} lost=${e.lost}/>`} />
   <${Td} text=${e.name} blur=${blurEnabled} onclick=${blur} />
-  <${Td} text="${e.distance.toFixed(1)} m" />
+  <${Td} text="${e.distance !== undefined ? e.distance.toFixed(1) : 0.0} m" />
   <${Td} text="${e.rssi ? e.rssi + "dBm" : "N/A"}" />
   <${Td} text="${e.lq / 4 * 100}%" />
 

@@ -31,6 +31,9 @@
 #ifndef CLOUD_BUILD
 #define CLOUD_BUILD false
 #endif
+#ifndef GITHASH
+#define GITHASH "githash"
+#endif
 
 // Timing parameters
 

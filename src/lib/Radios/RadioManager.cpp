@@ -166,13 +166,14 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
     default:
         break;
     }
+    DBGF("Received packet from peer %s\n", peer_slotname[air_0.id]);
 
     if ((sys.air_last_received_id == curr.id) && (sys.phase > MODE_OTA_SYNC) && !sys.disable_tx)
     {
         // Pick another slot
+        DBGF("[RadioManager] Received packet with our own ID %s, moving to %s. Last TX was %u-%u\n", peer_slotname[air_0.id], peer_slotname[curr.id], sys.last_tx_start, sys.last_tx_end);
         sprintf(sys.message, "%s", "ID CONFLICT");
         pick_id();
-        DBGF("Received packet with our own ID %s, moving to %s. Last TX was %u-%u\n", peer_slotname[air_0.id], peer_slotname[curr.id], sys.last_tx_start, sys.last_tx_end);
         resync_tx_slot(cfg.lora_timing_delay);
     }
     peer->packetsReceived++;

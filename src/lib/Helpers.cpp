@@ -3,6 +3,7 @@
 #include <cmath>
 #include <Arduino.h>
 #include "main.h"
+#include "ConfigStrings.h"
 #include "Peers/PeerManager.h"
 
 
@@ -10,14 +11,28 @@ void pick_id()
 {
     DBGF("[pick_id] selecting new ID\n");
     curr.id = 0;
-    for (int i = 0; i < cfg.lora_nodes; i++)
+    int i;
+    for (i = 1; i < LORA_M3_NODES; i++)
     {
-        peer_t *peer = PeerManager::getSingleton()->getPeer(i);
-        if ((peer->id == 0) && (curr.id == 0) && (!peer->lost))
+        peer_t *peer = PeerManager::getSingleton()->getPeer(i - 1);
+        if (peer->id != 0 || millis() - peer->updated < LORA_PEER_TIMEOUT)
         {
-            curr.id = i + 1;
+            DBGF("[pick_id] skipping id %s\n", peer_slotname[i]);
+            continue;
+        }
+        else if (i <= LORA_M3_NODES)
+        {
+            curr.id = i;
+            break;
+        }
+        else
+        {
+            curr.id = 0;
+            break;
         }
     }
+    curr.id = i;
+    DBGF("[pick_id] selected id %s\n", peer_slotname[i]);
 }
 
 void resync_tx_slot(int16_t delay)
