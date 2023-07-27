@@ -115,7 +115,7 @@ function Main() {
         break;
       case 6:
         initalLoadComplete.current = true;
-        refreshIndex.current = 0;
+        refreshIndex.current = -1;
     }
     refreshIndex.current++;
     setTimeout(refresh, initalLoadComplete.current ? 1000 : 25);
