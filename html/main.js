@@ -1,13 +1,17 @@
 'use strict';
-import { h, render, useState, useEffect, html, Router } from './bundle.js';
+import { h, render, useRef, useState, useEffect, html, Router } from './bundle.js';
 import LoadingSpinner, { Icons, Setting, Button, Stat, tipColors, Notification, PeerTable, RadioTable } from './components.js';
 
-const Logo = props => html`<img class=${props.class} src="/images/logo.png"></img>`
+const Logo = props => html`<img class=${props.class} src="/images/logo.svg"></img>`
 // Permit using the web ui locally for development
 const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
 
-function Header({ id, setShowSidebar, showSidebar }) {
+function Header({ id, version, setShowSidebar, showSidebar }) {
   const [rebootResult, setRebootResult] = useState(null);
+  const [blurEnabled, setBlurEnabled] = useState(false);
+  const blur = () => {
+    setBlurEnabled(!blurEnabled);
+  }
   const rebootAction = () => {
     fetch(ENDPOINT_PREFIX + "/system/reboot", { method: "POST" })
       .then((r) => {
@@ -23,7 +27,9 @@ function Header({ id, setShowSidebar, showSidebar }) {
     <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
       <div class="relative flex flex-1"><//>
       <div class="flex items-center gap-x-4 lg:gap-x-6">
-        <span class="text-sm text-slate-400">${id}<//>
+        <span class="text-sm text-slate-400 ${blurEnabled ? 'blur' : ''}" onclick=${blur}>${id}<//>
+        <div class="hidden lg:block lg:h-4 lg:w-px lg:bg-gray-200" aria-hidden="true"><//>
+        <span class="text-sm text-slate-400">${version}<//>
         <div class="hidden lg:block lg:h-4 lg:w-px lg:bg-gray-200" aria-hidden="true"><//>
         <${Button} title="Reboot" icon=${Icons.refresh} onclick=${rebootAction} />
         ${rebootResult && html`<${Notification} ok=${rebootResult.status} timeout=${rebootResult.status ? 1500 : 5000}
@@ -50,7 +56,7 @@ function Sidebar({ url, show, systemStatus }) {
             ${show && 'translate-x-0'} right-auto bottom-0">
   <div class="flex flex-col m-4 gap-y-6">
     <div class="flex h-10 shrink-0 items-center gap-x-4 font-bold text-xl text-slate-500">
-      <${Logo} class="h-full"/> FormationFlight
+      <${Logo} class="h-full logo"/> FormationFlight
       <div class="text-xs text-slate-500">
       ${systemStatus.version.match(/v\d/) ? systemStatus.version : "dev"}
       <//>
@@ -84,19 +90,38 @@ function Main() {
   const [cryptomanagerStatus, setCryptomanagerStatus] = useState(null);
   const [radiomanagerStatus, setRadiomanagerStatus] = useState(null);
   const [mspmanagerStatus, setMspmanagerStatus] = useState(null);
+  const refreshIndex = useRef(0);
+  const initalLoadComplete = useRef(false);
 
   const refresh = () => {
-    fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then(r => setSystemStatus(r));
-    fetch(ENDPOINT_PREFIX + '/peermanager/status').then(r => r.json()).then(r => setPeermanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/gnssmanager/status').then(r => r.json()).then(r => setGnssmanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/cryptomanager/status').then(r => r.json()).then(r => setCryptomanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/radiomanager/status').then(r => r.json()).then(r => setRadiomanagerStatus(r));
-    fetch(ENDPOINT_PREFIX + '/mspmanager/status').then(r => r.json()).then(r => setMspmanagerStatus(r));
-
+    switch (refreshIndex.current) {
+      case 0:
+        fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then(r => setSystemStatus(r));
+        break;
+      case 1:
+        fetch(ENDPOINT_PREFIX + '/peermanager/status').then(r => r.json()).then(r => setPeermanagerStatus(r));
+        break;
+      case 2:
+        fetch(ENDPOINT_PREFIX + '/gnssmanager/status').then(r => r.json()).then(r => setGnssmanagerStatus(r));
+        break;
+      case 3:
+        fetch(ENDPOINT_PREFIX + '/cryptomanager/status').then(r => r.json()).then(r => setCryptomanagerStatus(r));
+        break;
+      case 4:
+        fetch(ENDPOINT_PREFIX + '/radiomanager/status').then(r => r.json()).then(r => setRadiomanagerStatus(r));
+        break;
+      case 5:
+        fetch(ENDPOINT_PREFIX + '/mspmanager/status').then(r => r.json()).then(r => setMspmanagerStatus(r));
+        break;
+      case 6:
+        initalLoadComplete.current = true;
+        refreshIndex.current = 0;
+    }
+    refreshIndex.current++;
+    setTimeout(refresh, initalLoadComplete.current ? 1000 : 25);
   }
   useEffect(() => {
     refresh();
-    setInterval(refresh, 5000);
   }, []);
 
   const ellipsizeString = (str, n) => {
@@ -250,9 +275,9 @@ const App = function () {
   return html`
 <div class="min-h-screen bg-slate-100">
   <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
-  <${Header} id="${systemStatus.target}/${systemStatus.longName} | ${systemStatus.version}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
+  <${Header} id="${systemStatus.target}/${systemStatus.longName}" version="${systemStatus.version}/${systemStatus.gitHash}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
-    <${Router} onChange=${ev => setUrl(ev.url)} history=${History.createHashHistory()} >
+    <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(false); }} history=${History.createHashHistory()} >
       <${Main} default=${true} />
       <!--<${Settings} path="settings" />-->
       <${Update} path="update" />

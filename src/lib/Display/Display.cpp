@@ -331,26 +331,10 @@ void display_draw_startup()
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
     display.setTextAlignment(TEXT_ALIGN_LEFT);
-    display.drawString(0, 9, String(cfg.target_name));
-    display.drawString(35, 9, String(cfg.lora_band) + "MHz");
-    display.drawString(0, 19, "MODE:");
-    display.drawString(35, 19, String(loramode_name[cfg.lora_mode]));
-    display.drawString(0, 29, "HOST:");
-    display.display();
+    display.drawString(0, 9, String(CFG_TARGET_NAME));
+#ifdef LORA_BAND
+    display.drawString(35, 9, String(LORA_BAND) + "MHz");
 #endif
-}
-
-void display_draw_clearconfig()
-{
-#ifdef HAS_OLED
-    display.clear();
-    display.setFont(ArialMT_Plain_10);
-    display.setTextAlignment(TEXT_ALIGN_RIGHT);
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
-    display.drawString(0, 9, String(cfg.target_name));
-    display.drawString(35, 9, String(cfg.lora_band) + "MHz");
-    display.drawString(0, 19, "MODE:");
-    display.drawString(35, 19, String(loramode_name[cfg.lora_mode]));
     display.drawString(0, 29, "HOST:");
     display.display();
 #endif

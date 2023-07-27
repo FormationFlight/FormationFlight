@@ -10,7 +10,11 @@
     padding-bottom: 0.25rem;
 }
 
-/* https://codesandbox.io/s/silly-frog-z7ju3?file=/public/index.html */
+.blur {
+    filter: blur(4px) brightness(0);
+}
+
+/* https://codesandbox.io/s/silly-frog-z7ju3 */
 
 #root {
     width: 100%;
@@ -131,4 +135,13 @@
     0% {
         transform: scale(1);
     }
+}
+
+.logo {
+    filter: invert(47%) sepia(5%) saturate(1962%) hue-rotate(176deg) brightness(93%) contrast(85%);
+    transition: all .5s ease-in-out;
+}
+
+.logo:hover {
+    filter: invert(24%) sepia(91%) saturate(2531%) hue-rotate(218deg) brightness(98%) contrast(88%);
 }

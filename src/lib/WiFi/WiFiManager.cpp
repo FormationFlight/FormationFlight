@@ -226,6 +226,7 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     doc["platform"] = "ESP32";
 #endif
     doc["version"] = VERSION;
+    doc["gitHash"] = GITHASH;
     doc["buildTime"] = BUILDTIME;
     doc["cloudBuild"] = CLOUD_BUILD;
     doc["heap"] = ESP.getFreeHeap();
@@ -233,6 +234,7 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     doc["lora_band"] = LORA_BAND;
 #endif
     doc["uptimeMilliseconds"] = millis();
+    doc["phase"] = sys.phase;
     doc["name"] = curr.name;
     doc["longName"] = generate_id();
     doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
@@ -291,6 +293,7 @@ void handleFileUploadData(AsyncWebServerRequest *request, const String &filename
             r->statusCode = 500;
             return;
         }
+        WiFiManager::getSingleton()->setOTAActive();
     }
 
     if (Update.write(data, len) != len)

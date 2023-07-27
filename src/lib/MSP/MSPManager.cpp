@@ -28,7 +28,7 @@ void MSPManager::begin(Stream &stream)
 // Returns the flight controller's state - 0 for disarmed, 1 for armed.
 uint8_t MSPManager::getState()
 {
-    if (!ready)
+    if (!ready || !hostIsFlightController(this->getFCVariant()))
     {
         return 0;
     }
@@ -49,6 +49,10 @@ MSPHost MSPManager::getFCVariant()
 {
     static char variant[5] = "";
     static bool cached = false;
+    if (sys.phase > MODE_HOST_SCAN)
+    {
+        cached = true;
+    }
     if (!cached)
     {
         msp->request(MSP_FC_VARIANT, variant, sizeof(variant));
@@ -72,10 +76,6 @@ MSPHost MSPManager::getFCVariant()
     {
         cached = true;
         return HOST_BTFL;
-    }
-    if (sys.phase > MODE_HOST_SCAN)
-    {
-        cached = true;
     }
     return HOST_NONE;
 }
@@ -102,11 +102,26 @@ msp_fc_version_t MSPManager::getFCVersion()
 // Sends a MSP request for the analog values of the FC; will be all-zero if the request failed
 msp_analog_t MSPManager::getAnalogValues()
 {
-    msp_analog_t analog;
+    static msp_analog_t analog;
+    static unsigned long cached = 0;
+
+    if (!hostIsFlightController(this->getFCVariant()))
+    {
+        memset(&analog, 0, sizeof(analog));
+        return analog;
+    }
+
+    if (millis() - cached < 1000)
+    {
+        return analog;
+    }
+
     if (!msp->request(MSP_ANALOG, &analog, sizeof(analog)))
     {
         memset(&analog, 0, sizeof(analog));
+        return analog;
     }
+    cached = millis();
     return analog;
 }
 
@@ -114,6 +129,11 @@ msp_analog_t MSPManager::getAnalogValues()
 msp_raw_gps_t MSPManager::getLocation()
 {
     msp_raw_gps_t gps;
+    if (!hostIsFlightController(this->getFCVariant()))
+    {
+        memset(&gps, 0, sizeof(gps));
+        return gps;
+    }
     if (!msp->request(MSP_RAW_GPS, &gps, sizeof(gps)))
     {
         // Force the response to 0
