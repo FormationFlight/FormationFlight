@@ -2,6 +2,7 @@
 
 GNSSManager::GNSSManager()
 {
+    currentProvider = -1;
 
 }
 
@@ -80,7 +81,8 @@ void GNSSManager::loop()
 
 void GNSSManager::statusJson(JsonDocument *doc)
 {
-    (*doc)["activeProvider"] = getCurrentProviderNameShort();
+    //String name = getCurrentProviderNameShort();
+    // (*doc)["activeProvider"] = name;
     GNSSLocation loc = getLocation();
     (*doc)["lat"] = loc.lat;
     (*doc)["lon"] = loc.lon;
@@ -91,6 +93,9 @@ void GNSSManager::statusJson(JsonDocument *doc)
     (*doc)["fixType"] = loc.fixType;
 #ifdef GNSS_INJECT
     (*doc)["injectingGNSS"] = true;
+    if (spoofLocationEnabled) {
+        (*doc)["gnssSpoof"] = true;
+    }
 #endif
 
     JsonArray providersArray = doc->createNestedArray("providers");
@@ -105,7 +110,6 @@ void GNSSManager::statusJson(JsonDocument *doc)
     }
 }
 
-
 void GNSSManager::setProviderStatus(uint8_t index, bool status)
 {
     if (providers[index] == nullptr) {
@@ -116,7 +120,10 @@ void GNSSManager::setProviderStatus(uint8_t index, bool status)
 
 String GNSSManager::getCurrentProviderNameShort()
 {
-    return providers[currentProvider]->getName();
+    if(currentProvider >= 0 && currentProvider < GNSS_MAX_PROVIDERS && providers[currentProvider] != nullptr)
+        return providers[currentProvider]->getName();
+
+    return "---";
 }
 
 double deg2rad(double deg)
@@ -191,6 +198,6 @@ GNSSLocation GNSSManager::calculatePointAtDistance(GNSSLocation loc, double dist
 // Generates a single point focused around loc offset by a subset of the bearing circle
 // for example if count = 3, n=0 will be at bearing 0°, n=1 will be at bearing 120°, n=2 will be at bearing 240°
 GNSSLocation GNSSManager::generatePointAround(GNSSLocation loc, int n, int count, double distance) {
-    double bearing = (360.0 / count) * n; // Calculate the bearing between each point
+    double bearing = (360.0 / count) * (n - 1); // Calculate the bearing between each point
     return calculatePointAtDistance(loc, distance, bearing);
 }
