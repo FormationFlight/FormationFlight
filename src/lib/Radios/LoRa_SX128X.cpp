@@ -49,15 +49,24 @@ int LoRa_SX128X::begin() {
     SPI.begin();
 #endif
     radio = new SX1281(new Module(LORA_PIN_CS, LORA_PIN_DIO, LORA_PIN_RST, LORA_PIN_BUSY));
-    radio->begin(FREQUENCY, BANDWIDTH, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, LORA_POWER, PREAMBLE_LENGTH);
+    radio->reset(false);
+    int state = radio->begin(FREQUENCY, BANDWIDTH, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, LORA_POWER, PREAMBLE_LENGTH);
+    if (state != RADIOLIB_ERR_NONE) {
+        DBGF("failed to init sx1280: %d\n", state);
+        while (true) {}
+    }
     // We appear to need to set this twice
     radio->setOutputPower(LORA_POWER);
+    radio->setHighSensitivityMode(true);
     //radio->setCRC(0);
     #ifdef LORA_PIN_TXEN
     radio->setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
     #endif
     //radio->implicitHeader(sizeof(air_type0_t));
     radio->setDio1Action(onSX128XPacketReceive);
+    // Discard any data in the buffer
+    uint8_t buf[256];
+    radio->readData(buf, sizeof(buf));
     radio->startReceive();
 
 #endif
@@ -91,7 +100,7 @@ void LoRa_SX128X::loop()
     if (packetReceived)
     {
         uint16_t flags = radio->getIrqStatus();
-        if (flags == RADIOLIB_SX128X_IRQ_RX_DONE) {
+        if (flags == RADIOLIB_SX128X_IRQ_RX_DONE || flags == RADIOLIB_SX128X_IRQ_RX_TX_TIMEOUT) {
             receive();
         }
         if (flags & RADIOLIB_SX128X_IRQ_TX_DONE) {

@@ -81,12 +81,18 @@ void GNSSManager::loop()
 void GNSSManager::statusJson(JsonDocument *doc)
 {
     (*doc)["activeProvider"] = getCurrentProviderNameShort();
+    GNSSLocation loc = getLocation();
+    (*doc)["lat"] = loc.lat;
+    (*doc)["lon"] = loc.lon;
+    (*doc)["alt"] = loc.alt;
+    (*doc)["groundSpeed"] = loc.groundSpeed;
+    (*doc)["groundCourse"] = loc.groundCourse;
+    (*doc)["numSat"] = loc.numSat;
+    (*doc)["fixType"] = loc.fixType;
 #ifdef GNSS_INJECT
     (*doc)["injectingGNSS"] = true;
 #endif
-    (*doc)["lat"] = getLocation().lat;
-    (*doc)["lon"] = getLocation().lon;
-    (*doc)["alt"] = getLocation().alt;
+
     JsonArray providersArray = doc->createNestedArray("providers");
     for (uint8_t i = 0; i < GNSS_MAX_PROVIDERS; i++)
     {

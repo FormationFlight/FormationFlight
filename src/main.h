@@ -31,6 +31,9 @@
 #ifndef CLOUD_BUILD
 #define CLOUD_BUILD false
 #endif
+#ifndef GITHASH
+#define GITHASH "githash"
+#endif
 
 // Timing parameters
 
@@ -93,26 +96,13 @@ struct __attribute__((packed)) air_type0_t {
 struct config_t {
 
     uint16_t version;
-    uint8_t profile_id;
-    char target_name[8];
 
-    uint8_t lora_power;
-    uint16_t lora_band;
-    uint32_t lora_frequency;
+    bool force_gs = false;
 
-    uint8_t lora_mode;
-    bool lora_automode;
-    bool force_gs;
-
-    uint32_t lora_bandwidth;
-    uint8_t lora_coding_rate;
-    uint8_t lora_spreading_factor;
     uint8_t lora_nodes;
     uint16_t slot_spacing;
     int16_t lora_timing_delay;
     int16_t msp_after_tx_delay;
-
-    // IO & Display
 
     bool display_enable;
 };
