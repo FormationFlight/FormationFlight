@@ -252,12 +252,14 @@ const App = function () {
   const [showSidebar, setShowSidebar] = useState(true);
 
   const handleWindowResize = () => {
+    console.log(window.innerWidth)
     if (window.innerWidth < 1200) {
       setShowSidebar(false);
     }
     if (window.innerWidth > 1600) {
       setShowSidebar(true);
     }
+    console.log(showSidebar)
   };
 
   useEffect(() => fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then((r) => {
@@ -277,7 +279,7 @@ const App = function () {
   <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
   <${Header} id="${systemStatus.target}/${systemStatus.longName}" version="${systemStatus.version}/${systemStatus.gitHash}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
-    <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(false); }} history=${History.createHashHistory()} >
+    <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(window.innerWidth > 1200); }} history=${History.createHashHistory()} >
       <${Main} default=${true} />
       <!--<${Settings} path="settings" />-->
       <${Update} path="update" />

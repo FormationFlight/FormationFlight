@@ -114,13 +114,13 @@ export function Stat({ title, text, tipText, tipIcon, tipColors, subText }) {
     setBlurEnabled(!blurEnabled);
   }
   return html`
-<div class="flex flex-col bg-white border shadow-sm rounded-xl dark:bg-slate-900 dark:border-gray-800">
+<div class="flex flex-col bg-white border shadow-sm rounded-xl">
   <div class="p-4 md:p-5">
     <div class="flex items-center gap-x-2 pb-1">
       <p class="text-xs uppercase tracking-wide text-gray-500"> ${title} </p>
     <//>
     <div class="mt-1 flex items-center gap-x-2">
-      <h3 class="text-xl sm:text-xl font-medium text-gray-800 dark:text-gray-200">
+      <h3 class="text-xl sm:text-xl font-medium text-gray-800">
         ${text}
       <//>
       <span class="flex items-center">
@@ -130,7 +130,7 @@ export function Stat({ title, text, tipText, tipIcon, tipColors, subText }) {
     <//>
     ${!!subText && html`
     <div class="mt-1 flex items-center gap-x-2">
-      <h6 class="text-xs sm:text-s font-small text-gray-500 dark:text-gray-200 ${blurEnabled ? 'blur' : ''}" onclick=${blur}>
+      <h6 class="text-xs sm:text-s font-small text-gray-500 ${blurEnabled ? 'blur' : ''}" onclick=${blur}>
     ${subText}
       <//>
     <//>
