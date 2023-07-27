@@ -252,14 +252,12 @@ const App = function () {
   const [showSidebar, setShowSidebar] = useState(true);
 
   const handleWindowResize = () => {
-    console.log(window.innerWidth)
     if (window.innerWidth < 1200) {
       setShowSidebar(false);
     }
     if (window.innerWidth > 1600) {
       setShowSidebar(true);
     }
-    console.log(showSidebar)
   };
 
   useEffect(() => fetch(ENDPOINT_PREFIX + '/system/status').then(r => r.json()).then((r) => {
