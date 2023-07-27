@@ -56,7 +56,7 @@ function Sidebar({ url, show, systemStatus }) {
             ${show && 'translate-x-0'} right-auto bottom-0">
   <div class="flex flex-col m-4 gap-y-6">
     <div class="flex h-10 shrink-0 items-center gap-x-4 font-bold text-xl text-slate-500">
-      <${Logo} class="h-full"/> FormationFlight
+      <${Logo} class="h-full logo"/> FormationFlight
       <div class="text-xs text-slate-500">
       ${systemStatus.version.match(/v\d/) ? systemStatus.version : "dev"}
       <//>
@@ -277,7 +277,7 @@ const App = function () {
   <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
   <${Header} id="${systemStatus.target}/${systemStatus.longName}" version="${systemStatus.version}/${systemStatus.gitHash}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
-    <${Router} onChange=${ev => setUrl(ev.url)} history=${History.createHashHistory()} >
+    <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(false); }} history=${History.createHashHistory()} >
       <${Main} default=${true} />
       <!--<${Settings} path="settings" />-->
       <${Update} path="update" />

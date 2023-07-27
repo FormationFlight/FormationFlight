@@ -136,3 +136,12 @@
         transform: scale(1);
     }
 }
+
+.logo {
+    filter: invert(47%) sepia(5%) saturate(1962%) hue-rotate(176deg) brightness(93%) contrast(85%);
+    transition: all .5s ease-in-out;
+}
+
+.logo:hover {
+    filter: invert(24%) sepia(91%) saturate(2531%) hue-rotate(218deg) brightness(98%) contrast(88%);
+}
