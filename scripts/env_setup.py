@@ -49,7 +49,7 @@ target_name = env['PIOENV'].upper()
 if platform in ['espressif8266']:
     env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", compress_bin)
 # Replace ESPOTA with our custom HTTP POST OTA
-if 'WIFI' in target_name:
+if target_name.endswith('VIA_WIFI'):
     env.Replace(UPLOADCMD=on_upload)
 # Copy other files for esp32
 if platform in ['espressif32']:
