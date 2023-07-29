@@ -81,8 +81,7 @@ void GNSSManager::loop()
 
 void GNSSManager::statusJson(JsonDocument *doc)
 {
-    //String name = getCurrentProviderNameShort();
-    // (*doc)["activeProvider"] = name;
+    (*doc)["activeProvider"] = getCurrentProviderNameShort();
     GNSSLocation loc = getLocation();
     (*doc)["lat"] = loc.lat;
     (*doc)["lon"] = loc.lon;
@@ -198,6 +197,6 @@ GNSSLocation GNSSManager::calculatePointAtDistance(GNSSLocation loc, double dist
 // Generates a single point focused around loc offset by a subset of the bearing circle
 // for example if count = 3, n=0 will be at bearing 0°, n=1 will be at bearing 120°, n=2 will be at bearing 240°
 GNSSLocation GNSSManager::generatePointAround(GNSSLocation loc, int n, int count, double distance) {
-    double bearing = (360.0 / count) * (n - 1); // Calculate the bearing between each point
+    double bearing = (360.0 / count) * n; // Calculate the bearing between each point
     return calculatePointAtDistance(loc, distance, bearing);
 }
