@@ -155,21 +155,6 @@ uint8_t MSPManager::mapFixType2Msp(GNSS_FIX_TYPE fixType)
 
 void MSPManager::sendLocation(GNSSLocation loc)
 {
-    /*
-    msp_raw_gps_t gps;
-    gps.alt = loc.alt;
-    gps.fixType = loc.fixType;
-    gps.fixType = this->mapFixType2Msp(loc.fixType);
-    gps.groundCourse = loc.groundCourse * 10;
-    const double kmh_to_cms = 27.77;
-    gps.groundSpeed = loc.groundSpeed * kmh_to_cms;
-    gps.hdop = loc.hdop;
-    gps.lat = loc.lat * (1 / 10000000);
-    gps.lon = loc.lon * (1 / 10000000);
-    gps.numSat = loc.numSat;
-    msp->command(MSP_SET_RAW_GPS, &gps, sizeof(gps), 0);
-    */
-
     static msp_sensor_gps_t gps2 = {};
     gps2.gpsWeek = 0xFFFF; // if it is not coming from gps, 0xffff means not supported
     gps2.fixType = this->mapFixType2Msp(loc.fixType);
@@ -181,16 +166,23 @@ void MSPManager::sendLocation(GNSSLocation loc)
     gps2.longitude = loc.lon * 10000000;
     gps2.satellitesInView = loc.numSat;
 
-    gps2.instance = 1;
+    gps2.instance = 0;
+
+    // TODO: The following data should come from the actual GPS unit
 
     // TODO: These are velocity vectors. Update gnss location to include 3d speed?
     // 2d speed modulus can be computed by using nedVelEast nedVelNorth
     // cm/s
-    gps2.nedVelDown = 0;
-    gps2.nedVelEast = 0;
-    gps2.nedVelNorth = 0;
+    // if gnss location is 2d, velNorth = vel * cos(radians(groundCourse * 10))
+    // and velEast = vel * sin(radians(groundCourse * 10))
 
-    // TODO: time of day from GPS data
+    gps2.nedVelNorth = loc.groundSpeed * cos(radians(loc.groundCourse * 10));
+    gps2.nedVelEast = loc.groundSpeed * sin(radians(loc.groundCourse * 10));
+    gps2.nedVelDown = 0;
+
+    gps2.horizontalPosAccuracy = 0;
+    gps2.verticalPosAccuracy = 0;
+
     unsigned long m = millis();
     gps2.year = 1970;
     gps2.day = 1;
@@ -202,6 +194,10 @@ void MSPManager::sendLocation(GNSSLocation loc)
 
     gps2.horizontalPosAccuracy = 1;
     gps2.verticalPosAccuracy = 1;
+
+    gps2.trueYaw = 0xFFFF; // 0xFFFF should mean unsupported.
+    // The TOW count is a value ranging from 0 to 403,199 whose meaning is the number of 1.5 second periods elapsed since the beginning of the GPS week. 
+    gps2.msTOW = (uint32_t)((m / 1.5f ) + 0.5) % 403199;
 
     msp->command2(MSP2_SENSOR_GPS, &gps2, sizeof(gps2), 0);
 
