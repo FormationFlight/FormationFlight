@@ -274,7 +274,7 @@ void handleFileUploadData(AsyncWebServerRequest *request, const String &filename
     if (!filename.endsWith(".bin") && !filename.endsWith(".bin.gz")) {
         r->message = "must upload .bin or .bin.gz";
 #elif defined(PLATFORM_ESP32)
-    if (!filename.endsWith(".bin") {
+    if (!filename.endsWith(".bin")) {
         r->message = "must upload .bin";
 #endif
         r->statusCode = 400;
