@@ -14,7 +14,7 @@ void pick_id()
     int i;
     for (i = 1; i < LORA_M3_NODES; i++)
     {
-        peer_t *peer = PeerManager::getSingleton()->getPeer(i - 1);
+        const peer_t *peer = PeerManager::getSingleton()->getPeer(i - 1);
         if (peer->id != 0 || millis() - peer->updated < LORA_PEER_TIMEOUT)
         {
             DBGF("[pick_id] skipping id %s\n", peer_slotname[i]);
@@ -40,7 +40,7 @@ void resync_tx_slot(int16_t delay)
     bool startnow = 0;
     for (int i = 0; (i < cfg.lora_nodes) && (startnow == 0); i++)
     {
-        peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+        const peer_t *peer = PeerManager::getSingleton()->getPeer(i);
 
         if (peer->id > 0)
         {

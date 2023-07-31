@@ -205,7 +205,7 @@ void MSPManager::sendLocation(GNSSLocation loc)
 }
 
 // Sends a particular peer
-void MSPManager::sendRadar(peer_t *peer)
+void MSPManager::sendRadar(const peer_t *peer)
 {
     msp_radar_pos_t position;
     position.id = peer->id;
@@ -218,12 +218,6 @@ void MSPManager::sendRadar(peer_t *peer)
     position.lq = peer->lq;
     msp->command2(MSP2_COMMON_SET_RADAR_POS, &position, sizeof(position), 0);
     peerUpdatesSent++;
-}
-
-// Enables or disables spoofing fake peers
-void MSPManager::enableSpoofing(bool enabled)
-{
-    this->spoofingPeers = enabled;
 }
 
 // Schedules the next transmission loop at the given timestamp
@@ -244,50 +238,17 @@ void MSPManager::loop()
 
         // Send MSP radar positions to the FC
         StatsManager::getSingleton()->startTimer();
-        if (this->spoofingPeers)
+
+        const peer_t *peer = PeerManager::getSingleton()->getPeer(peerIndex);
+        // Only send if the peer has been seen and it's not us
+        if (peer->id > 0 && peerIndex + 1 != curr.id)
         {
-            GNSSLocation spoofOrigin = GNSSManager::getSingleton()->getLocation();
-            if (spoofOrigin.fixType == GNSS_FIX_TYPE_NONE) {
-                // Pick an arbitrary point to spoof peers at if we don't know where we are
-                // 45.171546, 5.722387 is Grenoble, France where OlivierC-FR comes from as an homage to his project iNav Radar
-                spoofOrigin.lat = 45.171546;
-                spoofOrigin.lon = 5.722387;
-            }
-            uint8_t id = peerIndex + 1;
-            // Generate peers in 100m offsets away in a circle around the user 
-            GNSSLocation peerLocation = GNSSManager::generatePointAround(spoofOrigin, peerIndex, cfg.lora_nodes, 100 * (peerIndex + 1));
-            peer_t peer{
-                .id = id,
-                .state = 1,
-                .lost = 0,
-                .updated = millis(),
-                .lq = 4,
-                .gps = {
-                    .lat = (int)(peerLocation.lat * 1000000),
-                    .lon = (int)(peerLocation.lon * 1000000),
-                    .alt = 100,
-                    .groundSpeed = 0,
-                    .groundCourse = 0,
-                },
-                .name = "FAK",
-            };
-            if (peer.id > 0 && peerIndex + 1 != curr.id)
+            if (!DEBUG)
             {
-                MSPManager::getSingleton()->sendRadar(&peer);
+                MSPManager::getSingleton()->sendRadar(peer);
             }
         }
-        else
-        {
-            peer_t *peer = PeerManager::getSingleton()->getPeer(peerIndex);
-            // Only send if the peer has been seen and it's not us
-            if (peer->id > 0 && peerIndex + 1 != curr.id)
-            {
-                if (!DEBUG)
-                {
-                    MSPManager::getSingleton()->sendRadar(peer);
-                }
-            }
-        }
+
         StatsManager::getSingleton()->storeTimerAndRestart(STATS_KEY_MSP_SENDTIME_US);
         // Move to the next peer
         if (peerIndex < cfg.lora_nodes - 1) {
@@ -305,7 +266,6 @@ void MSPManager::loop()
 void MSPManager::statusJson(JsonDocument *doc)
 {
     msp_analog_t analog = getAnalogValues();
-    (*doc)["spoofingPeers"] = this->spoofingPeers;
     (*doc)["peerUpdatesSent"] = this->peerUpdatesSent;
     (*doc)["gnssUpdatesSent"] = this->gnssUpdatesSent;
     (*doc)["vbat"] = analog.vbat * 0.1;

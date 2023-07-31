@@ -414,7 +414,7 @@ void loop()
     if (curr.id > 1 && PeerManager::getSingleton()->count_active() > 0)
     {
         int prev = curr.id - 2;
-        peer_t *peer = PeerManager::getSingleton()->getPeer(prev);
+        const peer_t *peer = PeerManager::getSingleton()->getPeer(prev);
         if (peer->id > 0 && millis() - peer->updated < sys.lora_cycle && millis() - lastDriftCalculation > sys.lora_cycle)
         {
             if (sys.last_tx_end > peer->updated)

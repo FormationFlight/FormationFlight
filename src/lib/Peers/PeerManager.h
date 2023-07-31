@@ -31,13 +31,22 @@ struct peer_t {
 class PeerManager
 {
 public:
-    peer_t *getPeer(uint8_t index);
+    const peer_t *getPeer(uint8_t index);
+    peer_t *getPeerMutable(uint8_t index);
     void reset();
     uint8_t count(bool active = false);
     uint8_t count_active();
     void statusJson(JsonDocument *doc);
     void loop();
     static PeerManager *getSingleton();
+
+    void enableSpoofing(bool enabled);
+
 private:
     peer_t peers[NODES_MAX];
+    peer_t spoofedPeers[NODES_MAX];
+    peer_t *getSpoofedPeer(uint8_t index);
+
+    // When true, MSPManager will inject fake peers
+    bool spoofingPeers = false;
 };

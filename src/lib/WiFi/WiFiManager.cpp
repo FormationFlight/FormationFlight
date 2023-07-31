@@ -82,11 +82,15 @@ WiFiManager::WiFiManager()
     });
     // PeerManager
     server->on("/peermanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
-        StaticJsonDocument<1024> doc;
+        StaticJsonDocument<2048> doc;
         PeerManager::getSingleton()->statusJson(&doc);
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);
+    });
+    server->on("/peermanager/spoof", HTTP_POST, [](AsyncWebServerRequest *request) {
+        PeerManager::getSingleton()->enableSpoofing(true);
+        request->send(200, "text/plain", "OK");
     });
     // MSPManager
     server->on("/mspmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -95,10 +99,6 @@ WiFiManager::WiFiManager()
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);
-    });
-    server->on("/mspmanager/spoof", HTTP_POST, [](AsyncWebServerRequest *request) {
-        MSPManager::getSingleton()->enableSpoofing(true);
-        request->send(200, "text/plain", "OK");
     });
     // GNSSManager
     server->on("/gnssmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
