@@ -277,7 +277,7 @@ const App = function () {
   <${Sidebar} url=${url} show=${showSidebar} systemStatus=${systemStatus} />
   <${Header} id="${systemStatus.target}/${systemStatus.longName}" version="${systemStatus.version}/${systemStatus.gitHash}" showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
-    <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(false); }} history=${History.createHashHistory()} >
+    <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(window.innerWidth > 1200); }} history=${History.createHashHistory()} >
       <${Main} default=${true} />
       <!--<${Settings} path="settings" />-->
       <${Update} path="update" />

@@ -67,11 +67,11 @@ jobs:
         mkdir -p ~/artifacts/
         mv .pio/build/${{ matrix.target }}/firmware.bin ~/artifacts/$OUTNAME.bin >& /dev/null || :
         # copy the common ESP32 files
-        #if [[ ${{matrix.target}} == *ESP32* ]] ; then
-        #  cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin ~/artifacts/firmware/
-        #  mv .pio/build/${{ matrix.target }}/partitions.bin ~/artifacts/firmware/
-        #  mv .pio/build/${{ matrix.target }}/bootloader.bin ~/artifacts/firmware/bootloader_dio_40m.bin
-        #fi
+        if [[ ${{matrix.target}} == *esp32* ]] ; then
+         cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin ~/artifacts/firmware/
+         mv .pio/build/${{ matrix.target }}/partitions.bin ~/artifacts/firmware/
+         mv .pio/build/${{ matrix.target }}/bootloader.bin ~/artifacts/firmware/bootloader_dio_40m.bin
+        fi
 
     - name: Store Artifacts
       uses: actions/upload-artifact@v3
