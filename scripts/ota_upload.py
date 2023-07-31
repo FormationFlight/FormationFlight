@@ -41,10 +41,20 @@ def gzip_compress_in_memory(input_file_path):
         print(f"Compressed to {buffer.getbuffer().nbytes} bytes")
         return buffer
 
-def post_gzipped_file(url, filename, file_buffer):
+def post_file(url, filename, file_buffer):
     files = {'file': (filename, file_buffer)}
     response = requests.post(url, files=files)
     return response
+
+def do_upload(url, filename, file_buffer):
+    # Make the HTTP POST request
+    response = post_file(url, filename, file_buffer)
+
+    # Check the response
+    if response.status_code == 200:
+        print(f"File upload successful!\n{response.text}")
+    else:
+        print(f"File upload failed with status code: {response.status_code}\n{response.text}")
 
 if __name__ == "__main__":
 
@@ -65,11 +75,4 @@ if __name__ == "__main__":
         file_buffer = gzip_compress_in_memory(input_file_path)
     print(f"Sending {os.path.basename(input_file_path)} ({file_buffer.getbuffer().nbytes} bytes) to {args.endpoint_url_base}...")
 
-    # Make the HTTP POST request
-    response = post_gzipped_file(args.endpoint_url_base + '/update', "firmware.bin", file_buffer)
-
-    # Check the response
-    if response.status_code == 200:
-        print(f"File upload successful!\n{response.text}")
-    else:
-        print(f"File upload failed with status code: {response.status_code}\n{response.text}")
+    do_upload(args.endpoint_url_base + '/update', 'firmware.bin', file_buffer)
