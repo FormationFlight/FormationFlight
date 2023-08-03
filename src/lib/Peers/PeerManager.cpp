@@ -93,7 +93,7 @@ void PeerManager::reset()
         peers[i].id = 0;
         peers[i].host = 0;
         peers[i].state = 0;
-        peers[i].lost = 1;
+        peers[i].lost = 0;
         peers[i].broadcast = 0;
         peers[i].lq_updated = millis();
         peers[i].lq_tick = 0;
@@ -108,7 +108,7 @@ void PeerManager::reset()
         spoofedPeers[i].id = 0;
         spoofedPeers[i].host = 0;
         spoofedPeers[i].state = 0;
-        spoofedPeers[i].lost = 1;
+        spoofedPeers[i].lost = 0;
         spoofedPeers[i].broadcast = 0;
         spoofedPeers[i].lq_updated = millis();
         spoofedPeers[i].lq_tick = 0;
@@ -173,7 +173,7 @@ uint8_t PeerManager::count(bool active)
     {
         const peer_t *peer = getPeer(i);
         // If active, don't count lost peers
-        if (peer != NULL)
+        if (peer != NULL && peer->id != 0)
         {
             if (active && peer->lost > 0)
             {
