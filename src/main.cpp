@@ -277,13 +277,11 @@ void loop()
                 {
                     DBGLN("[main] Checking craftname");
                     MSPManager::getSingleton()->getName(curr.name, sizeof(curr.name));
-                    DBGF("[main] Craftname returned %s\n", curr.name);
                 }
                 if (cfg.display_enable)
                 {
                     display_draw_progressbar(100 * (millis() - sys.cycle_scan_begin) / HOST_MSP_TIMEOUT);
                 }
-                
                 sys.display_updated = millis();
             }
         }
