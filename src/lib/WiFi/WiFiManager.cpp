@@ -120,7 +120,7 @@ WiFiManager::WiFiManager()
         GNSSManager::getSingleton()->spoofedLocation.fixType = GNSS_FIX_TYPE_3D;
         GNSSManager::getSingleton()->spoofedLocation.alt = 42000; // cm
         GNSSManager::getSingleton()->spoofedLocation.numSat = 42;
-        GNSSManager::getSingleton()->spoofedLocation.hdop = 6.9;
+        GNSSManager::getSingleton()->spoofedLocation.hdop = 0.69;
         GNSSManager::getSingleton()->spoofLocationEnabled = true;
 
         request->send(200, "text/plain", "OK");
