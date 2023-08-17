@@ -197,7 +197,7 @@ void MSPManager::sendLocation(GNSSLocation loc)
 
     gps2.trueYaw = 0xFFFF; // 0xFFFF should mean unsupported.
     // The TOW count is a value ranging from 0 to 403,199 whose meaning is the number of 1.5 second periods elapsed since the beginning of the GPS week. 
-    gps2.msTOW = (uint32_t)((m / 1.5f ) + 0.5) % 403199;
+    gps2.msTOW = (uint32_t)((m / 1500.0f) + 0.5) % 403199;
 
     msp->command2(MSP2_SENSOR_GPS, &gps2, sizeof(gps2), 0);
 
