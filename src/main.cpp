@@ -262,8 +262,6 @@ void loop()
                 if (curr.host == HOST_NONE)
                 {
                     curr.host = MSPManager::getSingleton()->getFCVariant();
-                    sys.host_found = millis();
-                    DBGF("[main] Checking FC Variant: %d\n", curr.host);
                 }
                 if (cfg.force_gs)
                 {
@@ -273,9 +271,8 @@ void loop()
                 // Found the host - Ardu's craftname is used for DJI messages, so "INIT" will be everyone's craftname.
                 // Better to use randomly generated names for Ardu and skip this.
             
-                if (sys.now > sys.host_found + FC_BOOT_DELAY && curr.host != HOST_NONE && curr.host != HOST_ARDU)
+                if (curr.host != HOST_NONE && curr.host != HOST_ARDU)
                 {
-                    DBGLN("[main] Checking craftname");
                     MSPManager::getSingleton()->getName(curr.name, sizeof(curr.name));
                 }
                 if (cfg.display_enable)

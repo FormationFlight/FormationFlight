@@ -56,8 +56,7 @@
 
 // Interval in ms between display updates
 #define DISPLAY_CYCLE 250
-// Interval in ms to allow the FC to boot
-#define FC_BOOT_DELAY 1500
+
 // Standard MSP serial speed
 #define SERIAL_SPEED 115200
 

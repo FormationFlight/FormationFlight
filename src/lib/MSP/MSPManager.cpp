@@ -40,7 +40,10 @@ uint8_t MSPManager::getState()
 // Requests the name of the flight controller over MSP without caching
 void MSPManager::getName(char *name, size_t length)
 {
-    msp->request(MSP_NAME, name, length);
+    if (!msp->request(MSP_NAME, name, length))
+    {
+        memset(name, 0, length);
+    }
 }
 
 // Returns the MSPHost variant of the flight controller; cached once we have a valid response,
@@ -55,7 +58,10 @@ MSPHost MSPManager::getFCVariant()
     }
     if (!cached)
     {
-        msp->request(MSP_FC_VARIANT, variant, sizeof(variant));
+        if (!msp->request(MSP_FC_VARIANT, variant, sizeof(variant)))
+        {
+            memset(&variant, 0, sizeof(variant));
+        }
     }
     if (strncmp(variant, "INAV", 4) == 0)
     {
