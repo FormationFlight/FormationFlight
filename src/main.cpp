@@ -309,7 +309,7 @@ void loop()
             {
                 for (int i = 0; i < cfg.lora_nodes; i++)
                 {
-                    peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+                    const peer_t *peer = PeerManager::getSingleton()->getPeer(i);
                     if (peer->id > 0)
                     {
                         display_draw_peername(peer->id);

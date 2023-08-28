@@ -81,7 +81,7 @@ void display_draw_status(system_t *sys)
 
         for (int i = 0; i < cfg.lora_nodes; i++)
         {
-            peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+            const peer_t *peer = PeerManager::getSingleton()->getPeer(i);
             if (peer->id > 0 && peer->lost == 0)
             {
                 diff = sys->last_tx_end - peer->updated;
@@ -102,7 +102,7 @@ void display_draw_status(system_t *sys)
         {
 
             display.setTextAlignment(TEXT_ALIGN_LEFT);
-            peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+            const peer_t *peer = PeerManager::getSingleton()->getPeer(i);
 
             if (pos[i] > -1)
             {
@@ -184,7 +184,7 @@ void display_draw_status(system_t *sys)
 
         int i = constrain(sys->display_page - 3, 0, cfg.lora_nodes - 1);
         bool iscurrent = (i + 1 == curr.id);
-        peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+        const peer_t *peer = PeerManager::getSingleton()->getPeer(i);
 
         display.setFont(ArialMT_Plain_24);
         display.setTextAlignment(TEXT_ALIGN_LEFT);
