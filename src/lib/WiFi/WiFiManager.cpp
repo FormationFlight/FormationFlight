@@ -270,8 +270,13 @@ void handleFileUploadResponse(AsyncWebServerRequest *request)
 void handleFileUploadData(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len, bool final)
 {
     OTAResult *r = WiFiManager::getSingleton()->getOTAResult();
-    if (!filename.endsWith(".bin") && !filename.endsWith(".elf")) {
-        r->message = "must upload .bin or .elf";
+#ifdef PLATFORM_ESP8266
+    if (!filename.endsWith(".bin") && !filename.endsWith(".bin.gz")) {
+        r->message = "must upload .bin or .bin.gz";
+#elif defined(PLATFORM_ESP32)
+    if (!filename.endsWith(".bin")) {
+        r->message = "must upload .bin";
+#endif
         r->statusCode = 400;
         return;
     }
