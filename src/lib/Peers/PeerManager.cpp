@@ -14,13 +14,76 @@ PeerManager *PeerManager::getSingleton()
     return peerManager;
 }
 
-peer_t *PeerManager::getPeer(uint8_t index)
+peer_t *PeerManager::getSpoofedPeer(uint8_t index)
+{
+    // Return true data for self
+    if ((index + 1) == curr.id) {
+        return &peers[index];
+    }
+
+    if (index >= NODES_MAX)
+    {
+        return nullptr;
+    }
+
+    GNSSLocation spoofOrigin = GNSSManager::getSingleton()->getLocation();
+    if (spoofOrigin.fixType == GNSS_FIX_TYPE_NONE)
+    {
+        // Pick an arbitrary point to spoof peers at if we don't know where we are
+        // 45.171546, 5.722387 is Grenoble, France where OlivierC-FR comes from as an homage to his project iNav Radar
+        spoofOrigin.lat = 45.171546;
+        spoofOrigin.lon = 5.722387;
+    }
+
+    uint8_t id = index + 1;
+    spoofedPeers[index].id = id;
+
+    // Generate peers in 100m offsets away in a circle around the user
+    GNSSLocation peerLocation = GNSSManager::generatePointAround(spoofOrigin, index, cfg.lora_nodes, 100 * (index + 1));
+    spoofedPeers[index].gps.lat = (int32_t)(peerLocation.lat * 1000000),
+    spoofedPeers[index].gps.lon = (int32_t)(peerLocation.lon * 1000000),
+    spoofedPeers[index].gps.alt = 100,
+    spoofedPeers[index].gps.groundSpeed = 0,
+    spoofedPeers[index].gps.groundCourse = 0,
+    spoofedPeers[index].distance = GNSSManager::getSingleton()->horizontalDistanceTo(peerLocation);
+
+    spoofedPeers[index].gps_pre.lat = (int32_t)(peerLocation.lat * 1000000),
+    spoofedPeers[index].gps_pre.lon = (int32_t)(peerLocation.lon * 1000000),
+    spoofedPeers[index].gps_pre.alt = 100,
+    spoofedPeers[index].gps_pre.groundSpeed = 0,
+    spoofedPeers[index].gps_pre.groundCourse = 0,
+
+    spoofedPeers[index].state = 1;
+    spoofedPeers[index].lost = 0;
+    spoofedPeers[index].updated = millis();
+    spoofedPeers[index].lq = 4;
+    spoofedPeers[index].name[0] = 'F';
+    spoofedPeers[index].name[1] = 'A';
+    spoofedPeers[index].name[2] = 'K' + index;
+    spoofedPeers[index].name[3] = '\0';
+    spoofedPeers[index].rssi = -50 + id;
+
+    return &spoofedPeers[index];
+}
+
+peer_t *PeerManager::getPeerMutable(uint8_t index)
 {
     if (index >= NODES_MAX)
     {
         return nullptr;
     }
+
     return &peers[index];
+}
+
+const peer_t *PeerManager::getPeer(uint8_t index)
+{
+    if(this->spoofingPeers)
+    {
+        return this->getSpoofedPeer(index);
+    }
+
+    return this->getPeerMutable(index);
 }
 
 void PeerManager::reset()
@@ -41,7 +104,24 @@ void PeerManager::reset()
         peers[i].direction = 0;
         peers[i].relalt = 0;
         peers[i].packetsReceived = 0;
+
+        spoofedPeers[i].id = 0;
+        spoofedPeers[i].host = 0;
+        spoofedPeers[i].state = 0;
+        spoofedPeers[i].lost = 0;
+        spoofedPeers[i].broadcast = 0;
+        spoofedPeers[i].lq_updated = millis();
+        spoofedPeers[i].lq_tick = 0;
+        spoofedPeers[i].lq = 0;
+        spoofedPeers[i].updated = 0;
+        spoofedPeers[i].rssi = 0;
+        spoofedPeers[i].distance = 0;
+        spoofedPeers[i].direction = 0;
+        spoofedPeers[i].relalt = 0;
+        spoofedPeers[i].packetsReceived = 0;
+
         strcpy(peers[i].name, "");
+        strcpy(spoofedPeers[i].name, "");
     }
 }
 
@@ -91,10 +171,11 @@ uint8_t PeerManager::count(bool active)
     int n = 0;
     for (int i = 0; i < NODES_MAX; i++)
     {
+        const peer_t *peer = getPeer(i);
         // If active, don't count lost peers
-        if (peers[i].id > 0)
+        if (peer != NULL && peer->id != 0)
         {
-            if (active && peers[i].lost > 0)
+            if (active && peer->lost > 0)
             {
                 continue;
             }
@@ -115,13 +196,17 @@ void PeerManager::statusJson(JsonDocument *doc)
     (*doc)["count"] = count();
     (*doc)["countActive"] = count_active();
     (*doc)["maxPeers"] = NODES_MAX;
+    if (this->spoofingPeers) {
+        (*doc)["spoofing"] = this->spoofingPeers;
+    }
     JsonArray peerArray = doc->createNestedArray("peers");
     for (uint8_t i = 0; i < NODES_MAX; i++)
     {
-        if (getPeer(i)->id != 0)
+        const peer_t *peer = getPeer(i);
+        if (peer != NULL && peer->id != 0)
         {
-            peer_t *peer = getPeer(i);
             JsonObject o = peerArray.createNestedObject();
+            o["rawId"] = peer->id;
             o["id"] = peer_slotname[peer->id];
             // TODO: get curr id from SystemManager
             // o["self"] = peer->id == curr.id;
@@ -147,3 +232,10 @@ void PeerManager::statusJson(JsonDocument *doc)
         }
     }
 }
+
+// Enables or disables spoofing fake peers
+void PeerManager::enableSpoofing(bool enabled)
+{
+    this->spoofingPeers = enabled;
+}
+

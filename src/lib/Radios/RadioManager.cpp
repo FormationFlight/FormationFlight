@@ -116,7 +116,7 @@ ReceiveResult RadioManager::receive(const uint8_t *rawPacket, size_t packetSize,
         return RECEIVE_RESULT_BAD_FIELD;
     }
 
-    peer_t *peer = PeerManager::getSingleton()->getPeer(air_0.id - 1);
+    peer_t *peer = PeerManager::getSingleton()->getPeerMutable(air_0.id - 1);
 
     // Update previous GPS location for extrapolation
     peer->gps_pre.lat = peer->gps.lat;

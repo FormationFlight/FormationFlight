@@ -26,9 +26,8 @@ public:
     msp_fc_version_t getFCVersion();
     msp_raw_gps_t getLocation();
     msp_analog_t getAnalogValues();
-    void sendRadar(peer_t *peer);
+    void sendRadar(const peer_t *peer);
     void sendLocation(GNSSLocation location);
-    void enableSpoofing(bool enabled);
     void begin(Stream &stream);
     void statusJson(JsonDocument *doc);
     void scheduleNextAt(unsigned long timestamp);
@@ -38,8 +37,6 @@ public:
 private:
     MSP *msp = nullptr;
     bool ready = false;
-    // When true, MSPManager will inject fake peers
-    bool spoofingPeers = false;
     // Counter indicating how many peer updates have been sent over MSP
     uint32_t peerUpdatesSent = 0;
     // Counter indicating how many GPS positions have been injected into the FC via MSP
@@ -48,4 +45,6 @@ private:
     unsigned long nextSendTime = 0;
     // Which peer we'll send next
     uint8_t peerIndex = 0;
+
+    uint8_t mapFixType2Msp(GNSS_FIX_TYPE fixType);
 };

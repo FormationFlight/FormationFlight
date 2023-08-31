@@ -2,6 +2,7 @@
 
 GNSSManager::GNSSManager()
 {
+    currentProvider = -1;
 
 }
 
@@ -22,6 +23,7 @@ GNSSLocation GNSSManager::getLocation()
     static uint32_t lastUpdate = 0;
     static GNSSLocation loc;
     if (spoofLocationEnabled) {
+        lastUpdate = millis();
         return spoofedLocation;
     }
     if (millis() - lastUpdate > GNSS_FRESH_INTERVAL_MS) {
@@ -90,6 +92,9 @@ void GNSSManager::statusJson(JsonDocument *doc)
     (*doc)["fixType"] = loc.fixType;
 #ifdef GNSS_INJECT
     (*doc)["injectingGNSS"] = true;
+    if (spoofLocationEnabled) {
+        (*doc)["gnssSpoof"] = true;
+    }
 #endif
 
     JsonArray providersArray = doc->createNestedArray("providers");
@@ -104,7 +109,6 @@ void GNSSManager::statusJson(JsonDocument *doc)
     }
 }
 
-
 void GNSSManager::setProviderStatus(uint8_t index, bool status)
 {
     if (providers[index] == nullptr) {
@@ -115,7 +119,10 @@ void GNSSManager::setProviderStatus(uint8_t index, bool status)
 
 String GNSSManager::getCurrentProviderNameShort()
 {
-    return providers[currentProvider]->getName();
+    if(currentProvider >= 0 && currentProvider < GNSS_MAX_PROVIDERS && providers[currentProvider] != nullptr)
+        return providers[currentProvider]->getName();
+
+    return "---";
 }
 
 double deg2rad(double deg)

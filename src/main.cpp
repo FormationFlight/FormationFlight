@@ -309,7 +309,7 @@ void loop()
             {
                 for (int i = 0; i < cfg.lora_nodes; i++)
                 {
-                    peer_t *peer = PeerManager::getSingleton()->getPeer(i);
+                    const peer_t *peer = PeerManager::getSingleton()->getPeer(i);
                     if (peer->id > 0)
                     {
                         display_draw_peername(peer->id);
@@ -414,7 +414,7 @@ void loop()
     if (curr.id > 1 && PeerManager::getSingleton()->count_active() > 0)
     {
         int prev = curr.id - 2;
-        peer_t *peer = PeerManager::getSingleton()->getPeer(prev);
+        const peer_t *peer = PeerManager::getSingleton()->getPeer(prev);
         if (peer->id > 0 && millis() - peer->updated < sys.lora_cycle && millis() - lastDriftCalculation > sys.lora_cycle)
         {
             if (sys.last_tx_end > peer->updated)
