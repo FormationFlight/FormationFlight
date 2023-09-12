@@ -269,7 +269,7 @@ void display_draw_status(system_t *sys)
             {
                 display.drawString(0, 24, "A " + String(loc.alt) + "m");
                 display.drawString(0, 34, "S " + String(loc.groundSpeed / 100) + "m/s");
-                display.drawString(0, 44, "C " + String(loc.groundCourse / 10) + "°");
+                display.drawString(0, 44, "C " + String(loc.groundCourse) + "°");
             }
             else
             {
