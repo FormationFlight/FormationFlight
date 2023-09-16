@@ -40,7 +40,7 @@ air_type0_t RadioManager::prepare_packet()
     switch (air_0.extra_type)
     {
     case 0:
-        air_0.extra_value = loc.groundCourse / 10;
+        air_0.extra_value = loc.groundCourse;  // location.groundCourse is in degrees so we don't need to convert before sending
         break;
 
     case 1:
