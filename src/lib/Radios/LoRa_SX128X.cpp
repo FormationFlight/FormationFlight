@@ -55,9 +55,15 @@ int LoRa_SX128X::begin() {
         DBGF("failed to init sx1280: %d\n", state);
         while (true) {}
     }
-    // We appear to need to set this twice
-    radio->setOutputPower(LORA_POWER);
+    // We appear to need to set these twice?
     radio->setHighSensitivityMode(true);
+    radio->setFrequency(FREQUENCY);
+    radio->setBandwidth(BANDWIDTH);
+    radio->setSpreadingFactor(SPREADING_FACTOR);
+    radio->setCodingRate(CODING_RATE, LONG_INTERLEAVING);
+    radio->setSyncWord(SYNC_WORD);
+    radio->setOutputPower(LORA_POWER);
+    radio->setPreambleLength(PREAMBLE_LENGTH);
     //radio->setCRC(0);
     #ifdef LORA_PIN_TXEN
     radio->setRfSwitchPins(LORA_PIN_RXEN, LORA_PIN_TXEN);
