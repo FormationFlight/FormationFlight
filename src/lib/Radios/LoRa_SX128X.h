@@ -11,6 +11,7 @@
 #define CODING_RATE 6 // 4/6 CR
 #define SYNC_WORD 0x17 // Arbitrarily chosen
 #define PREAMBLE_LENGTH 12 // symbols
+#define LONG_INTERLEAVING true
 
 #define RECEIVE_TIMEOUT LORA_M3_SLOT_SPACING * LORA_M3_NODES - 1
 #endif
