@@ -66,6 +66,8 @@ jobs:
         OUTNAME=`echo ${{ matrix.target }} | sed s/_via.*//`
         mkdir -p ~/artifacts/
         mv .pio/build/${{ matrix.target }}/firmware.bin ~/artifacts/$OUTNAME.bin >& /dev/null || :
+        # also copy the .bin.gz if it exists
+        mv .pio/build/${{ matrix.target }}/firmware.bin.gz ~/artifacts/$OUTNAME.bin.gz >& /dev/null || :
         # copy the common ESP32 files
         if [[ ${{matrix.target}} == *esp32* ]] ; then
          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin ~/artifacts/firmware/
