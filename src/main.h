@@ -56,6 +56,7 @@
 
 // Interval in ms between display updates
 #define DISPLAY_CYCLE 250
+
 // Standard MSP serial speed
 #define SERIAL_SPEED 115200
 
@@ -142,6 +143,9 @@ struct system_t {
 
     // Timestamp when the last scan cycle began
     uint32_t cycle_scan_begin;
+
+    // Timestamp when we first found the FC
+    uint32_t host_found;
 
     // Message to display to the user
     char message[20];

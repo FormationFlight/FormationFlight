@@ -230,14 +230,9 @@ void loop()
     if (sys.phase == MODE_HOST_SCAN)
     {
 
-        if ((sys.now > (sys.cycle_scan_begin + HOST_MSP_TIMEOUT)) || (curr.host != HOST_NONE))
+        if ((sys.now > (sys.cycle_scan_begin + HOST_MSP_TIMEOUT)) || (curr.name[0] != '\0') || (curr.host == HOST_ARDU))
         {
-            // End of the host scan - Ardu's craftname is used for DJI messages, so "INIT" will be everyone's craftname.
-            // Better to use randomly generated names for Ardu
-            if (curr.host != HOST_NONE && curr.host != HOST_ARDU)
-            {
-                MSPManager::getSingleton()->getName(curr.name, sizeof(curr.name));
-            }
+            // If we don't have a craft name at this point, let's assign a random string.
             if (curr.name[0] == '\0')
             {
                 String chipIDString = generate_id();
@@ -264,11 +259,21 @@ void loop()
             if (sys.now > sys.display_updated + DISPLAY_CYCLE / 2)
             {
                 delay(100);
-                curr.host = MSPManager::getSingleton()->getFCVariant();
+                if (curr.host == HOST_NONE)
+                {
+                    curr.host = MSPManager::getSingleton()->getFCVariant();
+                }
                 if (cfg.force_gs)
                 {
                     DBGLN("[main] forcing GCS mode");
                     curr.host = HOST_GCS;
+                }
+                // Found the host - Ardu's craftname is used for DJI messages, so "INIT" will be everyone's craftname.
+                // Better to use randomly generated names for Ardu and skip this.
+            
+                if (curr.host != HOST_NONE && curr.host != HOST_ARDU)
+                {
+                    MSPManager::getSingleton()->getName(curr.name, sizeof(curr.name));
                 }
                 if (cfg.display_enable)
                 {
