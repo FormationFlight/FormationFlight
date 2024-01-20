@@ -58,7 +58,7 @@ function Sidebar({ url, show, systemStatus }) {
     <div class="flex h-10 shrink-0 items-center gap-x-4 font-bold text-xl text-slate-500">
       <${Logo} class="h-full logo"/> FormationFlight
       <div class="text-xs text-slate-500">
-      ${systemStatus.version.match(/v\d/) ? systemStatus.version : "dev"}
+      ${systemStatus.version.match(/v\d/) ? systemStatus.version.split('/')[1] : "dev"}
       <//>
     <//>
 
