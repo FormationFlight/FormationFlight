@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FormationFlight Display</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e293b;
+            color: #e2e8f0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: #0f172a;
+            padding: 1rem 2rem;
+            border-bottom: 2px solid #334155;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .header-title img {
+            height: 42px;
+            width: auto;
+        }
+
+        .header-title h1 {
+            font-size: 1.8rem;
+            color: #3b82f6;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            margin-left: auto;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        label {
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: #3b82f6;
+        }
+
+        input[type="text"] {
+            padding: 0.5rem;
+            border: 1px solid #475569;
+            border-radius: 4px;
+            background: #334155;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            width: 200px;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn-connect {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-connect:hover {
+            background: #059669;
+        }
+
+        .btn-connect:disabled {
+            background: #4b5563;
+            cursor: not-allowed;
+        }
+
+        .btn-disconnect {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-disconnect:hover {
+            background: #dc2626;
+        }
+
+        .status {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .status-dot.connected {
+            background: #10b981;
+        }
+
+        .counter {
+            padding: 0.3rem 0.8rem;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.9);
+            color: #f8fafc;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            pointer-events: none;
+            white-space: pre-line;
+            z-index: 1000;
+            border: 1px solid #334155;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-title">
+            <img src="ff_logo.png" alt="FormationFlight Logo">
+            <h1>FormationFlight Display</h1>
+        </div>
+        <div class="header-right">
+            <div class="controls">
+                <div class="control-group">
+                    <label for="serialPort">Serial Port:</label>
+                    <input type="text" id="serialPort" placeholder="/dev/ttyUSB0" value="/dev/ttyUSB0">
+                    <button id="connectBtn" class="btn-connect">Connect</button>
+                    <button id="disconnectBtn" class="btn-disconnect" style="display: none;">Disconnect</button>
+                </div>
+            </div>
+            <div class="status">
+                <div class="status-item">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">Disconnected</span>
+                </div>
+                <div class="status-item">
+                    <label>Peers:</label>
+                    <span class="counter" id="peerCount">0</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div id="map"></div>
+        <div id="tooltip" class="tooltip" style="display: none;"></div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
+    <script>
+        /*
+         * Icons used in this application are from Reshot (https://www.reshot.com/)
+         * Licensed under the Reshot Free License: https://www.reshot.com/license/
+         * 
+         * Drone icon (peer aircraft): https://www.reshot.com/free-svg-icons/item/drone-QMKDX7THUZ/
+         * Controller icon (self/GCS): https://www.reshot.com/free-svg-icons/item/drone-controller-HC2ZPW3VXM/
+         * 
+         * Icons have been adapted with custom colors for this application.
+         */
+        
+        const droneIcon = 'drone-blue.svg';
+        const controllerIcon = 'controller-green.svg';
+
+        function toNumber(value) {
+            if (typeof value === 'number') {
+                return Number.isFinite(value) ? value : null;
+            }
+
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+
+                if (trimmed.length === 0) {
+                    return null;
+                }
+
+                const parsed = Number(trimmed);
+                return Number.isFinite(parsed) ? parsed : null;
+            }
+
+            return null;
+        }
+
+        function extractPeerNameInfo(peer) {
+            const fullName = peer.name || peer.id || peer.rawId || 'Peer';
+            const shortName = peer.id || peer.rawId || 'UNK';
+
+            return {
+                fullName: fullName,
+                shortName: shortName
+            };
+        }
+
+        // WebSocket connection
+        let ws = null;
+        let map = null;
+        let vectorSource = null;
+        let vectorLayer = null;
+        let markers = new Map();
+        let mapCentered = false;
+
+        // Initialize OpenLayers map
+        function initMap() {
+            vectorSource = new ol.source.Vector();
+            
+            vectorLayer = new ol.layer.Vector({
+                source: vectorSource,
+                style: function(feature) {
+                    const type = feature.get('type');
+                    const icon = type === 'self' ? controllerIcon : droneIcon;
+                    const data = feature.get('data') || {};
+                    const labelText = type === 'peer' ? (data.displayLabel || '') : '';
+                    
+                    return new ol.style.Style({
+                        image: new ol.style.Icon({
+                            src: icon,
+                            scale: 1,
+                            anchor: [0.5, 0.5]
+                        }),
+                        text: labelText ? new ol.style.Text({
+                            text: labelText,
+                            font: 'bold 14px "Segoe UI", sans-serif',
+                            fill: new ol.style.Fill({ color: '#f8fafc' }),
+                            stroke: new ol.style.Stroke({ color: '#0f172a', width: 3 }),
+                            offsetY: -48,
+                            backgroundFill: new ol.style.Fill({ color: 'rgba(30, 41, 59, 0.7)' }),
+                            padding: [4, 8, 4, 8],
+                            placement: 'point'
+                        }) : undefined
+                    });
+                }
+            });
+
+            map = new ol.Map({
+                target: 'map',
+                layers: [
+                    new ol.layer.Tile({
+                        source: new ol.source.OSM()
+                    }),
+                    vectorLayer
+                ],
+                view: new ol.View({
+                    center: ol.proj.fromLonLat([0, 0]),
+                    zoom: 2
+                })
+            });
+
+            // Tooltip overlay
+            const tooltip = document.getElementById('tooltip');
+            const overlay = new ol.Overlay({
+                element: tooltip,
+                offset: [10, 0],
+                positioning: 'bottom-left'
+            });
+            map.addOverlay(overlay);
+
+            // Hover interaction for tooltip
+            map.on('pointermove', function(evt) {
+                const feature = map.forEachFeatureAtPixel(evt.pixel, function(feature) {
+                    return feature;
+                });
+
+                if (feature) {
+                    const data = feature.get('data');
+                    const isPeer = feature.get('type') === 'peer';
+                    
+                    let content = isPeer ? 
+                        `Peer: ${data.name || data.peer_id}\n` : 
+                        'Self/GCS\n';
+                    content += `Lat: ${data.latitude.toFixed(6)}°\n`;
+                    content += `Lon: ${data.longitude.toFixed(6)}°\n`;
+                    content += `Alt: ${data.altitude.toFixed(1)}m\n`;
+                    content += `Speed: ${data.ground_speed.toFixed(1)} m/s\n`;
+                    content += `Heading: ${data.heading.toFixed(0)}°\n`;
+                    
+                    if (isPeer) {
+                        content += `Distance: ${data.distance.toFixed(0)}m\n`;
+                        content += `Link Quality: ${data.lq}%\n`;
+                    } else {
+                        content += `Satellites: ${data.num_sat}\n`;
+                        content += `Fix Type: ${data.fix_type}\n`;
+                    }
+                    
+                    tooltip.innerText = content;
+                    tooltip.style.display = 'block';
+                    overlay.setPosition(evt.coordinate);
+                } else {
+                    tooltip.style.display = 'none';
+                }
+            });
+
+            map.on('pointerout', function() {
+                tooltip.style.display = 'none';
+            });
+        }
+
+        // Update UI
+        function updateUI(connected) {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const serialPort = document.getElementById('serialPort');
+
+            if (connected) {
+                statusDot.classList.add('connected');
+                statusText.textContent = 'Connected';
+                connectBtn.style.display = 'none';
+                disconnectBtn.style.display = 'block';
+                serialPort.disabled = true;
+            } else {
+                statusDot.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+                connectBtn.style.display = 'block';
+                disconnectBtn.style.display = 'none';
+                serialPort.disabled = false;
+            }
+        }
+
+        // Connect to WebSocket
+        async function connect() {
+            const serialPort = document.getElementById('serialPort').value;
+            
+            if (!serialPort) {
+                alert('Please enter a serial port');
+                return;
+            }
+
+            try {
+                // Configure the serial port via REST API
+                const response = await fetch('http://localhost:8080/api/connect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        port: serialPort,
+                        baud: 115200
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    alert('Failed to connect to serial port: ' + (result.error || 'Unknown error'));
+                    return;
+                }
+
+                console.log('Serial port connected:', result);
+
+                // Connect to WebSocket
+                ws = new WebSocket('ws://localhost:8766');
+                
+                ws.onopen = function() {
+                    console.log('WebSocket connected');
+                    updateUI(true);
+                };
+
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleMessage(data);
+                    } catch (e) {
+                        console.error('Error parsing message:', e);
+                    }
+                };
+
+                ws.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                };
+
+                ws.onclose = function() {
+                    console.log('WebSocket disconnected');
+                    updateUI(false);
+                    ws = null;
+                };
+            } catch (e) {
+                console.error('Connection error:', e);
+                alert('Failed to connect: ' + e.message);
+            }
+        }
+
+        // Disconnect from WebSocket
+        async function disconnect() {
+            try {
+                // Disconnect serial port via REST API
+                await fetch('http://localhost:8080/api/disconnect', {
+                    method: 'POST'
+                });
+            } catch (e) {
+                console.error('Error disconnecting serial:', e);
+            }
+
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            updateUI(false);
+            
+            // Clear markers
+            vectorSource.clear();
+            markers.clear();
+            mapCentered = false;
+            document.getElementById('peerCount').textContent = '0';
+        }
+
+        // Handle incoming messages
+        function handleMessage(data) {
+            console.log('Received:', data);
+            
+            if (data.type === 'peers' && data.payload && Array.isArray(data.payload.peers)) {
+                const payload = data.payload;
+
+                // Determine self ID: prefer 'X', then 'A' if no 'X'
+                let selfId = payload.myID;
+                if (!selfId) {
+                    if (payload.peers.some(peer => peer.id === 'X')) {
+                        selfId = 'X';
+                    } else if (payload.peers.some(peer => peer.id === 'A')) {
+                        selfId = 'A';
+                    }
+                }
+
+                payload.peers.forEach(peer => {
+                    const peerKey = String(peer.id);
+                    const peerLabel = peer.id ?? (peer.rawId !== undefined && peer.rawId !== null ? String(peer.rawId) : null);
+
+                    if (!peerKey || !peerLabel) {
+                        return;
+                    }
+
+                    updatePeerMarker(peer, selfId);
+                });
+            }
+            
+            updatePeerCount();
+        }
+
+        function centerOnFirstPeer() {
+            if (!map || markers.size === 0) {
+                return;
+            }
+
+            const iterator = markers.values().next();
+            const feature = iterator && iterator.value ? iterator.value : null;
+
+            if (!feature) {
+                return;
+            }
+
+            const coords = feature.getGeometry().getCoordinates();
+            map.getView().setCenter(coords);
+            map.getView().setZoom(13);
+            mapCentered = true;
+        }
+
+        // Update peer marker
+        function updatePeerMarker(peer, selfId) {
+            const peerKey = String(peer.id);
+            
+            if (!peerKey) {
+                return;
+            }
+
+            const lat = toNumber(peer.lat);
+            const lon = toNumber(peer.lon);
+
+            if (lat === null || lon === null) {
+                return;
+            }
+            
+            const coords = ol.proj.fromLonLat([lon, lat]);
+            const altitude = toNumber(peer.alt);
+            const groundSpeedRaw = toNumber(peer.groundSpeed);
+            const groundCourseRaw = toNumber(peer.groundCourse);
+            const distance = toNumber(peer.distance);
+            const linkQuality = toNumber(peer.lq);
+            const nameInfo = extractPeerNameInfo(peer);
+            const isSelf = peer.id === selfId;
+            
+            if (!markers.has(peerKey)) {
+                // Create new marker
+                const feature = new ol.Feature({
+                    geometry: new ol.geom.Point(coords),
+                    type: isSelf ? 'self' : 'peer',
+                    data: {
+                        peer_id: peerKey,
+                        name: nameInfo.fullName,
+                        displayLabel: nameInfo.shortName,
+                        latitude: lat,
+                        longitude: lon,
+                        altitude: altitude ?? 0,
+                        ground_speed: (groundSpeedRaw ?? 0) / 100,
+                        heading: (groundCourseRaw ?? 0) / 10,
+                        distance: distance ?? 0,
+                        lq: linkQuality ?? 0
+                    }
+                });
+                
+                vectorSource.addFeature(feature);
+                markers.set(peerKey, feature);
+                
+                // Center map on first peer if not centered yet
+                if (!mapCentered) {
+                    centerOnFirstPeer();
+                }
+            } else {
+                // Update existing marker
+                const feature = markers.get(peerKey);
+                feature.getGeometry().setCoordinates(coords);
+                feature.set('data', {
+                    peer_id: peerKey,
+                    name: nameInfo.fullName,
+                    displayLabel: nameInfo.shortName,
+                    latitude: lat,
+                    longitude: lon,
+                    altitude: altitude ?? 0,
+                    ground_speed: (groundSpeedRaw ?? 0) / 100,
+                    heading: (groundCourseRaw ?? 0) / 10,
+                    distance: distance ?? 0,
+                    lq: linkQuality ?? 0
+                });
+            }
+        }
+
+        // Update peer count
+        function updatePeerCount() {
+            document.getElementById('peerCount').textContent = markers.size;
+        }
+
+        // Event listeners
+        document.getElementById('connectBtn').addEventListener('click', connect);
+        document.getElementById('disconnectBtn').addEventListener('click', disconnect);
+        
+        document.getElementById('serialPort').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                connect();
+            }
+        });
+
+        // Initialize map on page load
+        window.addEventListener('load', function() {
+            initMap();
+        });
+    </script>
+</body>
+</html>
