@@ -31,6 +31,7 @@
 #include <lib/Radios/ESPNOW.h>
 #include <lib/Radios/LoRa_SX128X.h>
 #include <lib/Radios/LoRa_SX127X.h>
+#include <lib/Radios/LoRa_SX126X.h>
 // User interface
 #include <lib/Display/Display.h>
 
@@ -162,6 +163,10 @@ void setup()
 #ifdef LORA_FAMILY_SX127X
     DBGLN("[main] RadioManager::addRadio LoRa_SX127X");
     radioManager->addRadio(LoRa_SX127X::getSingleton());
+#endif
+#ifdef LORA_FAMILY_SX126X
+    DBGLN("[main] RadioManager::addRadio LoRa_SX126X");
+    radioManager->addRadio(LoRa_SX126X::getSingleton());
 #endif
 
     DBGLN("[main] init complete");
