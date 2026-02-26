@@ -26,6 +26,7 @@ WiFiManager::WiFiManager()
     WiFi.mode(WIFI_MODE_AP);
 #elif defined(PLATFORM_ESP8266)
     WiFi.mode(WIFI_AP);
+    WiFi.setOutputPower(13.5);
 #endif
     String chipIDString = generate_id();
     String ssid = "iNav Radar-";
