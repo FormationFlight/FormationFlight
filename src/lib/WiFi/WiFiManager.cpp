@@ -17,6 +17,7 @@
 #include "../Power/PowerManager.h"
 #include "../Statistics/StatsManager.h"
 #include "../Cryptography/CryptoManager.h"
+#include "../ConfigHandler.h"
 #include "webcontent.h"
 
 WiFiManager::WiFiManager()
@@ -61,6 +62,23 @@ WiFiManager::WiFiManager()
     server->on("/system/delay", HTTP_POST, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", "OK");
         delayMicroseconds(1000);
+    });
+    // Set the user-defined aircraft name (persisted to config). Empty reverts to auto.
+    server->on("/system/name", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("name", true)) {
+            request->send(400, "text/plain", "need parameter name");
+            return;
+        }
+        String name = request->getParam("name", true)->value();
+        strncpy(cfg.name_override, name.c_str(), sizeof(cfg.name_override) - 1);
+        cfg.name_override[sizeof(cfg.name_override) - 1] = '\0';
+        config_save();
+        // Apply immediately so the change shows without a reboot (clearing takes effect on reboot).
+        if (cfg.name_override[0] != '\0') {
+            strncpy(curr.name, cfg.name_override, sizeof(curr.name) - 1);
+            curr.name[sizeof(curr.name) - 1] = '\0';
+        }
+        request->send(200, "text/plain", "OK");
     });
     // RadioManager
     server->on("/radiomanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -241,6 +259,7 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     doc["uptimeMilliseconds"] = millis();
     doc["phase"] = sys.phase;
     doc["name"] = curr.name;
+    doc["device_name"] = cfg.name_override;
     doc["longName"] = generate_id();
     doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
     doc["state"] = MSPManager::getSingleton()->getState();

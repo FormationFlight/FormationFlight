@@ -4,7 +4,7 @@
 
 
 void handleConfigMessage(Stream& input_source, String message);
-void config_save(config_t *cfg);
+void config_save();
 void config_init(bool forcedefault = 0);
 void config_clear();
 

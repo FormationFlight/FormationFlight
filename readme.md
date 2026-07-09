@@ -7,6 +7,18 @@
 
 FormationFlight provides FPV pilots with inter-UAS positioning & telemetry, enabling formation flights, chase footage, and ground station coordination with ease. Spiritual successor to the [iNav Radar](https://github.com/OlivierC-FR/ESP32-INAV-Radar) project, FormationFlight adds many improvements including faster update rates, more users, encryption, and smaller, lighter hardware originally developed for the [ExpressLRS project](https://github.com/ExpressLRS/ExpressLRS).
 
+## This Fork
+
+This fork adds an **editable aircraft name in the WebUI**. Upstream derives the displayed name solely from the connected flight controller's craft name (falling back to a random ID when there is no FC). On a repurposed ExpressLRS receiver used standalone that often leaves you with an unhelpful auto-generated name.
+
+With this change you can set a name directly on the device:
+
+1. Connect to the device's WiFi AP (`iNav Radar-…`, password `inavradar`) and open the WebUI.
+2. Go to **Settings** → **Aircraft Name**, enter a name, and **Save**.
+3. Leave the field empty to fall back to the automatic behaviour (FC craft name, then a random ID).
+
+A non-empty name always wins over the flight controller's craft name, is stored in the device config (persists across reboots), and applies live without a reboot. The feature is compiled into the standard firmware, including all ExpressLRS receiver targets.
+
 ## Getting Started
 
 Visit the [FormationFlight Getting Started](https://formationflight.org/getting-started/) page!

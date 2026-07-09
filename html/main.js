@@ -64,7 +64,7 @@ function Sidebar({ url, show, systemStatus }) {
 
     <div class="flex flex-1 flex-col">
       <${NavLink} title="Dashboard" icon=${Icons.home} href="/" url=${url} />
-      <!--<${NavLink} title="Settings" icon=${Icons.settings} href="/settings" url=${url} />-->
+      <${NavLink} title="Settings" icon=${Icons.settings} href="/settings" url=${url} />
       <${NavLink} title="Update" icon=${Icons.upArrowBox} href="/update" url=${url} />
     <//>
   <//>
@@ -161,22 +161,22 @@ function Main() {
 }
 
 function Settings() {
-  const [settings, setSettings] = useState(null);
+  const [name, setName] = useState(null);
   const [saveResult, setSaveResult] = useState(null);
   const refresh = () => fetch(ENDPOINT_PREFIX + '/system/status')
     .then(r => r.json())
-    .then(r => setSettings(r));
+    .then(r => setName(r.device_name || ''));
   useEffect(refresh, []);
 
-  const mksetfn = k => (v => setSettings(x => Object.assign({}, x, { [k]: v })));
-  const onsave = () => fetch(ENDPOINT_PREFIX + '/system/status', {
-    method: 'GET'/*, body: JSON.stringify(settings)*/
-  }).then(r => r.json())
-    .then(r => setSaveResult(r))
-    .then(refresh);
+  const onsave = () => {
+    const body = new URLSearchParams();
+    body.append('name', name);
+    fetch(ENDPOINT_PREFIX + '/system/name', { method: 'POST', body })
+      .then(r => r.text().then(text => setSaveResult({ status: r.ok, message: r.ok ? 'Saved' : text })))
+      .then(refresh);
+  };
 
-  if (!settings) return '';
-  const logOptions = [[0, 'Disable'], [1, 'Error'], [2, 'Info'], [3, 'Debug']];
+  if (name === null) return '';
   return html`
 <div class="m-4 grid grid-cols-1 gap-4 md:grid-cols-2">
 
@@ -188,11 +188,9 @@ function Settings() {
       ${saveResult && html`<${Notification} ok=${saveResult.status}
         text=${saveResult.message} close=${() => setSaveResult(null)} />`}
 
-      <${Setting} title="Enable Logs" value=${settings.log_enabled} setfn=${mksetfn('log_enabled')} type="switch" />
-      <${Setting} title="Log Level" value=${settings.log_level} setfn=${mksetfn('log_level')} type="select" addonLeft="0-3" disabled=${!settings.log_enabled} options=${logOptions}/>
-      <${Setting} title="Brightness" value=${settings.brightness} setfn=${mksetfn('brightness')} type="number" addonRight="%" />
-      <${Setting} title="Device Name" value=${settings.device_name} setfn=${mksetfn('device_name')} type="" />
-      <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.save} onclick=${onsave} title="Save Settings" /><//>
+      <${Setting} title="Aircraft Name" value=${name} setfn=${setName} type="" placeholder="Leave empty for auto" />
+      <p class="mt-2 text-xs text-gray-400">Overrides the flight controller craft name. Leave empty to use the FC name (or an auto-generated one).</p>
+      <div class="mb-1 mt-3 flex place-content-end"><${Button} icon=${Icons.save} onclick=${onsave} title="Save" /><//>
     <//>
   <//>
 <//>`;
@@ -279,7 +277,7 @@ const App = function () {
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
     <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(window.innerWidth > 1200); }} history=${History.createHashHistory()} >
       <${Main} default=${true} />
-      <!--<${Settings} path="settings" />-->
+      <${Settings} path="settings" />
       <${Update} path="update" />
     <//>
   <//>

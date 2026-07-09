@@ -34,7 +34,7 @@ void config_init(bool forcedefault)
         ((char *)&cfg)[i] = data;
     }
 
-    if (true || cfg.version != VERSION_CONFIG || forcedefault)
+    if (cfg.version != VERSION_CONFIG || forcedefault)
     {
         cfg.version = VERSION_CONFIG;
         cfg.force_gs = false;
@@ -45,6 +45,7 @@ void config_init(bool forcedefault)
         cfg.msp_after_tx_delay = LORA_M3_MSP_AFTER_TX_DELAY;
 
         cfg.display_enable = 1;
+        cfg.name_override[0] = '\0';
         config_save();
     }
 }

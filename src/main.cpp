@@ -232,8 +232,14 @@ void loop()
 
         if ((sys.now > (sys.cycle_scan_begin + HOST_MSP_TIMEOUT)) || (curr.name[0] != '\0') || (curr.host == HOST_ARDU))
         {
+            // A user-set name (from the WebUI) always wins.
+            if (cfg.name_override[0] != '\0')
+            {
+                strncpy(curr.name, cfg.name_override, sizeof(curr.name) - 1);
+                curr.name[sizeof(curr.name) - 1] = '\0';
+            }
             // If we don't have a craft name at this point, let's assign a random string.
-            if (curr.name[0] == '\0')
+            else if (curr.name[0] == '\0')
             {
                 String chipIDString = generate_id();
                 for (int i = 0; i < 3; i++)

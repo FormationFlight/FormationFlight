@@ -18,7 +18,7 @@
 // -------- GENERAL
 
 #define PRODUCT_NAME "FormationFlight"
-#define VERSION_CONFIG 400
+#define VERSION_CONFIG 401
 #define START_DELAY 1000
 
 // These are injected at build time by build_flags.py, these are here to make syntax highlighting happy
@@ -106,6 +106,9 @@ struct config_t {
     int16_t msp_after_tx_delay;
 
     bool display_enable;
+
+    // User-set aircraft name (WebUI). Empty = auto (FC craft name, then random).
+    char name_override[16];
 };
 
 struct system_t {
