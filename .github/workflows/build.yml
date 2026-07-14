@@ -15,7 +15,7 @@ jobs:
       targets: ${{ steps.set-targets.outputs.targets }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - id: set-targets
       run: echo "targets=[$( (grep '\[env:.*UART\]' targets/*.ini) | sed 's/.*://' | sed s/.$// | egrep "(STLINK|UART)" | grep -v DEPRECATED | sed s/\]$// | tr '\n' ','  | sed 's/,$/"\n/' | sed 's/,/","/'g | sed 's/^/"/')]" >> $GITHUB_OUTPUT && cat $GITHUB_OUTPUT
 
@@ -32,7 +32,7 @@ jobs:
       uses: rlespinasse/github-slug-action@v4.4.1
 
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -40,7 +40,7 @@ jobs:
         python-version: '3.10'
 
     - name: Cache pip
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ matrix.target }}
@@ -52,7 +52,7 @@ jobs:
         pip install wheel
 
     - name: Cache PlatformIO
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.platformio
         key: ${{ runner.os }}-platformio
@@ -76,7 +76,7 @@ jobs:
         fi
 
     - name: Store Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: firmware
         path: ~/artifacts/**
@@ -88,7 +88,7 @@ jobs:
     steps:
     - name: Download Artifacts
       id: download
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: ~/artifacts/
     - name: Create Release
