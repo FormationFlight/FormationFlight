@@ -1,0 +1,10 @@
+{
+  "name": "ff_core",
+  "version": "0.1.0",
+  "description": "FormationFlight v2 core logic: wire protocol, ALOHA rate control, peer table. Pure C++, no hardware dependencies, host-testable.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "libLDFMode": "off"
+  }
+}
