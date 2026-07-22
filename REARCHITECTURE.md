@@ -108,7 +108,41 @@ onto the FC's radar slot limit.
 
 ## Sequencing
 
-Each phase lands as its own PR(s) on a `v2` branch, buildable and flashable at every
-step. Phase 1 keeps protocol v1 on the air temporarily (mechanical port of the old
-packet under the new core) so hardware smoke-testing stays possible; the v1 wire
-format is deleted in Phase 2 with the clean break.
+Each phase lands as its own PR(s) on a `v2` branch, buildable at every step.
+(Superseded refinement: because we took the clean break up front, Phase 1 wires
+the v2 modules directly rather than temporarily porting the v1 packet.)
+
+## Status (living)
+
+Done and committed on `v2`:
+
+- **Phase 0** — native test harness; pure modules: wire protocol, LoRa airtime,
+  ALOHA rate control, UID peer table.
+- **Phase 1a** — pure execution-model primitives: cooperative timer scheduler,
+  lock-free SPSC ring.
+- **Phase 1b** — `ff::Node` application core: the full v2 state machine behind
+  interfaces (IRadio/ILocationSource/ICrypto/RNG); replaces the MODE_* phase
+  machine and the sys/curr/cfg globals. Host-tested with fakes.
+- **Phase 1c** — hardware adapter layer + new `main.cpp`; first flashable build
+  (`expresslrs_rx_2400_via_UART`, ESP8285). `ff_core` compiles/links for host,
+  ESP32, and ESP8266.
+
+Test status: 54 host unit tests green. `ff_core` proven on xtensa-lx106 via a
+real firmware link.
+
+Remaining / deferred:
+
+- **Radio breadth** — only the SX128x adapter exists. SX127x and ESP-NOW adapters
+  still need porting; `main.cpp` #errors on those targets meanwhile.
+- **Async MSP** — `MspLocationSource` is rate-limited + cached (beacon path never
+  blocks), but the MSP request itself is still bounded-blocking. A fully
+  non-blocking MSP byte-pump is a later refinement.
+- **Web / OTA** — the v1 WiFi/web/OTA stack is excluded from the v2 build for now;
+  it returns in Phase 3 reading Node snapshots.
+- **On-device validation** — builds are compile-verified only; no hardware bring-up
+  has been done yet.
+- **Legacy code** — the v1 managers remain in `src/lib` (unbuilt) as reference for
+  porting; they get deleted once each family is ported.
+
+Next phases: **2** — protocol v2 crypto (AES-CCM AEAD replacing the passthrough)
+and finalizing the wire format; **3** — config persistence, web UI, display.
