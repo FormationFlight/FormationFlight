@@ -1,0 +1,177 @@
+#include "node.h"
+
+namespace ff {
+
+namespace {
+// Upper bound for a single frame including any AEAD expansion headroom.
+constexpr size_t kMaxRxFrame = 64;
+}  // namespace
+
+Node::Node(const NodeConfig& cfg, const NodeDeps& deps)
+    : cfg_(cfg), deps_(deps), peers_(cfg.peer_timeout_ms), rate_(cfg.rate) {}
+
+void Node::begin(uint32_t now_ms) {
+    // Prime the scheduler's clock so timers are scheduled relative to real time.
+    sched_.poll(now_ms);
+
+    if (deps_.radio != nullptr) {
+        rate_.setAirtimeMs(deps_.radio->airtimeMs(kPositionPacketSize));
+    }
+
+    // A listen-only node (e.g. a ground station) tracks peers but never emits.
+    if (!cfg_.listen_only) {
+        beacon_timer_ = sched_.after(nextBeaconDelayMs(), beaconTrampoline, this);
+        announce_timer_ =
+            sched_.every(cfg_.announce_interval_ms, announceTrampoline, this);
+    }
+    expire_timer_ = sched_.every(cfg_.expire_interval_ms, expireTrampoline, this);
+}
+
+uint32_t Node::poll(uint32_t now_ms) { return sched_.poll(now_ms); }
+
+uint32_t Node::nextBeaconDelayMs() {
+    const uint32_t active = peers_.countActive(sched_.now());
+    const float r = (deps_.rng != nullptr) ? deps_.rng(deps_.rng_ctx) : 0.5f;
+    return rate_.nextDelayMs(active, r);
+}
+
+void Node::beaconTrampoline(void* ctx) {
+    Node* self = static_cast<Node*>(ctx);
+    self->sendBeacon();
+    // Re-arm with fresh jitter and a peer-count-adjusted interval.
+    self->sched_.rearm(self->beacon_timer_, self->nextBeaconDelayMs());
+}
+
+void Node::announceTrampoline(void* ctx) {
+    static_cast<Node*>(ctx)->sendAnnounce();
+}
+
+void Node::expireTrampoline(void* ctx) {
+    Node* self = static_cast<Node*>(ctx);
+    self->peers_.expire(self->sched_.now());
+}
+
+void Node::sendBeacon() {
+    if (deps_.radio == nullptr) {
+        return;
+    }
+    NodeLocation loc =
+        (deps_.location != nullptr) ? deps_.location->getLocation() : NodeLocation{};
+
+    PositionPacket pkt{};
+    pkt.uid = cfg_.uid;
+    pkt.lat = loc.lat;
+    pkt.lon = loc.lon;
+    pkt.alt_m = loc.alt_m;
+    pkt.speed_cms = loc.speed_cms;
+    pkt.course_ddeg = loc.course_ddeg;
+    pkt.flags = 0;
+    if (loc.valid) {
+        pkt.flags |= POSITION_FLAG_HAS_FIX;
+    }
+    if (loc.armed) {
+        pkt.flags |= POSITION_FLAG_ARMED;
+    }
+
+    uint8_t buf[kMaxRxFrame];
+    size_t len = encodePosition(pkt, buf, sizeof(buf));
+    if (len == 0) {
+        return;
+    }
+    if (deps_.crypto != nullptr) {
+        len = deps_.crypto->encrypt(buf, len, sizeof(buf));
+        if (len == 0) {
+            return;
+        }
+    }
+    deps_.radio->transmit(buf, len);
+    stats_.beacons_sent++;
+    stats_.last_tx_ms = sched_.now();
+}
+
+void Node::sendAnnounce() {
+    if (deps_.radio == nullptr) {
+        return;
+    }
+    AnnouncePacket pkt{};
+    pkt.uid = cfg_.uid;
+    for (size_t i = 0; i < kMaxNameLen && cfg_.name[i] != '\0'; i++) {
+        pkt.name[i] = cfg_.name[i];
+    }
+    pkt.capabilities = cfg_.capabilities;
+
+    uint8_t buf[kMaxRxFrame];
+    size_t len = encodeAnnounce(pkt, buf, sizeof(buf));
+    if (len == 0) {
+        return;
+    }
+    if (deps_.crypto != nullptr) {
+        len = deps_.crypto->encrypt(buf, len, sizeof(buf));
+        if (len == 0) {
+            return;
+        }
+    }
+    deps_.radio->transmit(buf, len);
+    stats_.announces_sent++;
+    stats_.last_tx_ms = sched_.now();
+}
+
+void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t rssi) {
+    if (len == 0 || len > kMaxRxFrame) {
+        stats_.rx_rejected++;
+        return;
+    }
+    uint8_t buf[kMaxRxFrame];
+    for (size_t i = 0; i < len; i++) {
+        buf[i] = data[i];
+    }
+
+    size_t plain_len = len;
+    if (deps_.crypto != nullptr) {
+        if (!deps_.crypto->decrypt(buf, len, plain_len)) {
+            stats_.rx_rejected++;
+            return;
+        }
+    }
+
+    Header hdr;
+    if (peekHeader(buf, plain_len, hdr) != DecodeResult::Ok) {
+        stats_.rx_rejected++;
+        return;
+    }
+
+    // Our own UID: ignore. (v1 reacted to hearing "its slot" by reassigning
+    // slots; with UID identity there is nothing to do.)
+    if (hdr.uid == cfg_.uid) {
+        stats_.rx_self++;
+        return;
+    }
+
+    switch (hdr.type) {
+        case PacketType::Position: {
+            PositionPacket pkt;
+            if (decodePosition(buf, plain_len, pkt) != DecodeResult::Ok) {
+                stats_.rx_rejected++;
+                return;
+            }
+            peers_.updatePosition(pkt, now_ms, rssi);
+            stats_.rx_ok++;
+            break;
+        }
+        case PacketType::Announce: {
+            AnnouncePacket pkt;
+            if (decodeAnnounce(buf, plain_len, pkt) != DecodeResult::Ok) {
+                stats_.rx_rejected++;
+                return;
+            }
+            peers_.updateAnnounce(pkt, now_ms);
+            stats_.rx_ok++;
+            break;
+        }
+        default:
+            stats_.rx_rejected++;
+            return;
+    }
+}
+
+}  // namespace ff
