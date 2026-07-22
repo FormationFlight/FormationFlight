@@ -29,7 +29,12 @@ public:
         const size_t head = head_.load(std::memory_order_relaxed);
         const size_t next_head = next(head);
         if (next_head == tail_.load(std::memory_order_acquire)) {
-            dropped_.fetch_add(1, std::memory_order_relaxed);
+            // Plain (non-atomic) increment: this is a diagnostic counter written
+            // only by the producer. Using std::atomic::fetch_add here would emit
+            // a __atomic_fetch_add_4 libcall the ESP8266 lx106 core can't link
+            // (it has no atomic read-modify-write instruction). The head/tail
+            // indices below stay atomic; those compile to lock-free load/store.
+            dropped_++;
             return false;
         }
         buf_[head] = item;
@@ -64,7 +69,7 @@ public:
         return (head + Capacity - tail) % Capacity;
     }
 
-    uint32_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
+    uint32_t dropped() const { return dropped_; }
 
 private:
     static size_t next(size_t i) { return (i + 1) % Capacity; }
@@ -72,7 +77,7 @@ private:
     T buf_[Capacity];
     std::atomic<size_t> head_{0};  // next slot to write (producer)
     std::atomic<size_t> tail_{0};  // next slot to read (consumer)
-    std::atomic<uint32_t> dropped_{0};
+    uint32_t dropped_ = 0;         // producer-only diagnostic counter
 };
 
 }  // namespace ff
