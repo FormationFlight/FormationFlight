@@ -24,6 +24,12 @@
 #ifdef LORA_FAMILY_SX127X
 #include "hal/RadioSX127x.h"
 #endif
+#ifdef GNSS_ENABLED
+#include "hal/DirectGpsLocationSource.h"
+#ifndef GNSS_RATE_HZ
+#define GNSS_RATE_HZ 10  // highest reasonable u-blox rate; override per target
+#endif
+#endif
 
 namespace {
 
@@ -37,7 +43,11 @@ ff::RadioSX127x g_lora;
 #endif
 
 ff::PassthroughCrypto g_crypto;
-ff::MspLocationSource g_location;
+#ifdef GNSS_ENABLED
+ff::DirectGpsLocationSource g_gps;  // directly-attached u-blox GPS
+#else
+ff::MspLocationSource g_location;   // position via the flight controller
+#endif
 ff::Node* g_node = nullptr;
 
 // Uniform [0,1) for ALOHA jitter. Arduino's PRNG is seeded per-device below.
@@ -66,8 +76,11 @@ void setup() {
     g_hub.add(&g_lora);
 #endif
 
-    // MSP link to the flight controller.
-#if defined(PLATFORM_ESP32)
+    // Location: a directly-attached GPS (auto-configured to a high rate) if the
+    // target has one, otherwise the flight controller's position over MSP.
+#ifdef GNSS_ENABLED
+    g_gps.begin(GNSS_UART_INDEX, GNSS_PIN_RX, GNSS_PIN_TX, GNSS_RATE_HZ);
+#elif defined(PLATFORM_ESP32)
     Serial1.begin(115200, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
     g_location.begin(Serial1);
 #else
@@ -86,7 +99,11 @@ void setup() {
 
     ff::NodeDeps deps;
     deps.radios = &g_hub;
+#ifdef GNSS_ENABLED
+    deps.location = &g_gps;
+#else
     deps.location = &g_location;
+#endif
     deps.crypto = &g_crypto;
     deps.rng = rng01;
     deps.rng_ctx = nullptr;
@@ -99,8 +116,12 @@ void loop() {
     // Service every radio and feed received frames (from any of them) to the Node.
     g_hub.service(*g_node);
 
-    // Refresh our own position from the FC (rate-limited internally).
+    // Refresh our own position (direct GPS auto-config/parse, or MSP from the FC).
+#ifdef GNSS_ENABLED
+    g_gps.service();
+#else
     g_location.service();
+#endif
 
     // Drive the scheduler: beacons, announces, peer expiry.
     g_node->poll(millis());

@@ -140,12 +140,23 @@ Done and committed on `v2`:
   *that* medium (LoRa-only peers no longer slow ESP-NOW). MSP reads are now a pure
   byte-fed `MspParser` (host-tested) drained from `MspLocationSource::service()`;
   the last blocking serial wait in the firmware is gone.
+- **Phase 1f** — auto-configuring direct GPS. A pure, host-tested UBX module
+  (`ubx.*`: NAV-PVT parser/decoder + CFG-RATE/PRT/MSG builders, checked against
+  the canonical u-blox 10 Hz command). `DirectGpsLocationSource` (hal) runs a
+  non-blocking state machine that baud-sweeps an attached u-blox module, raises it
+  to 115200, sets the navigation rate high (10 Hz default, `GNSS_RATE_HZ`), and
+  switches it to compact binary NAV-PVT with NMEA off — replacing v1's 1 Hz NMEA.
+  Builds on the T-Beam target.
 
-Test status: 72 host unit tests green. `ff_core` proven on xtensa-lx106 and
+Test status: 82 host unit tests green. `ff_core` proven on xtensa-lx106 and
 xtensa-esp32 via real firmware links.
 
 Remaining / deferred:
 
+- **T-Beam GPS power** — the onboard GPS is powered by the AXP192 PMIC; enabling
+  that rail (v1's TBeamPower) is not yet ported, so the direct-GPS driver runs but
+  the T-Beam module stays unpowered until that follow-up lands. Any externally
+  powered GPS UART works today.
 - **Web / OTA** — the v1 WiFi/web/OTA stack is excluded from the v2 build for now;
   it returns in Phase 3 reading Node snapshots.
 - **On-device validation** — builds are compile-verified only; no hardware bring-up
