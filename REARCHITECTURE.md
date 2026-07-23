@@ -126,14 +126,19 @@ Done and committed on `v2`:
 - **Phase 1c** — hardware adapter layer + new `main.cpp`; first flashable build
   (`expresslrs_rx_2400_via_UART`, ESP8285). `ff_core` compiles/links for host,
   ESP32, and ESP8266.
+- **Phase 1d** — multi-radio. A `RadioHub` (an IRadio composite) fans each beacon
+  out to every enabled radio, reports the max child airtime so ALOHA paces to the
+  slowest medium, and drains all radios into the one peer table. Adapters for all
+  three families now exist (ESP-NOW, SX127x, SX128x) and a node runs ESP-NOW +
+  LoRa *simultaneously* — short-range 2.4 GHz mesh bridged to long-range LoRa,
+  which slot-based v1 could never do. Builds verified on ESP8266 (SX128x+ESP-NOW)
+  and ESP32 (SX127x+ESP-NOW).
 
-Test status: 54 host unit tests green. `ff_core` proven on xtensa-lx106 via a
-real firmware link.
+Test status: 58 host unit tests green. `ff_core` proven on xtensa-lx106 and
+xtensa-esp32 via real firmware links.
 
 Remaining / deferred:
 
-- **Radio breadth** — only the SX128x adapter exists. SX127x and ESP-NOW adapters
-  still need porting; `main.cpp` #errors on those targets meanwhile.
 - **Async MSP** — `MspLocationSource` is rate-limited + cached (beacon path never
   blocks), but the MSP request itself is still bounded-blocking. A fully
   non-blocking MSP byte-pump is a later refinement.

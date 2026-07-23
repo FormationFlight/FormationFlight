@@ -1,5 +1,5 @@
 #pragma once
-#ifdef LORA_FAMILY_SX128X
+#ifdef LORA_FAMILY_SX127X
 
 #include <RadioLib.h>
 
@@ -9,27 +9,28 @@
 
 namespace ff {
 
-// RadioDriver for the Semtech SX1280/SX1281 (2.4 GHz LoRa), as used on ExpressLRS
-// receivers. Half-duplex: sits in continuous receive, briefly enters transmit for
-// each beacon, then returns to receive. The DIO1 interrupt only sets a flag (kept
-// in IRAM, ESP8266-safe); the actual SPI read and timestamping happen loop-side
-// in serviceRx().
-class RadioSX128x : public RadioDriver {
+// RadioDriver for the Semtech SX1276/SX1278 (sub-GHz LoRa) on LilyGo / Heltec /
+// ELRS 900 hardware. Same half-duplex pattern as the SX128x driver: DIO0 ISR sets
+// an IRAM flag, the SPI read and timestamp happen loop-side in serviceRx().
+class RadioSX127x : public RadioDriver {
 public:
     bool begin();
 
-    // IRadio / RadioDriver
     void transmit(const uint8_t* data, size_t len) override;
     double airtimeMs(size_t payload_len) const override;
     void serviceRx() override;
     bool popRx(RxFrame& out) override { return rx_.pop(out); }
-    const char* name() const override { return "SX128x"; }
+    const char* name() const override { return "SX127x"; }
 
     uint32_t rxDropped() const { return rx_.dropped(); }
     void onDioIsr() { dio_pending_ = true; }
 
 private:
-    SX1281* radio_ = nullptr;
+#if LORA_BAND == 433
+    SX1278* radio_ = nullptr;
+#else
+    SX1276* radio_ = nullptr;
+#endif
     volatile bool dio_pending_ = false;
     bool transmitting_ = false;
     SpscRing<RxFrame, 8> rx_;
@@ -37,4 +38,4 @@ private:
 
 }  // namespace ff
 
-#endif  // LORA_FAMILY_SX128X
+#endif  // LORA_FAMILY_SX127X
