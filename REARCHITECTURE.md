@@ -135,15 +135,17 @@ Done and committed on `v2`:
   node runs ESP-NOW + LoRa *simultaneously* — short-range 2.4 GHz mesh bridged to
   long-range LoRa, which slot-based v1 could never do. Builds verified on ESP8266
   (SX128x+ESP-NOW) and ESP32 (SX127x+ESP-NOW).
+- **Phase 1e** — per-medium peer counting + non-blocking MSP. Each peer records a
+  per-radio last-heard time, so a radio's rate is driven by the peers actually on
+  *that* medium (LoRa-only peers no longer slow ESP-NOW). MSP reads are now a pure
+  byte-fed `MspParser` (host-tested) drained from `MspLocationSource::service()`;
+  the last blocking serial wait in the firmware is gone.
 
-Test status: 58 host unit tests green. `ff_core` proven on xtensa-lx106 and
+Test status: 72 host unit tests green. `ff_core` proven on xtensa-lx106 and
 xtensa-esp32 via real firmware links.
 
 Remaining / deferred:
 
-- **Async MSP** — `MspLocationSource` is rate-limited + cached (beacon path never
-  blocks), but the MSP request itself is still bounded-blocking. A fully
-  non-blocking MSP byte-pump is a later refinement.
 - **Web / OTA** — the v1 WiFi/web/OTA stack is excluded from the v2 build for now;
   it returns in Phase 3 reading Node snapshots.
 - **On-device validation** — builds are compile-verified only; no hardware bring-up
