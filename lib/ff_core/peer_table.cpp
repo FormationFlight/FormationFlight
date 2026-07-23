@@ -36,7 +36,17 @@ Peer* PeerTable::allocSlot() {
     return oldest;
 }
 
-Peer* PeerTable::updatePosition(const PositionPacket& p, uint32_t now_ms, int16_t rssi) {
+namespace {
+void markHeardOn(Peer* peer, size_t radio_index, uint32_t now_ms) {
+    if (radio_index < kMaxRadios) {
+        peer->last_seen_on[radio_index] = now_ms;
+        peer->radios_seen |= static_cast<uint8_t>(1u << radio_index);
+    }
+}
+}  // namespace
+
+Peer* PeerTable::updatePosition(const PositionPacket& p, uint32_t now_ms, int16_t rssi,
+                                size_t radio_index) {
     Peer* peer = findMutable(p.uid);
     if (peer == nullptr) {
         peer = allocSlot();
@@ -56,11 +66,13 @@ Peer* PeerTable::updatePosition(const PositionPacket& p, uint32_t now_ms, int16_
     if (rssi != 0) {
         peer->rssi = rssi;
     }
+    markHeardOn(peer, radio_index, now_ms);
     peer->packets_received++;
     return peer;
 }
 
-Peer* PeerTable::updateAnnounce(const AnnouncePacket& a, uint32_t now_ms) {
+Peer* PeerTable::updateAnnounce(const AnnouncePacket& a, uint32_t now_ms,
+                                size_t radio_index) {
     Peer* peer = findMutable(a.uid);
     if (peer == nullptr) {
         peer = allocSlot();
@@ -76,6 +88,7 @@ Peer* PeerTable::updateAnnounce(const AnnouncePacket& a, uint32_t now_ms) {
     peer->name[i] = '\0';
     peer->capabilities = a.capabilities;
     peer->last_update_ms = now_ms;
+    markHeardOn(peer, radio_index, now_ms);
     peer->packets_received++;
     return peer;
 }
@@ -92,6 +105,22 @@ uint32_t PeerTable::countActive(uint32_t now_ms) const {
     uint32_t n = 0;
     for (size_t i = 0; i < kMaxPeers; i++) {
         if (peers_[i].valid && (now_ms - peers_[i].last_update_ms) <= timeout_ms_) {
+            n++;
+        }
+    }
+    return n;
+}
+
+uint32_t PeerTable::countActiveOn(size_t radio_index, uint32_t now_ms) const {
+    if (radio_index >= kMaxRadios) {
+        return 0;
+    }
+    const uint8_t bit = static_cast<uint8_t>(1u << radio_index);
+    uint32_t n = 0;
+    for (size_t i = 0; i < kMaxPeers; i++) {
+        const Peer& p = peers_[i];
+        if (p.valid && (p.radios_seen & bit) &&
+            (now_ms - p.last_seen_on[radio_index]) <= timeout_ms_) {
             n++;
         }
     }

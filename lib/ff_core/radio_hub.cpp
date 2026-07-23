@@ -33,7 +33,7 @@ void RadioHub::service(Node& node) {
         r->serviceRx();
         RxFrame frame;
         while (r->popRx(frame)) {
-            node.onReceive(frame.data, frame.len, frame.timestamp_ms, frame.rssi);
+            node.onReceive(frame.data, frame.len, frame.timestamp_ms, frame.rssi, i);
         }
     }
 }

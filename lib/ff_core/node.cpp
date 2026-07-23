@@ -48,7 +48,8 @@ void Node::begin(uint32_t now_ms) {
 uint32_t Node::poll(uint32_t now_ms) { return sched_.poll(now_ms); }
 
 uint32_t Node::nextBeaconDelayMs(size_t index) {
-    const uint32_t active = peers_.countActive(sched_.now());
+    // Only peers actually heard on this radio count toward its channel load.
+    const uint32_t active = peers_.countActiveOn(index, sched_.now());
     const float r = (deps_.rng != nullptr) ? deps_.rng(deps_.rng_ctx) : 0.5f;
     return rate_.nextDelayMs(active, r, airtime_[index]);
 }
@@ -144,7 +145,8 @@ void Node::sendAnnounce() {
     stats_.last_tx_ms = sched_.now();
 }
 
-void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t rssi) {
+void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t rssi,
+                     size_t radio_index) {
     if (len == 0 || len > kMaxRxFrame) {
         stats_.rx_rejected++;
         return;
@@ -182,7 +184,7 @@ void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t r
                 stats_.rx_rejected++;
                 return;
             }
-            peers_.updatePosition(pkt, now_ms, rssi);
+            peers_.updatePosition(pkt, now_ms, rssi, radio_index);
             stats_.rx_ok++;
             break;
         }
@@ -192,7 +194,7 @@ void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t r
                 stats_.rx_rejected++;
                 return;
             }
-            peers_.updateAnnounce(pkt, now_ms);
+            peers_.updateAnnounce(pkt, now_ms, radio_index);
             stats_.rx_ok++;
             break;
         }

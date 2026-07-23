@@ -42,8 +42,8 @@ struct NodeLocation {
     uint16_t course_ddeg = 0;   // decidegrees 0..3599
 };
 
-// Maximum radios the Node paces independently and the RadioHub aggregates.
-constexpr size_t kMaxRadios = 4;
+// kMaxRadios is defined in peer_table.h (included above), shared by the peer
+// table's per-radio tracking and the Node's per-radio pacing.
 
 // The set of radios the Node transmits through. Each radio is addressed by index
 // so the Node can pace and transmit on them independently -- ESP-NOW stays fast
@@ -124,12 +124,17 @@ public:
     // milliseconds until the next scheduled work is due.
     uint32_t poll(uint32_t now_ms);
 
-    // Feed a raw received frame from the hardware RX path.
-    void onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t rssi);
+    // Feed a raw received frame from the hardware RX path, tagged with the radio
+    // it arrived on (so per-medium peer counts stay accurate).
+    void onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t rssi,
+                   size_t radio_index);
 
     const PeerTable& peers() const { return peers_; }
     const NodeStats& stats() const { return stats_; }
     uint32_t activePeerCount(uint32_t now_ms) const { return peers_.countActive(now_ms); }
+    uint32_t activePeerCountOn(size_t radio_index, uint32_t now_ms) const {
+        return peers_.countActiveOn(radio_index, now_ms);
+    }
 
 private:
     // Per-radio beacon context passed to the scheduler trampoline.

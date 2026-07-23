@@ -74,6 +74,13 @@ static size_t makePeerFrame(uint32_t uid, uint8_t* buf, size_t cap,
     return encodePosition(p, buf, cap);
 }
 
+// Inject a peer heard on a specific radio.
+static void injectPeer(Node& node, uint32_t uid, uint32_t now, size_t radio) {
+    uint8_t buf[64];
+    size_t n = makePeerFrame(uid, buf, sizeof(buf));
+    node.onReceive(buf, n, now, -50, radio);
+}
+
 static NodeConfig baseConfig(uint32_t uid = 1) {
     NodeConfig cfg{};
     cfg.uid = uid;
@@ -121,12 +128,10 @@ void test_beacon_interval_grows_with_peers() {
     NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
 
     Node node(baseConfig(), deps);
-    uint8_t buf[64];
     for (uint32_t i = 0; i < 5; i++) {
-        size_t n = makePeerFrame(0x1000 + i, buf, sizeof(buf));
-        node.onReceive(buf, n, 0, -50);
+        injectPeer(node, 0x1000 + i, 0, 0);
     }
-    TEST_ASSERT_EQUAL_UINT32(5, node.activePeerCount(0));
+    TEST_ASSERT_EQUAL_UINT32(5, node.activePeerCountOn(0, 0));
 
     node.begin(0);
     // 5 peers -> 6 nodes -> base 6*14/0.15 = 560ms. First beacon at ~560.
@@ -137,35 +142,59 @@ void test_beacon_interval_grows_with_peers() {
 }
 
 void test_per_radio_rate_keeps_fast_radio_fast() {
-    // Two radios: a fast one (ESP-NOW-like, 2 ms) and a slow one (LoRa-like,
-    // 20 ms). Under the same peer load the fast radio must keep beaconing quickly
-    // while the slow one backs off -- the whole point of per-radio rate control.
+    // Fast radio (2 ms) and slow radio (20 ms), both loaded with the same peers.
     FakeRadioSet radio;
     radio.n_radios = 2;
-    radio.airtimes[0] = 2.0;   // fast
-    radio.airtimes[1] = 20.0;  // slow
+    radio.airtimes[0] = 2.0;
+    radio.airtimes[1] = 20.0;
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
     NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
 
     Node node(baseConfig(), deps);
-    uint8_t buf[64];
     for (uint32_t i = 0; i < 5; i++) {
-        size_t n = makePeerFrame(0x2000 + i, buf, sizeof(buf));
-        node.onReceive(buf, n, 0, -50);
+        injectPeer(node, 0x2000 + i, 0, 0);  // heard on both media
+        injectPeer(node, 0x2000 + i, 0, 1);
     }
     node.begin(0);
     for (uint32_t t = 10; t <= 2000; t += 10) {
         node.poll(t);
     }
-    // Fast radio: base 6*2/0.15=80 -> clamp 100ms -> ~20 beacons by 2000ms.
-    // Slow radio: base 6*20/0.15=800ms -> ~2 beacons.
+    // Fast: base 6*2/0.15=80 -> clamp 100ms -> ~20 beacons. Slow: 800ms -> ~2.
     size_t fast = radio.countForRadio(0);
     size_t slow = radio.countForRadio(1);
     TEST_ASSERT_TRUE(fast >= 15);
     TEST_ASSERT_TRUE(slow <= 5);
     TEST_ASSERT_TRUE(fast > slow * 3);
+}
+
+void test_peers_on_one_medium_dont_slow_the_other() {
+    // The point of per-medium counting: 5 peers heard ONLY on the slow radio must
+    // not throttle the fast radio, which sees zero peers on its own medium.
+    FakeRadioSet radio;
+    radio.n_radios = 2;
+    radio.airtimes[0] = 2.0;   // fast (ESP-NOW)
+    radio.airtimes[1] = 20.0;  // slow (LoRa)
+    FakeLocation location;
+    location.loc.valid = true;
+    NullCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+
+    Node node(baseConfig(), deps);
+    for (uint32_t i = 0; i < 5; i++) {
+        injectPeer(node, 0x3000 + i, 0, 1);  // LoRa only
+    }
+    TEST_ASSERT_EQUAL_UINT32(5, node.activePeerCountOn(1, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, node.activePeerCountOn(0, 0));
+
+    node.begin(0);
+    for (uint32_t t = 10; t <= 2000; t += 10) {
+        node.poll(t);
+    }
+    // Fast radio unaffected by the LoRa-only peers -> stays at the 100ms floor.
+    TEST_ASSERT_TRUE(radio.countForRadio(0) >= 18);
+    TEST_ASSERT_TRUE(radio.countForRadio(1) <= 5);
 }
 
 void test_onreceive_populates_peer_table() {
@@ -176,7 +205,7 @@ void test_onreceive_populates_peer_table() {
 
     uint8_t buf[64];
     size_t n = makePeerFrame(0x55, buf, sizeof(buf), 12345, 67890);
-    node.onReceive(buf, n, 1000, -70);
+    node.onReceive(buf, n, 1000, -70, 0);
 
     TEST_ASSERT_EQUAL_UINT32(1, node.stats().rx_ok);
     const Peer* p = node.peers().find(0x55);
@@ -194,7 +223,7 @@ void test_ignores_own_uid() {
 
     uint8_t buf[64];
     size_t n = makePeerFrame(7, buf, sizeof(buf));
-    node.onReceive(buf, n, 1000, -50);
+    node.onReceive(buf, n, 1000, -50, 0);
 
     TEST_ASSERT_EQUAL_UINT32(1, node.stats().rx_self);
     TEST_ASSERT_EQUAL_UINT32(0, node.stats().rx_ok);
@@ -213,9 +242,7 @@ void test_listen_only_tracks_but_never_transmits() {
     Node node(cfg, deps);
     node.begin(0);
 
-    uint8_t buf[64];
-    size_t n = makePeerFrame(0x22, buf, sizeof(buf));
-    node.onReceive(buf, n, 100, -50);
+    injectPeer(node, 0x22, 100, 0);
 
     for (uint32_t t = 10; t <= 5000; t += 10) {
         node.poll(t);
@@ -232,7 +259,7 @@ void test_crypto_rejection_drops_frame() {
 
     uint8_t buf[64];
     size_t n = makePeerFrame(0x99, buf, sizeof(buf));
-    node.onReceive(buf, n, 1000, -50);
+    node.onReceive(buf, n, 1000, -50, 0);
 
     TEST_ASSERT_EQUAL_UINT32(1, node.stats().rx_rejected);
     TEST_ASSERT_EQUAL_UINT32(0, node.stats().rx_ok);
@@ -252,7 +279,6 @@ void test_announce_is_emitted_on_all_radios() {
     for (uint32_t t = 10; t <= 2100; t += 10) {
         node.poll(t);
     }
-    // Count announces per radio; each should have received at least one.
     size_t announces[2] = {0, 0};
     for (auto& tx : radio.sent) {
         Header h{};
@@ -272,8 +298,6 @@ void test_announce_is_emitted_on_all_radios() {
 void test_disabled_radio_is_not_transmitted_on() {
     FakeRadioSet radio;
     radio.n_radios = 2;
-    radio.airtimes[0] = 14.0;
-    radio.airtimes[1] = 14.0;
     radio.enabled_[1] = false;  // second radio off
     FakeLocation location;
     location.loc.valid = true;
@@ -300,9 +324,7 @@ void test_peer_expires() {
     cfg.peer_timeout_ms = 1000;
     Node node(cfg, deps);
 
-    uint8_t buf[64];
-    size_t n = makePeerFrame(0x33, buf, sizeof(buf));
-    node.onReceive(buf, n, 0, -50);
+    injectPeer(node, 0x33, 0, 0);
     TEST_ASSERT_EQUAL_UINT32(1, node.activePeerCount(0));
 
     node.begin(0);
@@ -318,6 +340,7 @@ int main(int, char**) {
     RUN_TEST(test_beacons_at_min_rate_when_alone);
     RUN_TEST(test_beacon_interval_grows_with_peers);
     RUN_TEST(test_per_radio_rate_keeps_fast_radio_fast);
+    RUN_TEST(test_peers_on_one_medium_dont_slow_the_other);
     RUN_TEST(test_onreceive_populates_peer_table);
     RUN_TEST(test_ignores_own_uid);
     RUN_TEST(test_listen_only_tracks_but_never_transmits);
