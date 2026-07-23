@@ -136,9 +136,33 @@ void test_jitter_bounds() {
     TEST_ASSERT_TRUE(mid < hi);
 }
 
+void test_airtime_parameterized_paces_each_medium() {
+    // One controller, shared config, different airtimes -> different intervals.
+    // This is how the Node keeps ESP-NOW fast while LoRa slows under load.
+    RateConfig cfg{};
+    RateController rc(cfg);
+    // 5 peers -> 6 nodes total.
+    uint32_t fast = rc.baseIntervalMs(5, 2.0);   // ESP-NOW: 6*2/0.15=80 -> clamp 100
+    uint32_t slow = rc.baseIntervalMs(5, 20.0);  // LoRa: 6*20/0.15=800
+    TEST_ASSERT_EQUAL_UINT32(100, fast);
+    TEST_ASSERT_UINT32_WITHIN(2, 800, slow);
+    TEST_ASSERT_TRUE(slow > fast);
+}
+
+void test_airtime_parameterized_jitter() {
+    RateConfig cfg{};
+    cfg.jitter_frac = 0.25f;
+    RateController rc(cfg);
+    uint32_t base = rc.baseIntervalMs(5, 20.0);  // 800
+    TEST_ASSERT_EQUAL_UINT32(base, rc.nextDelayMs(5, 0.5f, 20.0));           // mid
+    TEST_ASSERT_UINT32_WITHIN(2, base * 3 / 4, rc.nextDelayMs(5, 0.0f, 20.0));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_airtime_matches_known_reference);
+    RUN_TEST(test_airtime_parameterized_paces_each_medium);
+    RUN_TEST(test_airtime_parameterized_jitter);
     RUN_TEST(test_airtime_default_mode);
     RUN_TEST(test_airtime_faster_bandwidth_is_shorter);
     RUN_TEST(test_airtime_grows_with_spreading_factor);

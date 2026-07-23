@@ -72,10 +72,10 @@ void test_add_respects_capacity() {
         TEST_ASSERT_TRUE(hub.add(&d[i]));
     }
     TEST_ASSERT_FALSE(hub.add(&d[kMaxRadios]));  // over capacity
-    TEST_ASSERT_EQUAL_UINT32(kMaxRadios, hub.count());
+    TEST_ASSERT_EQUAL_UINT32(kMaxRadios, hub.radioCount());
 }
 
-void test_transmit_fans_out_to_enabled_only() {
+void test_transmit_targets_a_single_radio() {
     RadioHub hub;
     FakeDriver espnow("ESPNOW", 2.0);
     FakeDriver lora("SX127x", 20.0);
@@ -83,26 +83,31 @@ void test_transmit_fans_out_to_enabled_only() {
     hub.add(&lora);
 
     uint8_t buf[8] = {1, 2, 3, 4, 5};
-    hub.transmit(buf, 5);
+    hub.transmit(0, buf, 5);
+    TEST_ASSERT_EQUAL_UINT32(1, espnow.sent.size());
+    TEST_ASSERT_EQUAL_UINT32(0, lora.sent.size());
+
+    hub.transmit(1, buf, 5);
     TEST_ASSERT_EQUAL_UINT32(1, espnow.sent.size());
     TEST_ASSERT_EQUAL_UINT32(1, lora.sent.size());
 
+    // Transmitting on a disabled radio is a no-op.
     lora.setEnabled(false);
-    hub.transmit(buf, 5);
-    TEST_ASSERT_EQUAL_UINT32(2, espnow.sent.size());
-    TEST_ASSERT_EQUAL_UINT32(1, lora.sent.size());  // unchanged, disabled
+    TEST_ASSERT_FALSE(hub.radioEnabled(1));
+    hub.transmit(1, buf, 5);
+    TEST_ASSERT_EQUAL_UINT32(1, lora.sent.size());
 }
 
-void test_airtime_is_max_of_enabled() {
+void test_airtime_is_reported_per_radio() {
     RadioHub hub;
     FakeDriver espnow("ESPNOW", 2.0);
     FakeDriver lora("SX127x", 20.0);
     hub.add(&espnow);
     hub.add(&lora);
 
-    TEST_ASSERT_DOUBLE_WITHIN(0.001, 20.0, hub.airtimeMs(21));  // paces to LoRa
-    lora.setEnabled(false);
-    TEST_ASSERT_DOUBLE_WITHIN(0.001, 2.0, hub.airtimeMs(21));   // now ESP-NOW
+    // Each radio's own airtime -- the Node paces each independently from these.
+    TEST_ASSERT_DOUBLE_WITHIN(0.001, 2.0, hub.airtimeMs(0, 21));
+    TEST_ASSERT_DOUBLE_WITHIN(0.001, 20.0, hub.airtimeMs(1, 21));
 }
 
 void test_service_delivers_from_all_radios_to_node() {
@@ -137,8 +142,8 @@ void test_service_delivers_from_all_radios_to_node() {
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_add_respects_capacity);
-    RUN_TEST(test_transmit_fans_out_to_enabled_only);
-    RUN_TEST(test_airtime_is_max_of_enabled);
+    RUN_TEST(test_transmit_targets_a_single_radio);
+    RUN_TEST(test_airtime_is_reported_per_radio);
     RUN_TEST(test_service_delivers_from_all_radios_to_node);
     return UNITY_END();
 }

@@ -42,14 +42,23 @@ struct NodeLocation {
     uint16_t course_ddeg = 0;   // decidegrees 0..3599
 };
 
-// Radio the Node transmits through. Receive is push-driven: the hardware layer
-// drains its RX ring and calls Node::onReceive().
-class IRadio {
+// Maximum radios the Node paces independently and the RadioHub aggregates.
+constexpr size_t kMaxRadios = 4;
+
+// The set of radios the Node transmits through. Each radio is addressed by index
+// so the Node can pace and transmit on them independently -- ESP-NOW stays fast
+// while LoRa slows down as peers grow, because each radio's beacon interval is
+// sized from its own airtime. Receive is push-driven: the hardware layer drains
+// each radio's RX ring and calls Node::onReceive(). RadioHub implements this.
+class IRadioSet {
 public:
-    virtual ~IRadio() = default;
-    virtual void transmit(const uint8_t* data, size_t len) = 0;
-    // Time on air for a payload of the given size, used to size the ALOHA rate.
-    virtual double airtimeMs(size_t payload_len) const = 0;
+    virtual ~IRadioSet() = default;
+    virtual size_t radioCount() const = 0;
+    virtual bool radioEnabled(size_t index) const = 0;
+    // Time on air for a payload on radio `index`, used to size that radio's rate.
+    virtual double airtimeMs(size_t index, size_t payload_len) const = 0;
+    // Transmit on a single radio.
+    virtual void transmit(size_t index, const uint8_t* data, size_t len) = 0;
 };
 
 // Source of the node's own position.
@@ -87,7 +96,7 @@ struct NodeConfig {
 };
 
 struct NodeDeps {
-    IRadio* radio = nullptr;
+    IRadioSet* radios = nullptr;
     ILocationSource* location = nullptr;
     ICrypto* crypto = nullptr;
     RandomFn rng = nullptr;
@@ -123,22 +132,32 @@ public:
     uint32_t activePeerCount(uint32_t now_ms) const { return peers_.countActive(now_ms); }
 
 private:
+    // Per-radio beacon context passed to the scheduler trampoline.
+    struct BeaconSlot {
+        Node* node = nullptr;
+        uint8_t index = 0;
+    };
+
     static void beaconTrampoline(void* ctx);
     static void announceTrampoline(void* ctx);
     static void expireTrampoline(void* ctx);
 
-    void sendBeacon();
+    void onBeaconTick(size_t index);
+    void sendBeacon(size_t index);
     void sendAnnounce();
-    uint32_t nextBeaconDelayMs();
+    uint32_t nextBeaconDelayMs(size_t index);
 
     NodeConfig cfg_;
     NodeDeps deps_;
     Scheduler sched_;
     PeerTable peers_;
-    RateController rate_;
+    RateController rate_;  // shared config/clamps; airtime supplied per radio
     NodeStats stats_;
 
-    TimerHandle beacon_timer_ = kInvalidTimer;
+    size_t radio_count_ = 0;
+    double airtime_[kMaxRadios] = {0};
+    BeaconSlot beacon_slots_[kMaxRadios];
+    TimerHandle beacon_timer_[kMaxRadios];
     TimerHandle announce_timer_ = kInvalidTimer;
     TimerHandle expire_timer_ = kInvalidTimer;
 };

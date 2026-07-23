@@ -85,7 +85,7 @@ void setup() {
     cfg.capabilities = ff::CAP_HAS_GPS | ff::CAP_HAS_MSP_FC;
 
     ff::NodeDeps deps;
-    deps.radio = &g_hub;
+    deps.radios = &g_hub;
     deps.location = &g_location;
     deps.crypto = &g_crypto;
     deps.rng = rng01;

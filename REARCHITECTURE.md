@@ -126,13 +126,15 @@ Done and committed on `v2`:
 - **Phase 1c** — hardware adapter layer + new `main.cpp`; first flashable build
   (`expresslrs_rx_2400_via_UART`, ESP8285). `ff_core` compiles/links for host,
   ESP32, and ESP8266.
-- **Phase 1d** — multi-radio. A `RadioHub` (an IRadio composite) fans each beacon
-  out to every enabled radio, reports the max child airtime so ALOHA paces to the
-  slowest medium, and drains all radios into the one peer table. Adapters for all
-  three families now exist (ESP-NOW, SX127x, SX128x) and a node runs ESP-NOW +
-  LoRa *simultaneously* — short-range 2.4 GHz mesh bridged to long-range LoRa,
-  which slot-based v1 could never do. Builds verified on ESP8266 (SX128x+ESP-NOW)
-  and ESP32 (SX127x+ESP-NOW).
+- **Phase 1d** — multi-radio. The Node addresses radios by index via an IRadioSet
+  (implemented by `RadioHub`) and beacons on each **independently**: every radio
+  has its own beacon timer paced from its own airtime, so ESP-NOW stays fast
+  (tiny airtime → clamps to the 10 Hz floor) while LoRa backs off as peers grow.
+  Announces fan out to all radios; frames received on any radio feed the one peer
+  table. Adapters for all three families exist (ESP-NOW, SX127x, SX128x) and a
+  node runs ESP-NOW + LoRa *simultaneously* — short-range 2.4 GHz mesh bridged to
+  long-range LoRa, which slot-based v1 could never do. Builds verified on ESP8266
+  (SX128x+ESP-NOW) and ESP32 (SX127x+ESP-NOW).
 
 Test status: 58 host unit tests green. `ff_core` proven on xtensa-lx106 and
 xtensa-esp32 via real firmware links.

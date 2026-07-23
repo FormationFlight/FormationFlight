@@ -24,16 +24,17 @@ void RateController::setAirtimeMs(double airtime_ms) {
     }
 }
 
-uint32_t RateController::baseIntervalMs(uint32_t active_peers) const {
+uint32_t RateController::baseIntervalMs(uint32_t active_peers, double airtime_ms) const {
     // Include ourselves in the node count sharing the channel.
     const double n_total = static_cast<double>(active_peers) + 1.0;
     const double load = (cfg_.target_load > 0.0f) ? cfg_.target_load : 0.15;
-    const double base = (n_total * airtime_ms_) / load;
+    const double base = (n_total * airtime_ms) / load;
     return clampU32(base, cfg_.min_interval_ms, cfg_.max_interval_ms);
 }
 
-uint32_t RateController::nextDelayMs(uint32_t active_peers, float rand01) const {
-    const uint32_t base = baseIntervalMs(active_peers);
+uint32_t RateController::nextDelayMs(uint32_t active_peers, float rand01,
+                                     double airtime_ms) const {
+    const uint32_t base = baseIntervalMs(active_peers, airtime_ms);
     // Map rand01 in [0,1) to a factor in [1 - jitter, 1 + jitter).
     const double factor = 1.0 + (static_cast<double>(rand01) * 2.0 - 1.0) *
                                     static_cast<double>(cfg_.jitter_frac);
@@ -42,6 +43,14 @@ uint32_t RateController::nextDelayMs(uint32_t active_peers, float rand01) const 
         delay = 0.0;
     }
     return static_cast<uint32_t>(delay + 0.5);
+}
+
+uint32_t RateController::baseIntervalMs(uint32_t active_peers) const {
+    return baseIntervalMs(active_peers, airtime_ms_);
+}
+
+uint32_t RateController::nextDelayMs(uint32_t active_peers, float rand01) const {
+    return nextDelayMs(active_peers, rand01, airtime_ms_);
 }
 
 }  // namespace ff

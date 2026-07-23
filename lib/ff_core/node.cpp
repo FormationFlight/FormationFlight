@@ -14,13 +14,31 @@ void Node::begin(uint32_t now_ms) {
     // Prime the scheduler's clock so timers are scheduled relative to real time.
     sched_.poll(now_ms);
 
-    if (deps_.radio != nullptr) {
-        rate_.setAirtimeMs(deps_.radio->airtimeMs(kPositionPacketSize));
+    radio_count_ = 0;
+    if (deps_.radios != nullptr) {
+        radio_count_ = deps_.radios->radioCount();
+        if (radio_count_ > kMaxRadios) {
+            radio_count_ = kMaxRadios;
+        }
+    }
+    for (size_t i = 0; i < kMaxRadios; i++) {
+        beacon_timer_[i] = kInvalidTimer;
     }
 
-    // A listen-only node (e.g. a ground station) tracks peers but never emits.
+    // Each radio beacons on its own schedule, paced by its own airtime, so a slow
+    // medium (LoRa) backing off does not throttle a fast one (ESP-NOW).
+    for (size_t i = 0; i < radio_count_; i++) {
+        airtime_[i] = deps_.radios->airtimeMs(i, kPositionPacketSize);
+        beacon_slots_[i].node = this;
+        beacon_slots_[i].index = static_cast<uint8_t>(i);
+        // A listen-only node (e.g. a ground station) tracks peers but never emits.
+        if (!cfg_.listen_only) {
+            beacon_timer_[i] =
+                sched_.after(nextBeaconDelayMs(i), beaconTrampoline, &beacon_slots_[i]);
+        }
+    }
+
     if (!cfg_.listen_only) {
-        beacon_timer_ = sched_.after(nextBeaconDelayMs(), beaconTrampoline, this);
         announce_timer_ =
             sched_.every(cfg_.announce_interval_ms, announceTrampoline, this);
     }
@@ -29,17 +47,22 @@ void Node::begin(uint32_t now_ms) {
 
 uint32_t Node::poll(uint32_t now_ms) { return sched_.poll(now_ms); }
 
-uint32_t Node::nextBeaconDelayMs() {
+uint32_t Node::nextBeaconDelayMs(size_t index) {
     const uint32_t active = peers_.countActive(sched_.now());
     const float r = (deps_.rng != nullptr) ? deps_.rng(deps_.rng_ctx) : 0.5f;
-    return rate_.nextDelayMs(active, r);
+    return rate_.nextDelayMs(active, r, airtime_[index]);
 }
 
 void Node::beaconTrampoline(void* ctx) {
-    Node* self = static_cast<Node*>(ctx);
-    self->sendBeacon();
-    // Re-arm with fresh jitter and a peer-count-adjusted interval.
-    self->sched_.rearm(self->beacon_timer_, self->nextBeaconDelayMs());
+    BeaconSlot* slot = static_cast<BeaconSlot*>(ctx);
+    slot->node->onBeaconTick(slot->index);
+}
+
+void Node::onBeaconTick(size_t index) {
+    sendBeacon(index);
+    // Re-arm this radio's beacon with fresh jitter and a peer-count-adjusted
+    // interval sized from this radio's airtime.
+    sched_.rearm(beacon_timer_[index], nextBeaconDelayMs(index));
 }
 
 void Node::announceTrampoline(void* ctx) {
@@ -51,8 +74,8 @@ void Node::expireTrampoline(void* ctx) {
     self->peers_.expire(self->sched_.now());
 }
 
-void Node::sendBeacon() {
-    if (deps_.radio == nullptr) {
+void Node::sendBeacon(size_t index) {
+    if (deps_.radios == nullptr || !deps_.radios->radioEnabled(index)) {
         return;
     }
     NodeLocation loc =
@@ -84,13 +107,13 @@ void Node::sendBeacon() {
             return;
         }
     }
-    deps_.radio->transmit(buf, len);
+    deps_.radios->transmit(index, buf, len);
     stats_.beacons_sent++;
     stats_.last_tx_ms = sched_.now();
 }
 
 void Node::sendAnnounce() {
-    if (deps_.radio == nullptr) {
+    if (deps_.radios == nullptr) {
         return;
     }
     AnnouncePacket pkt{};
@@ -111,7 +134,12 @@ void Node::sendAnnounce() {
             return;
         }
     }
-    deps_.radio->transmit(buf, len);
+    // Announce (identity, not rate-controlled) goes out on every enabled radio.
+    for (size_t i = 0; i < radio_count_; i++) {
+        if (deps_.radios->radioEnabled(i)) {
+            deps_.radios->transmit(i, buf, len);
+        }
+    }
     stats_.announces_sent++;
     stats_.last_tx_ms = sched_.now();
 }
