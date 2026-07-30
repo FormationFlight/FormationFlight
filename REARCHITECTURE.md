@@ -148,7 +148,20 @@ Done and committed on `v2`:
   switches it to compact binary NAV-PVT with NMEA off — replacing v1's 1 Hz NMEA.
   Builds on the T-Beam target.
 
-Test status: 82 host unit tests green. `ff_core` proven on xtensa-lx106 and
+- **Phase 1g** — fixed a real, previously-observed v1 bug: a listen-only (GCS)
+  node's received peers never reached the USB-attached ground station, because
+  v1 only pushed MSP output as a side effect of the node's own radio transmit
+  cycle -- which a listen-only node, by definition, never runs. Added the MSP
+  radar-output path v2 was missing entirely (`ff_core/msp_radar`: a pure,
+  host-tested `MSP2_COMMON_SET_RADAR_POS` builder; `hal/MspRadarOutput`, which
+  writes and explicitly flushes). Wired via `Node::IMspRadarSink` on its **own**
+  independent scheduler timer -- never gated by `listen_only`, radio count, or
+  transmit activity -- so this bug class is structurally impossible to
+  reintroduce. A `GCS_MODE` build flag sets `listen_only` until real runtime
+  config (Phase 3) exists. The MSP UART is now always brought up regardless of
+  which location source is active (previously unwired for GNSS_ENABLED targets).
+
+Test status: 94 host unit tests green. `ff_core` proven on xtensa-lx106 and
 xtensa-esp32 via real firmware links.
 
 Remaining / deferred:

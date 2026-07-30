@@ -43,6 +43,14 @@ void Node::begin(uint32_t now_ms) {
             sched_.every(cfg_.announce_interval_ms, announceTrampoline, this);
     }
     expire_timer_ = sched_.every(cfg_.expire_interval_ms, expireTrampoline, this);
+
+    // Deliberately unconditional: not gated by listen_only, radio_count_, or any
+    // transmit activity. See IMspRadarSink's doc comment for why that matters.
+    if (deps_.msp_radar_sink != nullptr) {
+        msp_radar_cursor_ = 0;
+        msp_radar_timer_ =
+            sched_.every(cfg_.msp_radar_interval_ms, mspRadarTrampoline, this);
+    }
 }
 
 uint32_t Node::poll(uint32_t now_ms) { return sched_.poll(now_ms); }
@@ -73,6 +81,33 @@ void Node::announceTrampoline(void* ctx) {
 void Node::expireTrampoline(void* ctx) {
     Node* self = static_cast<Node*>(ctx);
     self->peers_.expire(self->sched_.now());
+}
+
+void Node::mspRadarTrampoline(void* ctx) {
+    static_cast<Node*>(ctx)->onMspRadarTick();
+}
+
+void Node::onMspRadarTick() {
+    if (deps_.msp_radar_sink == nullptr) {
+        return;
+    }
+    // Round-robin across the peer table, sending the first valid peer found and
+    // leaving the cursor just past it for next tick. Scans the whole table at
+    // most once so a sparsely-populated table doesn't loop forever.
+    const size_t cap = peers_.capacity();
+    for (size_t tries = 0; tries < cap; tries++) {
+        const size_t idx = msp_radar_cursor_;
+        msp_radar_cursor_ = (msp_radar_cursor_ + 1) % cap;
+        const Peer* peer = peers_.at(idx);
+        if (peer != nullptr) {
+            // slot_id is derived from table position (1-based), not the peer's
+            // UID: MSP radar consumers expect small stable-ish integer IDs.
+            deps_.msp_radar_sink->sendRadarPosition(static_cast<uint8_t>(idx + 1),
+                                                     *peer);
+            return;
+        }
+    }
+    // No peers currently known; nothing to send this tick.
 }
 
 void Node::sendBeacon(size_t index) {

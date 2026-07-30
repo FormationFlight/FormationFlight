@@ -120,7 +120,7 @@ void test_service_delivers_from_all_radios_to_node() {
     NullCrypto crypto;
     NodeConfig cfg{};
     cfg.uid = 1;
-    NodeDeps deps{&hub, nullptr, &crypto, nullptr, nullptr};
+    NodeDeps deps{&hub, nullptr, &crypto, nullptr, nullptr, nullptr};
     Node node(cfg, deps);
 
     // A peer heard on ESP-NOW and a different peer heard on LoRa.

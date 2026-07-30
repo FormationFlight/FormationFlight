@@ -83,6 +83,24 @@ public:
 // Uniform random in [0,1), injected so jitter is deterministic under test.
 using RandomFn = float (*)(void* ctx);
 
+// Sink for this node's known peers, pushed out as MSP radar positions -- to an
+// attached flight controller's onboard OSD radar, or, in listen-only/GCS use, to
+// any MSP-speaking ground-station software. Optional: leave NodeDeps::msp_radar_sink
+// null to disable.
+//
+// This is scheduled on its own independent Node timer (see begin()), deliberately
+// never gated by radio transmit activity or listen_only. v1 tied its MSP output
+// schedule to the radio TX cycle, so a listen-only node -- which never transmits
+// by definition -- never sent its received peers out over MSP either: a real,
+// previously-observed bug where a GCS-mode node's peer data never reached the
+// USB-attached ground station. Keeping this sink on its own timer here makes that
+// bug structurally impossible to reintroduce.
+class IMspRadarSink {
+public:
+    virtual ~IMspRadarSink() = default;
+    virtual void sendRadarPosition(uint8_t slot_id, const Peer& peer) = 0;
+};
+
 struct NodeConfig {
     uint32_t uid = 0;
     char name[kMaxNameLen + 1] = {0};
@@ -91,7 +109,11 @@ struct NodeConfig {
     uint32_t peer_timeout_ms = 6000;
     uint32_t announce_interval_ms = 2000;
     uint32_t expire_interval_ms = 1000;
-    // GCS / silent mode: track peers but never transmit.
+    // How often one peer's MSP radar position is sent (round-robin across known
+    // peers, one per tick). Irrelevant if msp_radar_sink is null.
+    uint32_t msp_radar_interval_ms = 100;
+    // GCS / silent mode: track peers but never transmit on the radio. MSP radar
+    // output is independent of this and still runs (see IMspRadarSink above).
     bool listen_only = false;
 };
 
@@ -99,6 +121,7 @@ struct NodeDeps {
     IRadioSet* radios = nullptr;
     ILocationSource* location = nullptr;
     ICrypto* crypto = nullptr;
+    IMspRadarSink* msp_radar_sink = nullptr;
     RandomFn rng = nullptr;
     void* rng_ctx = nullptr;
 };
@@ -146,10 +169,12 @@ private:
     static void beaconTrampoline(void* ctx);
     static void announceTrampoline(void* ctx);
     static void expireTrampoline(void* ctx);
+    static void mspRadarTrampoline(void* ctx);
 
     void onBeaconTick(size_t index);
     void sendBeacon(size_t index);
     void sendAnnounce();
+    void onMspRadarTick();
     uint32_t nextBeaconDelayMs(size_t index);
 
     NodeConfig cfg_;
@@ -165,6 +190,8 @@ private:
     TimerHandle beacon_timer_[kMaxRadios];
     TimerHandle announce_timer_ = kInvalidTimer;
     TimerHandle expire_timer_ = kInvalidTimer;
+    TimerHandle msp_radar_timer_ = kInvalidTimer;
+    size_t msp_radar_cursor_ = 0;
 };
 
 }  // namespace ff

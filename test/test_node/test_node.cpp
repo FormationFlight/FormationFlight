@@ -59,6 +59,19 @@ struct RejectCrypto : ICrypto {
     bool decrypt(uint8_t*, size_t, size_t&) override { return false; }
 };
 
+struct FakeMspRadarSink : IMspRadarSink {
+    struct Sent {
+        uint8_t slot_id;
+        uint32_t peer_uid;  // 0 if the peer had no uid tracked (not used here)
+        int32_t lat;
+    };
+    std::vector<Sent> sent;
+
+    void sendRadarPosition(uint8_t slot_id, const Peer& peer) override {
+        sent.push_back({slot_id, peer.uid, peer.lat});
+    }
+};
+
 static float rngHalf(void*) { return 0.5f; }  // no jitter (factor 1.0)
 
 static size_t makePeerFrame(uint32_t uid, uint8_t* buf, size_t cap,
@@ -100,7 +113,7 @@ void test_beacons_at_min_rate_when_alone() {
     location.loc.valid = true;
     location.loc.lat = 451715460;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
 
     Node node(baseConfig(), deps);
     node.begin(0);
@@ -125,7 +138,7 @@ void test_beacon_interval_grows_with_peers() {
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
 
     Node node(baseConfig(), deps);
     for (uint32_t i = 0; i < 5; i++) {
@@ -150,7 +163,7 @@ void test_per_radio_rate_keeps_fast_radio_fast() {
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
 
     Node node(baseConfig(), deps);
     for (uint32_t i = 0; i < 5; i++) {
@@ -179,7 +192,7 @@ void test_peers_on_one_medium_dont_slow_the_other() {
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
 
     Node node(baseConfig(), deps);
     for (uint32_t i = 0; i < 5; i++) {
@@ -200,7 +213,7 @@ void test_peers_on_one_medium_dont_slow_the_other() {
 void test_onreceive_populates_peer_table() {
     FakeRadioSet radio;
     NullCrypto crypto;
-    NodeDeps deps{&radio, nullptr, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, nullptr, &crypto, nullptr, rngHalf, nullptr};
     Node node(baseConfig(), deps);
 
     uint8_t buf[64];
@@ -218,7 +231,7 @@ void test_onreceive_populates_peer_table() {
 void test_ignores_own_uid() {
     FakeRadioSet radio;
     NullCrypto crypto;
-    NodeDeps deps{&radio, nullptr, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, nullptr, &crypto, nullptr, rngHalf, nullptr};
     Node node(baseConfig(7), deps);
 
     uint8_t buf[64];
@@ -235,7 +248,7 @@ void test_listen_only_tracks_but_never_transmits() {
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
 
     NodeConfig cfg = baseConfig();
     cfg.listen_only = true;
@@ -254,7 +267,7 @@ void test_listen_only_tracks_but_never_transmits() {
 void test_crypto_rejection_drops_frame() {
     FakeRadioSet radio;
     RejectCrypto crypto;
-    NodeDeps deps{&radio, nullptr, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, nullptr, &crypto, nullptr, rngHalf, nullptr};
     Node node(baseConfig(), deps);
 
     uint8_t buf[64];
@@ -272,7 +285,7 @@ void test_announce_is_emitted_on_all_radios() {
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
     Node node(baseConfig(), deps);
     node.begin(0);
 
@@ -302,7 +315,7 @@ void test_disabled_radio_is_not_transmitted_on() {
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
     Node node(baseConfig(), deps);
     node.begin(0);
 
@@ -313,12 +326,102 @@ void test_disabled_radio_is_not_transmitted_on() {
     TEST_ASSERT_EQUAL_UINT32(0, radio.countForRadio(1));  // disabled, silent
 }
 
+// ---- MSP radar output ------------------------------------------------------
+//
+// These reproduce the reported bug: a node in listen-only (GCS) mode, with no
+// radio ever transmitting, must still push its received peers out over the MSP
+// radar sink on its own schedule. v1 tied that output to the radio TX cycle, so
+// a node that never transmits never sent anything -- the fix is that the sink is
+// scheduled independently in Node::begin(), regardless of listen_only or radios.
+
+void test_gcs_mode_still_emits_msp_radar_with_no_radios_and_no_tx() {
+    FakeMspRadarSink sink;
+    NodeConfig cfg = baseConfig();
+    cfg.listen_only = true;            // GCS: never transmits
+    cfg.msp_radar_interval_ms = 50;
+    // No IRadioSet at all -- the exact "no Tx call in the firmware" scenario.
+    NodeDeps deps{nullptr, nullptr, nullptr, &sink, nullptr, nullptr};
+    Node node(cfg, deps);
+
+    injectPeer(node, 0xC0FFEE, 0, 0);  // a peer heard over some radio
+    node.begin(0);
+
+    for (uint32_t t = 10; t <= 500; t += 10) {
+        node.poll(t);
+    }
+    // Must have received radar sends purely from the sink's own timer.
+    TEST_ASSERT_TRUE(sink.sent.size() >= 5);
+    for (auto& s : sink.sent) {
+        TEST_ASSERT_EQUAL_UINT32(0xC0FFEE, s.peer_uid);
+    }
+}
+
+void test_msp_radar_no_sink_configured_is_safe() {
+    NodeConfig cfg = baseConfig();
+    cfg.listen_only = true;
+    NodeDeps deps{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    Node node(cfg, deps);
+    injectPeer(node, 0x01, 0, 0);
+    node.begin(0);
+    for (uint32_t t = 10; t <= 500; t += 10) {
+        node.poll(t);  // must not crash with no sink
+    }
+    TEST_ASSERT_TRUE(true);
+}
+
+void test_msp_radar_round_robins_across_peers() {
+    FakeMspRadarSink sink;
+    NodeConfig cfg = baseConfig();
+    cfg.listen_only = true;
+    cfg.msp_radar_interval_ms = 50;
+    NodeDeps deps{nullptr, nullptr, nullptr, &sink, nullptr, nullptr};
+    Node node(cfg, deps);
+
+    injectPeer(node, 0xA1, 0, 0);
+    injectPeer(node, 0xA2, 0, 0);
+    injectPeer(node, 0xA3, 0, 0);
+    node.begin(0);
+    for (uint32_t t = 10; t <= 300; t += 10) {
+        node.poll(t);
+    }
+    // All three peers should appear in the sent sequence (round robin), not just
+    // the first one repeated.
+    bool saw[3] = {false, false, false};
+    for (auto& s : sink.sent) {
+        if (s.peer_uid == 0xA1) saw[0] = true;
+        if (s.peer_uid == 0xA2) saw[1] = true;
+        if (s.peer_uid == 0xA3) saw[2] = true;
+    }
+    TEST_ASSERT_TRUE(saw[0] && saw[1] && saw[2]);
+}
+
+void test_msp_radar_active_node_also_gets_output() {
+    // Not just GCS mode: a normal transmitting node with an attached FC also
+    // needs its peers pushed out over MSP radar, on the same independent timer.
+    FakeRadioSet radio;
+    FakeLocation location;
+    location.loc.valid = true;
+    NullCrypto crypto;
+    FakeMspRadarSink sink;
+    NodeDeps deps{&radio, &location, &crypto, &sink, rngHalf, nullptr};
+    NodeConfig cfg = baseConfig();
+    cfg.msp_radar_interval_ms = 50;
+    Node node(cfg, deps);
+
+    injectPeer(node, 0xB1, 0, 0);
+    node.begin(0);
+    for (uint32_t t = 10; t <= 300; t += 10) {
+        node.poll(t);
+    }
+    TEST_ASSERT_TRUE(sink.sent.size() >= 4);
+}
+
 void test_peer_expires() {
     FakeRadioSet radio;
     FakeLocation location;
     location.loc.valid = true;
     NullCrypto crypto;
-    NodeDeps deps{&radio, &location, &crypto, rngHalf, nullptr};
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
 
     NodeConfig cfg = baseConfig();
     cfg.peer_timeout_ms = 1000;
@@ -347,6 +450,10 @@ int main(int, char**) {
     RUN_TEST(test_crypto_rejection_drops_frame);
     RUN_TEST(test_announce_is_emitted_on_all_radios);
     RUN_TEST(test_disabled_radio_is_not_transmitted_on);
+    RUN_TEST(test_gcs_mode_still_emits_msp_radar_with_no_radios_and_no_tx);
+    RUN_TEST(test_msp_radar_no_sink_configured_is_safe);
+    RUN_TEST(test_msp_radar_round_robins_across_peers);
+    RUN_TEST(test_msp_radar_active_node_also_gets_output);
     RUN_TEST(test_peer_expires);
     return UNITY_END();
 }
