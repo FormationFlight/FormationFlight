@@ -83,6 +83,9 @@
 
 #define MSP2_SENSOR_GPS                 0x1F03 // INAV expects this, instead of MSP_SET_RAW_GPS
 
+#define MSP2_INAV_SET_GVAR              0x2214 // SET a Global Variable's value (INAV 9.0+)
+#define MSP2_INAV_MIXER                 0x2010 // GET mixer config incl. platformType (INAV 1.9+, MSP API 2.1+)
+
 // bits of getActiveModes() return value
 #define MSP_MODE_ARM          0
 #define MSP_MODE_ANGLE        1
@@ -679,6 +682,45 @@ struct msp_set_wp_t {
   uint8_t flag;     // 0xa5 = last, otherwise set to 0
 } __attribute__ ((packed));
 
+// MSP2_INAV_SET_GVAR command payload (INAV 9.0+). index is 0-7 (INAV
+// supports MAX_GLOBAL_VARIABLES == 8, verified against inav/src/main/
+// programming/global_variables.h); value is INAV's native int32
+// (verified against inav/src/main/fc/fc_msp.c's MSP2_INAV_SET_GVAR
+// handler, which requires exactly a 5-byte payload, not 2 bytes).
+struct msp_set_gvar_t {
+  uint8_t index;
+  int32_t value;
+} __attribute__((packed));
+
+// MSP2_INAV_MIXER reply. Verified against inav/src/main/fc/fc_msp.c's
+// MSP2_INAV_MIXER case: motorDirectionInverted, a reserved byte, then
+// motorstopOnLow, platformType, hasFlaps, appliedMixerPreset (u16),
+// MAX_SUPPORTED_MOTORS, MAX_SUPPORTED_SERVOS, in that order — 9 bytes total.
+struct msp_mixer_config_t {
+  uint8_t  motorDirectionInverted;
+  uint8_t  reserved;
+  uint8_t  motorstopOnLow;
+  uint8_t  platformType;
+  uint8_t  hasFlaps;
+  uint16_t appliedMixerPreset;
+  uint8_t  maxSupportedMotors;
+  uint8_t  maxSupportedServos;
+} __attribute__ ((packed));
+
+// mixerConfig()->platformType values (INAV's flyingPlatformType_e).
+enum InavPlatformType {
+    INAV_PLATFORM_MULTIROTOR = 0,
+    INAV_PLATFORM_AIRPLANE   = 1,
+    INAV_PLATFORM_HELICOPTER = 2,
+    INAV_PLATFORM_TRICOPTER  = 3,
+    INAV_PLATFORM_ROVER      = 4,
+    INAV_PLATFORM_BOAT       = 5,
+    // Not a wire value — sentinel for "no MSP2_INAV_MIXER reply received yet",
+    // so callers/logs can tell "unanswered" apart from a real
+    // INAV_PLATFORM_MULTIROTOR (0) reply. 0xFF since platformType is a uint8_t.
+    INAV_PLATFORM_UNKNOWN    = 0xFF,
+};
+
 struct msp_radar_pos_t {
   uint8_t id;
   uint8_t state;    // disarmed(0) armed (1)
@@ -721,6 +763,12 @@ class MSP {
         bool waitFor2(uint16_t messageID, void * payload, uint8_t maxSize, uint8_t * recvSize = NULL);
     
     bool request(uint8_t messageID, void * payload, uint8_t maxSize, uint8_t * recvSize = NULL);
+
+    // Like request(), but for MSP v2 messages: sends a no-payload v2 request
+    // and waits for the matching v2 reply. Needed because command2() (used by
+    // sendGvar()) discards its reply payload — command2()'s job is "send and
+    // ack," this one's job is "send and read the answer."
+    bool request2(uint16_t messageID, void * payload, uint8_t maxSize, uint8_t * recvSize = NULL);
 
     bool command(uint8_t messageID, void * payload, uint8_t size, bool waitACK = true);
 

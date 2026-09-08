@@ -1,6 +1,7 @@
 'use strict';
 import { h, render, useRef, useState, useEffect, html, Router } from './bundle.js';
 import LoadingSpinner, { Icons, Setting, Button, Stat, tipColors, Notification, PeerTable, RadioTable } from './components.js';
+import FollowPanel from './follow.js';
 
 const Logo = props => html`<img class=${props.class} src="/images/logo.svg"></img>`
 // Permit using the web ui locally for development
@@ -64,6 +65,7 @@ function Sidebar({ url, show, systemStatus }) {
 
     <div class="flex flex-1 flex-col">
       <${NavLink} title="Dashboard" icon=${Icons.home} href="/" url=${url} />
+      <${NavLink} title="Follow" icon=${Icons.scan} href="/follow" url=${url} />
       <!--<${NavLink} title="Settings" icon=${Icons.settings} href="/settings" url=${url} />-->
       <${NavLink} title="Update" icon=${Icons.upArrowBox} href="/update" url=${url} />
     <//>
@@ -279,6 +281,7 @@ const App = function () {
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">
     <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(window.innerWidth > 1200); }} history=${History.createHashHistory()} >
       <${Main} default=${true} />
+      <${FollowPanel} path="follow" />
       <!--<${Settings} path="settings" />-->
       <${Update} path="update" />
     <//>
