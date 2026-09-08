@@ -22,6 +22,8 @@
 // GNSS
 #include <lib/GNSS/GNSSManager.h>
 #include <lib/GNSS/MSP_GNSS.h>
+// Follow mode
+#include <lib/Follow/FollowManager.h>
 #ifdef GNSS_ENABLED
 #include <lib/GNSS/Direct_GNSS.h>
 #endif
@@ -205,6 +207,9 @@ void loop()
     // Periodic MSP tasks
     MSPManager::getSingleton()->loop();
     statsManager->storeTimerAndRestart(STATS_KEY_MSPMANAGER_LOOPTIME_US);
+    // Periodic follow-mode tasks (needs fresh peer, self-location, and MSP link)
+    FollowManager::getSingleton()->loop();
+    statsManager->storeTimerAndRestart(STATS_KEY_FOLLOWMANAGER_LOOPTIME_US);
 
 #ifdef IO_LED_PIN
     if (millis() - sys.last_tx_start > cfg.slot_spacing) {
