@@ -8,6 +8,7 @@ src/.DS_Store
 platformio.ini
 
 *.json
+!docs/spec/fixtures/*.json
 src/lib/WiFi/staticfilehandler.inc
 src/lib/WiFi/webcontent.h
 *.pyc
