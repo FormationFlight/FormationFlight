@@ -370,8 +370,9 @@ bool candidateOffsetOk(const FollowOffset& candidate, const FollowOffset& refere
                        double minSepM, double minVSepM);
 bool rcCandidateMatchesStaticDefault(const FollowOffset& candidate, const FollowConfig& config);
 
-// A peer is stale if absent/invalid or its last *position* is older than
-// timeout_ms (an announce alone does not make a peer followable).
+// A peer is stale if absent/invalid, beaconing without a GPS fix, or its last
+// *position* is older than timeout_ms (an announce alone does not make a peer
+// followable).
 bool followPeerStale(const Peer* peer, uint32_t now_ms, uint32_t timeout_ms);
 
 // ---- The controller ----------------------------------------------------------

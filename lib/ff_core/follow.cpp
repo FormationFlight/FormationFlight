@@ -222,6 +222,11 @@ bool followPeerStale(const Peer* peer, uint32_t now_ms, uint32_t timeout_ms) {
     if (peer == nullptr || !peer->valid) {
         return true;
     }
+    // A beacon sent without a fix carries no usable position (the leader is
+    // still on the bench, or lost GPS); never chase it.
+    if ((peer->flags & POSITION_FLAG_HAS_FIX) == 0) {
+        return true;
+    }
     return (now_ms - peer->last_position_ms) > timeout_ms;
 }
 

@@ -225,3 +225,27 @@ void test_telemetry_needs_follow_gate_and_rc_assignment() {
     TEST_ASSERT_TRUE(h.fc.needAltitude);
     TEST_ASSERT_TRUE(h.fc.needRc);
 }
+
+// A leader beaconing without a GPS fix has no usable position: it must not be
+// acquired, and a locked leader losing its fix must drop to HOLDING.
+void test_peer_without_fix_is_not_followable()
+{
+    FollowHarness h;
+    h.fc.gcsNav = true;
+    h.self.set(37.0, -122.0);
+    h.setPeerAt(1, 37.0, -122.0, 10.0, 0.0, 0, h.now, /*hasFix=*/false);
+
+    h.tick();
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_ACQUIRING, h.status().state);
+    TEST_ASSERT_EQUAL(0, (int)h.fc.sentWaypoints.size());
+
+    h.setPeer(1, 37.0, -122.0, 10.0, 0.0);  // fix acquired
+    h.tick();
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_LOCKED, h.status().state);
+    TEST_ASSERT_EQUAL(1, (int)h.fc.sentWaypoints.size());
+
+    h.setPeerAt(1, 37.0, -122.0, 10.0, 0.0, 0, h.now, /*hasFix=*/false);  // fix lost
+    h.tick();
+    TEST_ASSERT_EQUAL(FOLLOW_LOCK_LOCKED_HOLDING, h.status().state);
+    TEST_ASSERT_EQUAL(1, (int)h.fc.sentWaypoints.size());
+}

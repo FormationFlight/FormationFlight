@@ -50,6 +50,7 @@ extern void test_applyConfig_target_uid_change_forces_reacquire_mid_lock();
 extern void test_announce_only_peer_is_not_followable();
 extern void test_no_own_fix_suppresses_waypoint_but_keeps_lock();
 extern void test_telemetry_needs_follow_gate_and_rc_assignment();
+extern void test_peer_without_fix_is_not_followable();
 
 // test_altitude_floor.cpp
 extern void test_altitude_above_floor_is_not_clamped();
@@ -157,6 +158,7 @@ int main(int, char**) {
     RUN_TEST(test_announce_only_peer_is_not_followable);
     RUN_TEST(test_no_own_fix_suppresses_waypoint_but_keeps_lock);
     RUN_TEST(test_telemetry_needs_follow_gate_and_rc_assignment);
+    RUN_TEST(test_peer_without_fix_is_not_followable);
 
     RUN_TEST(test_altitude_above_floor_is_not_clamped);
     RUN_TEST(test_altitude_below_floor_is_clamped_but_still_emitted);

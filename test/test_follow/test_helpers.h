@@ -117,7 +117,7 @@ struct FollowHarness {
     }
 
     void setPeerAt(uint32_t uid, double lat, double lon, double speedMs, double courseDeg,
-                   int16_t alt_m, uint32_t at_ms) {
+                   int16_t alt_m, uint32_t at_ms, bool hasFix = true) {
         PositionPacket p{};
         p.uid = uid;
         p.lat = static_cast<int32_t>(std::lround(lat * 1e7));
@@ -125,7 +125,7 @@ struct FollowHarness {
         p.alt_m = alt_m;
         p.speed_cms = static_cast<uint16_t>(std::lround(speedMs * 100.0));
         p.course_ddeg = static_cast<uint16_t>(std::lround(courseDeg * 10.0));
-        p.flags = POSITION_FLAG_HAS_FIX;
+        p.flags = hasFix ? POSITION_FLAG_HAS_FIX : 0;
         peers.updatePosition(p, at_ms, -50, 0);
     }
 
