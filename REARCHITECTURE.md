@@ -161,8 +161,33 @@ Done and committed on `v2`:
   config (Phase 3) exists. The MSP UART is now always brought up regardless of
   which location source is active (previously unwired for GNSS_ENABLED targets).
 
-Test status: 94 host unit tests green. `ff_core` proven on xtensa-lx106 and
-xtensa-esp32 via real firmware links.
+- **Phase 1h** — Follow-on-iNav (PR #71, adhishvyas) merged and ported onto the
+  Node core. The v1 contribution steers an iNav FC into a formation slot
+  relative to another node (WP#255 + MSP_SET_HEAD, RC-scaled offsets with a
+  two-layer geometry safety net, altitude floor, GVAR status/condition
+  reporting, fixed-wing autothrottle). It now lives in `ff_core/follow.*` as a
+  pure, host-tested `FollowController` that reads the Node's UID-keyed
+  `PeerTable` and `ILocationSource` and talks to the FC through an `IFollowFc`
+  seam. Targets are 32-bit UIDs (0 = first active); the v1 "slot id reused by
+  another aircraft" hold-state hack is gone because a UID is a stable identity.
+  Geodesy was extracted from v1's GNSSManager into pure `ff_core/geo.*`.
+  The FC side is `hal/MspFcLink`, which replaces `MspLocationSource`: one
+  non-blocking MSP link (v1 *and* v2 framing in `MspParser`, protocol helpers
+  in `ff_core/msp_fc.*`) that polls the fix, modes and Follow's telemetry on
+  schedules, never waits, and sets the beacon's ARMED flag from the FC. Modes
+  come from MSP2_INAV_STATUS's full-width box bitmask on INAV (MSP_STATUS's
+  32-bit field can't see GCS NAV on builds with many boxes enabled), and
+  arming from INAV's armingFlags rather than the ARM box. `hal/FollowConfigStore`
+  persists the versioned `FollowRecord` in EEPROM (offset 0 -- Phase 3's
+  ConfigManager must place itself after it or absorb it). The PR's web panel,
+  mock server, docs and fixture came across unchanged apart from dropping the
+  v1 slot-id range rule from all three config validators; the web UI itself
+  still returns in Phase 3. The v1 `src/lib/Follow` copy stays as unbuilt
+  reference for that port (its REST handlers).
+
+Test status: 200+ host unit tests green (v2 core + the ported Follow suite +
+geodesy + MSP protocol). `ff_core` proven on xtensa-lx106 and xtensa-esp32 via
+real firmware links.
 
 Remaining / deferred:
 
@@ -175,7 +200,11 @@ Remaining / deferred:
 - **On-device validation** — builds are compile-verified only; no hardware bring-up
   has been done yet.
 - **Legacy code** — the v1 managers remain in `src/lib` (unbuilt) as reference for
-  porting; they get deleted once each family is ported.
+  porting; they get deleted once each family is ported. `src/lib/Follow` is
+  already ported (Phase 1h) but is kept until Phase 3 lifts its REST handlers.
+- **Follow config editing** — `FollowConfigStore` loads a saved config at boot,
+  but nothing can save one until the Phase 3 web/CLI path exists; until then
+  the compile-time `FOLLOW_*` defaults (overridable per target) are what runs.
 
 Next phases: **2** — protocol v2 crypto (AES-CCM AEAD replacing the passthrough)
 and finalizing the wire format; **3** — config persistence, web UI, display.

@@ -1,8 +1,7 @@
-// Single Unity entry point for the test_follow_native suite. PlatformIO
-// compiles every .cpp in this directory into one binary, so setUp()/
-// tearDown()/main() must be defined exactly once -- the other test_*.cpp
-// files here define only plain (non-static) test functions, declared
-// extern below and registered with RUN_TEST().
+// Single Unity entry point for the Follow suite. PlatformIO compiles every .cpp
+// in this directory into one binary, so setUp()/tearDown()/main() are defined
+// exactly once here; the other test_*.cpp files define plain (non-static) test
+// functions, declared extern below and registered with RUN_TEST().
 
 #include <unity.h>
 
@@ -10,7 +9,7 @@ void setUp() {}
 void tearDown() {}
 
 // test_harness_smoke.cpp
-extern void test_follow_manager_constructs_with_fakes();
+extern void test_follow_controller_constructs_with_fakes();
 
 // test_slot_geometry.cpp
 extern void test_ahead_at_course_zero_is_due_north();
@@ -39,21 +38,25 @@ extern void test_zero_on_candidate_side_never_counts_as_crossed();
 extern void test_zero_on_reference_side_never_counts_as_crossed();
 
 // test_peer_lock.cpp
-extern void test_fresh_manager_stays_acquiring_with_no_peers();
-extern void test_fresh_manager_locks_within_one_cycle_once_peer_exists();
-extern void test_target_peer_zero_locks_first_active_in_iteration_order();
-extern void test_target_peer_pinned_ignores_other_live_peers();
-extern void test_locked_peer_going_stale_enters_locked_holding_and_keeps_id();
-extern void test_locked_holding_peer_returning_with_same_name_relocks();
-extern void test_locked_holding_id_reused_by_different_aircraft_does_not_relock();
+extern void test_fresh_controller_stays_acquiring_with_no_peers();
+extern void test_fresh_controller_locks_within_one_cycle_once_peer_exists();
+extern void test_target_uid_zero_locks_first_active_in_table_order();
+extern void test_target_uid_pinned_ignores_other_live_peers();
+extern void test_locked_peer_going_stale_enters_locked_holding_and_keeps_uid();
+extern void test_locked_holding_peer_returning_relocks_same_uid();
+extern void test_locked_holding_never_fails_over_to_another_peer();
 extern void test_gate_inactive_mid_lock_forces_idle_and_clears_lock();
-extern void test_applyConfig_target_peer_change_forces_reacquire_mid_lock();
+extern void test_applyConfig_target_uid_change_forces_reacquire_mid_lock();
+extern void test_announce_only_peer_is_not_followable();
+extern void test_no_own_fix_suppresses_waypoint_but_keeps_lock();
+extern void test_telemetry_needs_follow_gate_and_rc_assignment();
 
 // test_altitude_floor.cpp
 extern void test_altitude_above_floor_is_not_clamped();
 extern void test_altitude_below_floor_is_clamped_but_still_emitted();
 extern void test_floor_clamp_not_attributable_to_rc_reports_floor_clamped_condition();
 extern void test_floor_clamp_attributable_to_rc_reports_rc_invalid_gap_condition();
+extern void test_relative_altitude_uses_peer_minus_self_msl();
 extern void test_target_within_max_dist_is_emitted_normally();
 extern void test_target_beyond_max_dist_suppresses_waypoint_but_keeps_lock();
 
@@ -71,7 +74,7 @@ extern void test_course_below_threshold_from_first_cycle_falls_back_to_reported_
 
 // test_rc_axis_and_prearm.cpp
 extern void test_axis_offset_no_channel_assigned_returns_configured_unchanged();
-extern void test_axis_offset_msp_read_failure_falls_back_to_configured();
+extern void test_axis_offset_fc_read_failure_falls_back_to_configured();
 extern void test_axis_offset_center_maps_to_zero();
 extern void test_axis_offset_full_deflection_maps_to_plus_and_minus_gap();
 extern void test_axis_offset_out_of_range_us_clamps_to_nearest_endpoint();
@@ -102,23 +105,22 @@ extern void test_gvar_unchanged_value_resent_after_heartbeat_elapses();
 extern void test_gvar_index_minus_one_never_sends();
 extern void test_condition_code_priority_highest_value_wins_not_first_computed();
 
-// test_config_and_eeprom.cpp
+// test_config_and_record.cpp
 extern void test_applyConfig_validation_rules_table();
 extern void test_rejected_applyConfig_leaves_live_config_untouched();
-extern void test_eeprom_round_trip_preserves_fields_with_documented_rounding();
-extern void test_eeprom_version_mismatch_falls_back_to_defaults();
-extern void test_eeprom_save_rate_limited_second_call_fails_first_persists();
-extern void test_configJson_emits_every_documented_field();
-extern void test_statusJson_conditional_fields_present_and_absent_as_documented();
+extern void test_record_round_trip_preserves_fields_with_documented_rounding();
+extern void test_record_version_mismatch_is_rejected_and_keeps_defaults();
+extern void test_record_save_rate_limited_second_call_fails_first_persists();
+extern void test_record_codec_carries_every_field();
+extern void test_status_conditional_fields_present_and_absent_as_documented();
 
 // test_cross_mirror_fixture.cpp
 extern void test_applyConfig_matches_every_fixture_case();
 
-int main(int argc, char **argv)
-{
+int main(int, char**) {
     UNITY_BEGIN();
 
-    RUN_TEST(test_follow_manager_constructs_with_fakes);
+    RUN_TEST(test_follow_controller_constructs_with_fakes);
 
     RUN_TEST(test_ahead_at_course_zero_is_due_north);
     RUN_TEST(test_behind_at_course_zero_is_due_south);
@@ -143,20 +145,24 @@ int main(int argc, char **argv)
     RUN_TEST(test_zero_on_candidate_side_never_counts_as_crossed);
     RUN_TEST(test_zero_on_reference_side_never_counts_as_crossed);
 
-    RUN_TEST(test_fresh_manager_stays_acquiring_with_no_peers);
-    RUN_TEST(test_fresh_manager_locks_within_one_cycle_once_peer_exists);
-    RUN_TEST(test_target_peer_zero_locks_first_active_in_iteration_order);
-    RUN_TEST(test_target_peer_pinned_ignores_other_live_peers);
-    RUN_TEST(test_locked_peer_going_stale_enters_locked_holding_and_keeps_id);
-    RUN_TEST(test_locked_holding_peer_returning_with_same_name_relocks);
-    RUN_TEST(test_locked_holding_id_reused_by_different_aircraft_does_not_relock);
+    RUN_TEST(test_fresh_controller_stays_acquiring_with_no_peers);
+    RUN_TEST(test_fresh_controller_locks_within_one_cycle_once_peer_exists);
+    RUN_TEST(test_target_uid_zero_locks_first_active_in_table_order);
+    RUN_TEST(test_target_uid_pinned_ignores_other_live_peers);
+    RUN_TEST(test_locked_peer_going_stale_enters_locked_holding_and_keeps_uid);
+    RUN_TEST(test_locked_holding_peer_returning_relocks_same_uid);
+    RUN_TEST(test_locked_holding_never_fails_over_to_another_peer);
     RUN_TEST(test_gate_inactive_mid_lock_forces_idle_and_clears_lock);
-    RUN_TEST(test_applyConfig_target_peer_change_forces_reacquire_mid_lock);
+    RUN_TEST(test_applyConfig_target_uid_change_forces_reacquire_mid_lock);
+    RUN_TEST(test_announce_only_peer_is_not_followable);
+    RUN_TEST(test_no_own_fix_suppresses_waypoint_but_keeps_lock);
+    RUN_TEST(test_telemetry_needs_follow_gate_and_rc_assignment);
 
     RUN_TEST(test_altitude_above_floor_is_not_clamped);
     RUN_TEST(test_altitude_below_floor_is_clamped_but_still_emitted);
     RUN_TEST(test_floor_clamp_not_attributable_to_rc_reports_floor_clamped_condition);
     RUN_TEST(test_floor_clamp_attributable_to_rc_reports_rc_invalid_gap_condition);
+    RUN_TEST(test_relative_altitude_uses_peer_minus_self_msl);
     RUN_TEST(test_target_within_max_dist_is_emitted_normally);
     RUN_TEST(test_target_beyond_max_dist_suppresses_waypoint_but_keeps_lock);
 
@@ -172,7 +178,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_course_below_threshold_from_first_cycle_falls_back_to_reported_value);
 
     RUN_TEST(test_axis_offset_no_channel_assigned_returns_configured_unchanged);
-    RUN_TEST(test_axis_offset_msp_read_failure_falls_back_to_configured);
+    RUN_TEST(test_axis_offset_fc_read_failure_falls_back_to_configured);
     RUN_TEST(test_axis_offset_center_maps_to_zero);
     RUN_TEST(test_axis_offset_full_deflection_maps_to_plus_and_minus_gap);
     RUN_TEST(test_axis_offset_out_of_range_us_clamps_to_nearest_endpoint);
@@ -203,11 +209,11 @@ int main(int argc, char **argv)
 
     RUN_TEST(test_applyConfig_validation_rules_table);
     RUN_TEST(test_rejected_applyConfig_leaves_live_config_untouched);
-    RUN_TEST(test_eeprom_round_trip_preserves_fields_with_documented_rounding);
-    RUN_TEST(test_eeprom_version_mismatch_falls_back_to_defaults);
-    RUN_TEST(test_eeprom_save_rate_limited_second_call_fails_first_persists);
-    RUN_TEST(test_configJson_emits_every_documented_field);
-    RUN_TEST(test_statusJson_conditional_fields_present_and_absent_as_documented);
+    RUN_TEST(test_record_round_trip_preserves_fields_with_documented_rounding);
+    RUN_TEST(test_record_version_mismatch_is_rejected_and_keeps_defaults);
+    RUN_TEST(test_record_save_rate_limited_second_call_fails_first_persists);
+    RUN_TEST(test_record_codec_carries_every_field);
+    RUN_TEST(test_status_conditional_fields_present_and_absent_as_documented);
 
     RUN_TEST(test_applyConfig_matches_every_fixture_case);
 

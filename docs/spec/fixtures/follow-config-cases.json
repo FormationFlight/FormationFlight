@@ -72,10 +72,10 @@
       "note": "Previously mock_server.py's validate_config() had no offsetGeometrySane() equivalent at all, so this passed Python validation while failing C++/JS. Fixed by adding the same minSepM/minVSepM geometry check to validate_config()."
     },
     {
-      "name": "target_peer_out_of_range_fails",
-      "overrides": { "targetPeer": 7 },
-      "expectValid": false,
-      "note": "Previously only FollowManager::applyConfig() checked targetPeer against NODES_MAX. Fixed by adding the same range check to validate_config() and validateConfig()."
+      "name": "target_peer_large_uid_is_valid",
+      "overrides": { "targetPeer": 305419896 },
+      "expectValid": true,
+      "note": "v2 firmware identifies peers by 32-bit UID, so targetPeer has no upper bound; the v1 NODES_MAX (6) range rule was removed from all three validators together."
     },
     {
       "name": "status_gvar_index_out_of_range_fails",

@@ -12,7 +12,9 @@
 //
 #include <Arduino.h>
 
-#include "hal/MspLocationSource.h"
+#include "follow.h"
+#include "hal/FollowConfigStore.h"
+#include "hal/MspFcLink.h"
 #include "hal/MspRadarOutput.h"
 #include "hal/PassthroughCrypto.h"
 #include "hal/RadioEspNow.h"
@@ -50,16 +52,23 @@ ff::PassthroughCrypto g_crypto;
 // in listen-only/GCS use) regardless of where OUR OWN position comes from.
 ff::MspRadarOutput g_msp_radar_output;
 
+// The non-blocking link to the flight controller on that same UART: the FC's
+// GPS fix and arm state for the beacon, and everything Follow reads/writes.
+ff::MspFcLink g_fc;
+
 // Our own position: a directly-attached GPS (auto-configured to a high rate) if
 // the target has one -- on its own separate UART -- otherwise the flight
-// controller's position read over the same MSP UART.
+// controller's position over the MSP link.
 #ifdef GNSS_ENABLED
 ff::DirectGpsLocationSource g_gps;
-#else
-ff::MspLocationSource g_location;
 #endif
 
 ff::Node* g_node = nullptr;
+
+// Follow: steer the attached FC into a slot relative to another node. Not
+// created on listen-only (GCS) builds, which have no FC to steer.
+ff::FollowController* g_follow = nullptr;
+ff::FollowConfigStore g_follow_store;
 
 // Uniform [0,1) for ALOHA jitter. Arduino's PRNG is seeded per-device below.
 float rng01(void*) { return static_cast<float>(random(0, 10000)) / 10000.0f; }
@@ -108,12 +117,13 @@ void setup() {
     Stream& mspStream = Serial;
 #endif
     g_msp_radar_output.begin(mspStream, cfg.peer_timeout_ms);
+    g_fc.begin(mspStream);
 
-    // Our own position: direct GPS on its own UART, or the FC over the MSP UART.
 #ifdef GNSS_ENABLED
     g_gps.begin(GNSS_UART_INDEX, GNSS_PIN_RX, GNSS_PIN_TX, GNSS_RATE_HZ);
+    ff::ILocationSource* location = &g_gps;
 #else
-    g_location.begin(mspStream);
+    ff::ILocationSource* location = &g_fc;
 #endif
 
 #ifdef IO_LED_PIN
@@ -122,11 +132,7 @@ void setup() {
 
     ff::NodeDeps deps;
     deps.radios = &g_hub;
-#ifdef GNSS_ENABLED
-    deps.location = &g_gps;
-#else
-    deps.location = &g_location;
-#endif
+    deps.location = location;
     deps.crypto = &g_crypto;
     deps.msp_radar_sink = &g_msp_radar_output;
     deps.rng = rng01;
@@ -134,20 +140,36 @@ void setup() {
 
     g_node = new ff::Node(cfg, deps);
     g_node->begin(millis());
+
+    if (!cfg.listen_only) {
+        g_follow = new ff::FollowController(&g_node->peers(), location, &g_fc);
+        // A previously saved config (once a web/CLI path exists to save one)
+        // wins over the compile-time defaults; an empty or stale store is
+        // silently ignored.
+        g_follow_store.begin();
+        g_follow_store.load(*g_follow);
+    }
 }
 
 void loop() {
+    const uint32_t now = millis();
+
     // Service every radio and feed received frames (from any of them) to the Node.
     g_hub.service(*g_node);
 
-    // Refresh our own position (direct GPS auto-config/parse, or MSP from the FC).
+    // Drain the FC link (fix, modes, Follow telemetry) and, if present, the
+    // direct GPS. Both are pure byte pumps; neither ever waits.
+    g_fc.service(now);
 #ifdef GNSS_ENABLED
     g_gps.service();
-#else
-    g_location.service();
 #endif
 
     // Drive the scheduler: beacons, announces, peer expiry, and MSP radar output
     // (the last of which runs on its own schedule regardless of listen_only/TX).
-    g_node->poll(millis());
+    g_node->poll(now);
+
+    // Follow runs its own control cycle at its configured rate.
+    if (g_follow != nullptr) {
+        g_follow->service(now);
+    }
 }

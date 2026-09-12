@@ -37,3 +37,35 @@ jobs:
 
       - name: Run native unit tests
         run: pio test -e native
+
+  # The Follow web UI's pure logic and the dev mock server validate configs
+  # against the same fixture the native suite does
+  # (docs/spec/fixtures/follow-config-cases.json), so all three run in CI
+  # to keep the three validators from drifting apart.
+  follow-logic-js:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run follow-logic.js tests
+        run: node --test test/follow-logic.test.js
+
+  mock-server-py:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run mock_server.py validate_config() tests
+        run: python3 test/test_mock_server.py

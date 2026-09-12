@@ -130,6 +130,95 @@ void test_oversize_frame_dropped_but_resyncs() {
     TEST_ASSERT_EQUAL_UINT8(60, p2.id());
 }
 
+// ---- MSP v2 framing -----------------------------------------------------------
+
+#include "msp_crc.h"
+
+static std::vector<uint8_t> frame2(uint16_t id, const std::vector<uint8_t>& payload,
+                                   uint8_t flag = 0) {
+    std::vector<uint8_t> f = {'$', 'X', '>'};
+    const uint16_t size = static_cast<uint16_t>(payload.size());
+    const uint8_t hdr[] = {flag, static_cast<uint8_t>(id & 0xFF), static_cast<uint8_t>(id >> 8),
+                           static_cast<uint8_t>(size & 0xFF), static_cast<uint8_t>(size >> 8)};
+    uint8_t crc = 0;
+    for (uint8_t b : hdr) {
+        f.push_back(b);
+        crc = mspCrc8DvbS2(crc, b);
+    }
+    for (uint8_t b : payload) {
+        f.push_back(b);
+        crc = mspCrc8DvbS2(crc, b);
+    }
+    f.push_back(crc);
+    return f;
+}
+
+void test_v2_parses_valid_frame() {
+    MspParser p;
+    std::vector<uint8_t> payload = {9, 8, 7};
+    auto f = frame2(0x2010, payload, 0);
+    MspParser last;
+    TEST_ASSERT_EQUAL_INT(1, feedAll(p, f, &last));
+    TEST_ASSERT_EQUAL_UINT8(2, last.version());
+    TEST_ASSERT_EQUAL_UINT16(0x2010, last.id());
+    TEST_ASSERT_EQUAL_UINT16(3, last.size());
+    TEST_ASSERT_EQUAL_UINT8(0, last.flag());
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(payload.data(), last.payload(), 3);
+}
+
+void test_v2_zero_length_frame() {
+    MspParser p;
+    auto f = frame2(0x2000, {});
+    MspParser last;
+    TEST_ASSERT_EQUAL_INT(1, feedAll(p, f, &last));
+    TEST_ASSERT_EQUAL_UINT16(0x2000, last.id());
+    TEST_ASSERT_EQUAL_UINT16(0, last.size());
+}
+
+void test_v2_bad_crc_rejected() {
+    MspParser p;
+    auto f = frame2(0x2010, {1, 2, 3});
+    f.back() ^= 0x01;
+    TEST_ASSERT_EQUAL_INT(0, feedAll(p, f));
+}
+
+void test_v1_and_v2_frames_interleave() {
+    MspParser p;
+    auto a = frame(106, {1, 2});
+    auto b = frame2(0x2010, {3, 4, 5});
+    auto c = frame(101, {6});
+    std::vector<uint8_t> all;
+    all.insert(all.end(), a.begin(), a.end());
+    all.insert(all.end(), b.begin(), b.end());
+    all.insert(all.end(), c.begin(), c.end());
+    int frames = 0;
+    std::vector<uint16_t> ids;
+    std::vector<uint8_t> versions;
+    for (uint8_t byte : all) {
+        if (p.feed(byte)) {
+            frames++;
+            ids.push_back(p.id());
+            versions.push_back(p.version());
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(3, frames);
+    TEST_ASSERT_EQUAL_UINT16(106, ids[0]);
+    TEST_ASSERT_EQUAL_UINT16(0x2010, ids[1]);
+    TEST_ASSERT_EQUAL_UINT16(101, ids[2]);
+    TEST_ASSERT_EQUAL_UINT8(1, versions[0]);
+    TEST_ASSERT_EQUAL_UINT8(2, versions[1]);
+    TEST_ASSERT_EQUAL_UINT8(1, versions[2]);
+}
+
+void test_v2_oversize_frame_dropped_but_resyncs() {
+    MspParser p;
+    std::vector<uint8_t> big(kMspMaxPayload + 1, 0x5A);
+    auto f = frame2(0x2010, big);
+    TEST_ASSERT_EQUAL_INT(0, feedAll(p, f));
+    auto ok = frame2(0x2000, {1});
+    TEST_ASSERT_EQUAL_INT(1, feedAll(p, ok));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_parses_valid_frame);
@@ -139,5 +228,10 @@ int main(int, char**) {
     RUN_TEST(test_resync_after_bad_frame);
     RUN_TEST(test_two_frames_back_to_back);
     RUN_TEST(test_oversize_frame_dropped_but_resyncs);
+    RUN_TEST(test_v2_parses_valid_frame);
+    RUN_TEST(test_v2_zero_length_frame);
+    RUN_TEST(test_v2_bad_crc_rejected);
+    RUN_TEST(test_v1_and_v2_frames_interleave);
+    RUN_TEST(test_v2_oversize_frame_dropped_but_resyncs);
     return UNITY_END();
 }

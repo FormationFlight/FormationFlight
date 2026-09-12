@@ -11,9 +11,9 @@
 // client-side isn't a substitute for server-side.
 export const STACKED_HORIZONTAL_EPSILON_M = 0.5;
 
-// Mirrors PeerManager.h's NODES_MAX (src/lib/Peers/PeerManager.h) — 0 =
-// FIRST_ACTIVE, 1-NODES_MAX pin to a specific peer id.
-const NODES_MAX = 6;
+// targetPeer is 0 = FIRST_ACTIVE or a peer identity. On v2 firmware that is a
+// 32-bit node UID, so there is no range rule (the C++ applyConfig() has none);
+// the v1 UI's 1-6 slot-id select is just a narrower way of producing one.
 // Mirrors MSP.h's MSP_MAX_SUPPORTED_CHANNELS (src/lib/MSP/MSP.h).
 const MSP_MAX_SUPPORTED_CHANNELS = 16;
 
@@ -46,9 +46,7 @@ export function validateConfig(cfg) {
   }
   if (!(cfg.maxTargetDistM > 0)) return { section: 'bounds', message: 'Max target distance must be > 0' };
   if (cfg.minCourseSpeed < 0) return { section: 'bounds', message: 'Min course speed must be >= 0' };
-  if (cfg.targetPeer < 0 || cfg.targetPeer > NODES_MAX) {
-    return { section: 'trigger', message: 'Target Peer out of range' };
-  }
+  if (cfg.targetPeer < 0) return { section: 'trigger', message: 'Target Peer must be >= 0' };
 
   const long = +cfg.ofsLongM, lat = +cfg.ofsLatM, vert = +cfg.ofsVertM;
   const horizontalMag = Math.sqrt(long * long + lat * lat);

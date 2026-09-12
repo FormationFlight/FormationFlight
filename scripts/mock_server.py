@@ -266,10 +266,6 @@ def followmanager_status(query=None):
     return doc
 
 
-# PeerManager.h's NODES_MAX (src/lib/Peers/PeerManager.h) — 0 = FIRST_ACTIVE,
-# 1-NODES_MAX pin to a specific peer id.
-NODES_MAX = 6
-
 # FollowManager.cpp's offsetGeometrySane(), used by both loop()
 # (runtime) and applyConfig() (config-validation time) on the firmware side —
 # mirrored here so a geometrically-insane static offset is rejected the same
@@ -291,8 +287,10 @@ def validate_config(cfg):
         return "maxTargetDistM must be > 0"
     if cfg.get("minCourseSpeed", 0) < 0:
         return "minCourseSpeed must be >= 0"
-    if cfg.get("targetPeer", 0) > NODES_MAX:
-        return "targetPeer out of range"
+    # targetPeer: 0 = FIRST_ACTIVE or a peer identity (a 32-bit node UID on v2
+    # firmware) -- no upper bound, mirroring FollowController::applyConfig().
+    if cfg.get("targetPeer", 0) < 0:
+        return "targetPeer must be >= 0"
     sgi = cfg.get("statusGvarIndex", -1)
     if sgi < -1 or sgi > 7:
         return "statusGvarIndex must be -1 (disabled) or 0-7"

@@ -1,5 +1,6 @@
 #include "msp_radar.h"
 
+#include "msp_crc.h"
 #include "protocol.h"
 #include "wire.h"
 
@@ -8,15 +9,6 @@ namespace ff {
 namespace {
 
 constexpr uint16_t kPayloadLen = 19;  // id+state+lat+lon+alt+heading+speed+lq
-
-uint8_t crc8DvbS2(uint8_t crc, uint8_t a) {
-    crc ^= a;
-    for (int i = 0; i < 8; i++) {
-        crc = (crc & 0x80) ? static_cast<uint8_t>((crc << 1) ^ 0xD5)
-                           : static_cast<uint8_t>(crc << 1);
-    }
-    return crc;
-}
 
 }  // namespace
 
@@ -63,14 +55,14 @@ size_t buildMspSetRadarPos(uint8_t slot_id, const Peer& peer, uint32_t now_ms,
     wire::put_u16(out, kPayloadLen);
 
     uint8_t crc = 0;
-    crc = crc8DvbS2(crc, 0);  // flag
-    crc = crc8DvbS2(crc, static_cast<uint8_t>(kMspSetRadarPos & 0xFF));
-    crc = crc8DvbS2(crc, static_cast<uint8_t>(kMspSetRadarPos >> 8));
-    crc = crc8DvbS2(crc, static_cast<uint8_t>(kPayloadLen & 0xFF));
-    crc = crc8DvbS2(crc, static_cast<uint8_t>(kPayloadLen >> 8));
+    crc = mspCrc8DvbS2(crc, 0);  // flag
+    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kMspSetRadarPos & 0xFF));
+    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kMspSetRadarPos >> 8));
+    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kPayloadLen & 0xFF));
+    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kPayloadLen >> 8));
     for (uint16_t i = 0; i < kPayloadLen; i++) {
         wire::put_u8(out, payload[i]);
-        crc = crc8DvbS2(crc, payload[i]);
+        crc = mspCrc8DvbS2(crc, payload[i]);
     }
     wire::put_u8(out, crc);
 

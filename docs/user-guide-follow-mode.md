@@ -18,6 +18,17 @@ position, which it's already doing if you can see it on the radar HUD.
 **Craft type:** the follower must be a multirotor or a fixed-wing. Some differences
 in functionality exist for fixed-wing vs multirotor followers.
 
+> **v2 firmware note.** On the v2 (ALOHA) firmware Follow runs as
+> `ff::FollowController` on the Node core, with the same behaviour described
+> here, but the web UI, the `/followmanager/*` REST endpoints and "Save to
+> EEPROM" have not been brought over yet (they return with the v2 web UI). Until
+> then the follower runs the compile-time defaults, overridable per target with
+> `-D FOLLOW_*` build flags (see `lib/ff_core/follow.h`). Two other differences:
+> peers are identified by a 32-bit node UID rather than a 1-6 slot id, so
+> "Target Peer" is a UID (`0` still means First Active); and the status GVAR
+> value `4` ("ID LOST") no longer occurs, because a UID cannot be reused by a
+> different aircraft.
+
 ---
 
 ## Table of contents
