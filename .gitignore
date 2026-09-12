@@ -8,8 +8,9 @@ src/.DS_Store
 platformio.ini
 
 *.json
-# ...but our library manifests are real source, not build artifacts.
+# ...but our library manifests and test fixtures are real source, not build artifacts.
 !lib/**/library.json
+!docs/spec/fixtures/*.json
 src/lib/WiFi/staticfilehandler.inc
 src/lib/WiFi/webcontent.h
 *.pyc

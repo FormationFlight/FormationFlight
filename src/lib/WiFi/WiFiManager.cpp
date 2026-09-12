@@ -17,6 +17,7 @@
 #include "../Power/PowerManager.h"
 #include "../Statistics/StatsManager.h"
 #include "../Cryptography/CryptoManager.h"
+#include "../Follow/FollowManager.h"
 #include "webcontent.h"
 
 WiFiManager::WiFiManager()
@@ -89,7 +90,36 @@ WiFiManager::WiFiManager()
         request->send(response);
     });
     server->on("/peermanager/spoof", HTTP_POST, [](AsyncWebServerRequest *request) {
-        PeerManager::getSingleton()->enableSpoofing(true);
+        // With sideLength, send a spoofed peer around a closed hexagon patrol path (repeatable
+        // bench testing of FollowManager against a moving target), centered on lat/lon if given,
+        // or on our own current GNSS fix at POST time if not - so it can be triggered without
+        // knowing coordinates up front. With just lat & lon (no sideLength), position a single
+        // spoofed peer explicitly instead. Without any of that, fall back to the original fixed
+        // 100m-ring of 5 peers.
+        if (request->hasParam("sideLength", true)) {
+            uint8_t index = request->hasParam("index", true) ? request->getParam("index", true)->value().toInt() : 0;
+            double sideLength = request->getParam("sideLength", true)->value().toDouble();
+            double speed = request->hasParam("speed", true) ? request->getParam("speed", true)->value().toDouble() : 0;
+            double lat, lon;
+            if (request->hasParam("lat", true) && request->hasParam("lon", true)) {
+                lat = request->getParam("lat", true)->value().toDouble();
+                lon = request->getParam("lon", true)->value().toDouble();
+            } else {
+                GNSSLocation loc = GNSSManager::getSingleton()->getLocation();
+                lat = loc.lat;
+                lon = loc.lon;
+            }
+            PeerManager::getSingleton()->spoofPeerHexPath(index, lat, lon, sideLength, speed);
+        } else if (request->hasParam("lat", true) && request->hasParam("lon", true)) {
+            uint8_t index = request->hasParam("index", true) ? request->getParam("index", true)->value().toInt() : 0;
+            double lat = request->getParam("lat", true)->value().toDouble();
+            double lon = request->getParam("lon", true)->value().toDouble();
+            double speed = request->hasParam("speed", true) ? request->getParam("speed", true)->value().toDouble() : 0;
+            double course = request->hasParam("course", true) ? request->getParam("course", true)->value().toDouble() : 0;
+            PeerManager::getSingleton()->spoofPeer(index, lat, lon, course, speed);
+        } else {
+            PeerManager::getSingleton()->enableSpoofing(true);
+        }
         request->send(200, "text/plain", "OK");
     });
     // MSPManager
@@ -148,6 +178,39 @@ WiFiManager::WiFiManager()
         AsyncResponseStream *response = request->beginResponseStream("application/json");
         serializeJson(doc, *response);
         request->send(response);
+    });
+    // FollowManager
+    server->on("/followmanager/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<896> doc;
+        FollowManager::getSingleton()->statusJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
+    server->on("/followmanager/config", HTTP_GET, [](AsyncWebServerRequest *request) {
+        StaticJsonDocument<1280> doc;
+        FollowManager::getSingleton()->configJson(&doc);
+        AsyncResponseStream *response = request->beginResponseStream("application/json");
+        serializeJson(doc, *response);
+        request->send(response);
+    });
+    // Live config update: applies to the in-memory config only, not EEPROM
+    // (see the /followmanager/commit handler below for that). Accepts a
+    // subset of form params, applies them on top of the current config,
+    // validates the result (offset geometry + basic field sanity) and
+    // rejects the whole update if it fails, rather than partially applying it.
+    server->on("/followmanager/config", HTTP_POST, handleFollowManagerConfigPost);
+    // Explicit "flush the current in-memory config to EEPROM" action,
+    // distinct from the live-edit POST above. Rate-limited inside
+    // FollowManager::saveToEEPROM() so rapid/duplicate clicks don't hammer
+    // EEPROM with writes.
+    server->on("/followmanager/commit", HTTP_POST, [](AsyncWebServerRequest *request) {
+        String errMsg;
+        if (!FollowManager::getSingleton()->saveToEEPROM(&errMsg)) {
+            request->send(429, "text/plain", errMsg);
+            return;
+        }
+        request->send(200, "text/plain", "OK");
     });
     // OTA firmware updates
     server->on("/update", HTTP_POST, handleFileUploadResponse, handleFileUploadData);
@@ -244,6 +307,83 @@ void handleSystemStatus(AsyncWebServerRequest *request)
     doc["longName"] = generate_id();
     doc["host"] = host_name[MSPManager::getSingleton()->getFCVariant()];
     doc["state"] = MSPManager::getSingleton()->getState();
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
+// Parses a subset of FollowRuntimeConfig's fields from POST form params,
+// applies them on top of the current in-memory FollowManager config, and asks
+// FollowManager to validate+swap the result atomically. Any single
+// unrecognized enum value fails the whole request with 400 before anything
+// is applied, so a typo'd param can't silently leave other fields updated.
+void handleFollowManagerConfigPost(AsyncWebServerRequest *request)
+{
+    FollowRuntimeConfig cfg = FollowManager::getSingleton()->getConfig();
+
+    auto strParam = [&](const char *name) {
+        return request->getParam(name, true)->value();
+    };
+
+    // Canonical track-relative offset — the AHEAD/BEHIND/etc.
+    // "friendly grid" is a client-side view over these signed meters
+    // (html/follow.js); the server only ever sees this one representation.
+    if (request->hasParam("ofsLongM", true)) cfg.ofsLongM = strParam("ofsLongM").toDouble();
+    if (request->hasParam("ofsLatM", true)) cfg.ofsLatM = strParam("ofsLatM").toDouble();
+    if (request->hasParam("ofsVertM", true)) cfg.ofsVertM = strParam("ofsVertM").toDouble();
+
+    if (request->hasParam("targetPeer", true)) cfg.targetPeer = (uint8_t)strParam("targetPeer").toInt();
+    if (request->hasParam("emitHz", true)) cfg.emitHz = (uint16_t)strParam("emitHz").toInt();
+    if (request->hasParam("peerTimeoutMs", true)) cfg.peerTimeoutMs = (uint32_t)strParam("peerTimeoutMs").toInt();
+
+    if (request->hasParam("minSepM", true)) cfg.minSepM = strParam("minSepM").toDouble();
+    if (request->hasParam("minVSepM", true)) cfg.minVSepM = strParam("minVSepM").toDouble();
+    if (request->hasParam("maxTargetDistM", true)) cfg.maxTargetDistM = strParam("maxTargetDistM").toDouble();
+    if (request->hasParam("minAltM", true)) cfg.minAltM = strParam("minAltM").toDouble();
+    if (request->hasParam("minCourseSpeed", true)) cfg.minCourseSpeed = strParam("minCourseSpeed").toDouble();
+
+    // Nose heading — headingDeg is shared between FIXED
+    // (absolute) and COURSE_RELATIVE (offset from course); which
+    // interpretation applies depends solely on headingMode.
+    if (request->hasParam("headingMode", true)) {
+        String v = strParam("headingMode");
+        if (v == "OFF") cfg.headingMode = FOLLOW_HEADING_OFF;
+        else if (v == "COURSE") cfg.headingMode = FOLLOW_HEADING_COURSE;
+        else if (v == "POINT_LEADER") cfg.headingMode = FOLLOW_HEADING_POINT_LEADER;
+        else if (v == "FIXED") cfg.headingMode = FOLLOW_HEADING_FIXED;
+        else if (v == "COURSE_RELATIVE") cfg.headingMode = FOLLOW_HEADING_COURSE_RELATIVE;
+        else { request->send(400, "text/plain", "invalid headingMode (want OFF/COURSE/POINT_LEADER/FIXED/COURSE_RELATIVE)"); return; }
+    }
+    if (request->hasParam("headingDeg", true)) cfg.headingDeg = strParam("headingDeg").toDouble();
+
+    if (request->hasParam("statusGvarIndex", true)) cfg.statusGvarIndex = (int16_t)strParam("statusGvarIndex").toInt();
+    if (request->hasParam("conditionFlagsGvarIndex", true)) cfg.conditionFlagsGvarIndex = (int16_t)strParam("conditionFlagsGvarIndex").toInt();
+
+    if (request->hasParam("rcLongChannel", true)) cfg.rcLongChannel = (int16_t)strParam("rcLongChannel").toInt();
+    if (request->hasParam("rcLatChannel", true)) cfg.rcLatChannel = (int16_t)strParam("rcLatChannel").toInt();
+    if (request->hasParam("rcVertChannel", true)) cfg.rcVertChannel = (int16_t)strParam("rcVertChannel").toInt();
+
+    // Speed autothrottle.
+    if (request->hasParam("targetSpeedGvarIndex", true)) cfg.targetSpeedGvarIndex = (int16_t)strParam("targetSpeedGvarIndex").toInt();
+    if (request->hasParam("autothrottleEngageGvarIndex", true)) cfg.autothrottleEngageGvarIndex = (int16_t)strParam("autothrottleEngageGvarIndex").toInt();
+    if (request->hasParam("autothrottleEnableRcChannel", true)) cfg.autothrottleEnableRcChannel = (int16_t)strParam("autothrottleEnableRcChannel").toInt();
+    if (request->hasParam("autothrottleEnableMinThresholdUs", true)) cfg.autothrottleEnableMinThresholdUs = (int16_t)strParam("autothrottleEnableMinThresholdUs").toInt();
+    if (request->hasParam("autothrottleEnableMaxThresholdUs", true)) cfg.autothrottleEnableMaxThresholdUs = (int16_t)strParam("autothrottleEnableMaxThresholdUs").toInt();
+    if (request->hasParam("speedCorrectionAccelCmS2", true)) cfg.speedCorrectionAccelCmS2 = (int16_t)strParam("speedCorrectionAccelCmS2").toInt();
+    if (request->hasParam("minTargetSpeedMps", true)) cfg.minTargetSpeedMps = strParam("minTargetSpeedMps").toDouble();
+    if (request->hasParam("maxTargetSpeedMps", true)) cfg.maxTargetSpeedMps = strParam("maxTargetSpeedMps").toDouble();
+
+    // RAM only (never persisted — see FollowRuntimeConfig::debug).
+    if (request->hasParam("debug", true)) cfg.debug = strParam("debug") == "true";
+
+    String errMsg;
+    if (!FollowManager::getSingleton()->applyConfig(cfg, &errMsg)) {
+        request->send(400, "text/plain", errMsg);
+        return;
+    }
+
+    StaticJsonDocument<896> doc;
+    FollowManager::getSingleton()->configJson(&doc);
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     serializeJson(doc, *response);
     request->send(response);

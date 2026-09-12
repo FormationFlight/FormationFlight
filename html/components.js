@@ -144,10 +144,30 @@ export function TextValue({ value, setfn, disabled, placeholder, type, addonRigh
   return html`
 <div class="flex w-full items-center rounded border shadow-sm">
   ${addonLeft && html`<span class="inline-flex font-normal truncate py-1 border-r bg-slate-100 items-center border-gray-300 px-2 text-gray-500 text-xs">${addonLeft}</>`}
-  <input type=${type || 'text'} disabled=${disabled} 
+  <input type=${type || 'text'} disabled=${disabled}
     oninput=${ev => f(ev.target.value)} ...${attr}
     class="font-normal text-sm rounded w-full flex-1 py-0.5 px-2 text-gray-700 placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500" placeholder=${placeholder} value=${value} />
   ${addonRight && html`<span class="inline-flex font-normal truncate py-1 border-l bg-slate-100 items-center border-gray-300 px-2 text-gray-500 text-xs">${addonRight}</>`}
+<//>`;
+}
+
+// A stepper built from plain buttons + a display div, not a native
+// <input type=number> — avoids fighting the native control's own rendering
+// (needed so a sentinel value like -1 can read as "Disabled" instead of a
+// number) and, like SelectValue's replacement in the RC-channel fields,
+// keeps clear of native <select>/<input> quirks on mobile Firefox.
+export function SpinnerValue({ value, setfn, min, max, step, disabled, labelFn }) {
+  const s = step || 1;
+  const clamp = v => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, v));
+  const dec = () => setfn(clamp(value - s));
+  const inc = () => setfn(clamp(value + s));
+  const label = labelFn ? labelFn(value) : undefined;
+  const btnCls = "px-2.5 py-0.5 text-gray-500 disabled:cursor-not-allowed disabled:opacity-40 hover:enabled:bg-slate-200 hover:enabled:text-gray-700";
+  return html`
+<div class="flex w-full items-stretch rounded border shadow-sm overflow-hidden bg-slate-100 disabled:bg-gray-100">
+  <button type="button" onclick=${dec} disabled=${disabled || value <= min} class="${btnCls} border-r">−<//>
+  <div class="flex-1 flex items-center justify-center text-sm bg-white select-none ${disabled ? 'text-gray-400' : 'text-gray-700'}">${label !== undefined ? label : value}<//>
+  <button type="button" onclick=${inc} disabled=${disabled || value >= max} class="${btnCls} border-l">+<//>
 <//>`;
 }
 
@@ -178,15 +198,28 @@ export function FileValue({ onchange }) {
   `;
 }
 
+export function Tooltip({ text }) {
+  if (!text) return '';
+  return html`
+<span class="tooltip-wrap" tabindex="0">
+  <${Icons.info} class="w-4 h-4 tooltip-icon" />
+  <span class="tooltip-bubble" role="tooltip">${text}<//>
+<//>`;
+}
+
 export function Setting(props) {
   return html`
 <div class=${props.cls || 'grid grid-cols-2 gap-2 my-1'}>
-  <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">${props.title}<//>
-  <div class="flex items-center">
-    ${props.type == 'switch' ? h(SwitchValue, props) :
-      props.type == 'select' ? h(SelectValue, props) :
-        props.type == 'file' ? h(FileValue, props) :
-          h(TextValue, props)}
+  <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">${props.title}<${Tooltip} text=${props.tip} /><//>
+  <div class="flex flex-col">
+    <div class="flex items-center">
+      ${props.type == 'switch' ? h(SwitchValue, props) :
+        props.type == 'select' ? h(SelectValue, props) :
+          props.type == 'spinner' ? h(SpinnerValue, props) :
+            props.type == 'file' ? h(FileValue, props) :
+              h(TextValue, props)}
+    <//>
+    ${props.imperial && html`<span class="text-xs text-gray-400 mt-0.5">${props.imperial}<//>`}
   <//>
 <//>`;
 }
