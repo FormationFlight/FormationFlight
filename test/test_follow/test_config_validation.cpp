@@ -1,7 +1,8 @@
-// applyConfig() validation + FollowRecord persistence round-trip (via the
-// rate-limited requestSave()/loadRecord() pair and the pure
-// followToRecord()/followFromRecord() codec), plus FollowStatus's
-// conditional-field contract.
+// applyConfig() validation, and the shape of the status snapshot.
+//
+// Persistence moved out of Follow entirely: the whole node configuration, this
+// block included, is one JSON document owned by ff_core/config.h and tested in
+// test_config. What is left here is the rule set applyConfig() enforces.
 
 #include <unity.h>
 
@@ -117,144 +118,6 @@ void test_rejected_applyConfig_leaves_live_config_untouched() {
     const FollowConfig after = configOf(h);
     TEST_ASSERT_EQUAL_DOUBLE(before.ofsLongM, after.ofsLongM);
     TEST_ASSERT_EQUAL(before.emitHz, after.emitHz);
-}
-
-// ---- Record round-trip (via the public requestSave()/loadRecord(), which
-// internally exercise followToRecord()/followFromRecord()) ----
-
-void test_record_round_trip_preserves_fields_with_documented_rounding() {
-    FollowHarness h;
-
-    FollowConfig cfg = configOf(h);
-    cfg.ofsLongM = 15.6;           // lround -> 16
-    cfg.ofsLatM = -15.6;           // lround -> -16 (away from zero)
-    cfg.minSepM = 3.4;             // lround -> 3
-    cfg.minVSepM = 0;
-    cfg.headingDeg = 99.5;         // lround -> 100
-    cfg.minTargetSpeedMps = 5.5;   // lround -> 6
-    cfg.maxTargetSpeedMps = 30.5;  // lround -> 31 (still > minTargetSpeedMps after rounding, irrelevant to the raw double stored pre-round anyway)
-    cfg.targetUid = 0xA1B2C3D4u;   // a full 32-bit UID, so a narrowing bug can't hide behind the 0 default
-    cfg.emitHz = 5;
-    const char* err = nullptr;
-    TEST_ASSERT_TRUE(h.apply(cfg, &err));
-
-    FollowRecord rec{};
-    const char* saveErr = nullptr;
-    TEST_ASSERT_TRUE(h.ctl.requestSave(h.now, rec, &saveErr));
-    TEST_ASSERT_EQUAL_UINT16(kFollowRecordVersion, rec.version);
-
-    FollowHarness h2;  // fresh instance, compile-time defaults
-    TEST_ASSERT_TRUE(h2.ctl.loadRecord(rec));
-    const FollowConfig loaded = configOf(h2);
-
-    TEST_ASSERT_EQUAL_DOUBLE(16.0, loaded.ofsLongM);
-    TEST_ASSERT_EQUAL_DOUBLE(-16.0, loaded.ofsLatM);
-    TEST_ASSERT_EQUAL_DOUBLE(3.0, loaded.minSepM);
-    TEST_ASSERT_EQUAL_DOUBLE(100.0, loaded.headingDeg);
-    TEST_ASSERT_EQUAL_DOUBLE(6.0, loaded.minTargetSpeedMps);
-    TEST_ASSERT_EQUAL_DOUBLE(31.0, loaded.maxTargetSpeedMps);
-    // Non-fractional integer fields carry through unchanged.
-    TEST_ASSERT_EQUAL_UINT32(cfg.targetUid, loaded.targetUid);
-    TEST_ASSERT_EQUAL_UINT16(cfg.emitHz, loaded.emitHz);
-}
-
-void test_record_version_mismatch_is_rejected_and_keeps_defaults() {
-    FollowHarness h;
-
-    // Corrupt/uninitialized store: a record whose version doesn't match what
-    // loadRecord() expects.
-    FollowRecord bad{};
-    bad.version = 0;  // never a real kFollowRecordVersion value
-    bad.ofsLongM = 42;  // would be obvious if a stale record were applied anyway
-
-    TEST_ASSERT_FALSE(h.ctl.loadRecord(bad));
-
-    // Compile-time default untouched, not a crash or a partially-applied
-    // garbage record.
-    TEST_ASSERT_EQUAL_DOUBLE(-15.0, configOf(h).ofsLongM);
-}
-
-void test_record_save_rate_limited_second_call_fails_first_persists() {
-    FollowHarness h;
-
-    FollowConfig cfg1 = configOf(h);
-    cfg1.ofsLongM = -8.0;  // still geometry-sane against default minSepM(8)
-    const char* err = nullptr;
-    TEST_ASSERT_TRUE(h.apply(cfg1, &err));
-    FollowRecord rec1{};
-    const char* saveErr1 = nullptr;
-    TEST_ASSERT_TRUE(h.ctl.requestSave(h.now, rec1, &saveErr1));  // first save: no prior commit, always allowed
-
-    FollowConfig cfg2 = configOf(h);
-    cfg2.ofsLongM = -9.0;
-    TEST_ASSERT_TRUE(h.apply(cfg2, &err));
-    FollowRecord rec2{};
-    const char* saveErr2 = nullptr;
-    TEST_ASSERT_FALSE(h.ctl.requestSave(h.now, rec2, &saveErr2));  // same instant -> within kFollowSaveMinIntervalMs
-    TEST_ASSERT_NOT_NULL(saveErr2);
-
-    FollowHarness h2;
-    TEST_ASSERT_TRUE(h2.ctl.loadRecord(rec1));
-    TEST_ASSERT_EQUAL_DOUBLE(-8.0, configOf(h2).ofsLongM);  // first save's data, not the second (rejected) one
-
-    // Once the minimum interval has elapsed since the last *successful* save,
-    // a save goes through again and carries the current (second) config.
-    h.now += kFollowSaveMinIntervalMs;
-    FollowRecord rec3{};
-    const char* saveErr3 = nullptr;
-    TEST_ASSERT_TRUE(h.ctl.requestSave(h.now, rec3, &saveErr3));
-    TEST_ASSERT_EQUAL_INT16(-9, rec3.ofsLongM);
-}
-
-// ---- Pure codec: every persisted field survives followToRecord() ->
-// followFromRecord(). Driven by the FOLLOW_CONFIG_*_FIELDS X-macros so a field
-// added to the codec later is covered here automatically (and one added to
-// FollowConfig but *not* the codec shows up as a missing X-macro entry). ----
-
-void test_record_codec_carries_every_field() {
-    const FollowConfig defaults;
-    FollowConfig cfg;
-
-    // Distinct, non-default integer values everywhere. The codec is pure, so
-    // applyConfig()'s validity rules don't matter here; only the values do.
-    // DIRECT fields count up from 1, ROUNDED (double) fields from 101, so no
-    // two fields share a value and a swapped pair can't cancel out.
-    int v = 1;
-#define SET_DIRECT(field) cfg.field = static_cast<decltype(cfg.field)>(v++);
-    FOLLOW_CONFIG_DIRECT_FIELDS(SET_DIRECT)
-#undef SET_DIRECT
-    v = 101;
-#define SET_ROUNDED(field) cfg.field = static_cast<double>(v++);
-    FOLLOW_CONFIG_ROUNDED_FIELDS(SET_ROUNDED)
-#undef SET_ROUNDED
-    // A full-width UID on top, so an int16 narrowing bug in the record can't
-    // hide behind a small sequential value.
-    cfg.targetUid = 0x12345678u;
-    cfg.headingMode = FOLLOW_HEADING_FIXED;
-
-    // Guard the premise: every value really differs from the compile-time
-    // default (otherwise a field the codec silently drops would still "match").
-#define CHECK_NON_DEFAULT(field) \
-    TEST_ASSERT_TRUE_MESSAGE(cfg.field != defaults.field, #field " test value collides with its default");
-    FOLLOW_CONFIG_DIRECT_FIELDS(CHECK_NON_DEFAULT)
-    FOLLOW_CONFIG_ROUNDED_FIELDS(CHECK_NON_DEFAULT)
-#undef CHECK_NON_DEFAULT
-    TEST_ASSERT_TRUE(cfg.headingMode != defaults.headingMode);
-
-    const FollowRecord rec = followToRecord(cfg);
-    TEST_ASSERT_EQUAL_UINT16(kFollowRecordVersion, rec.version);
-    const FollowConfig back = followFromRecord(rec);
-
-#define CHECK_CARRIED(field) \
-    TEST_ASSERT_TRUE_MESSAGE(cfg.field == back.field, #field " did not survive the record round-trip");
-    FOLLOW_CONFIG_DIRECT_FIELDS(CHECK_CARRIED)
-    FOLLOW_CONFIG_ROUNDED_FIELDS(CHECK_CARRIED)
-#undef CHECK_CARRIED
-    TEST_ASSERT_EQUAL(FOLLOW_HEADING_FIXED, back.headingMode);
-
-    // debug is RAM-only by contract: it must NOT be persisted.
-    cfg.debug = true;
-    TEST_ASSERT_EQUAL(defaults.debug, followFromRecord(followToRecord(cfg)).debug);
 }
 
 // ---- Section 4.14 status contract: conditional fields ----

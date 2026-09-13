@@ -89,6 +89,14 @@ public:
 
     uint32_t txCounter() const { return counter_; }
 
+    // Encrypts a frame as though it came from another node. This exists solely
+    // for the traffic simulator (hal/SimRadio), which has to produce frames that
+    // are indistinguishable from real ones all the way through the receive path:
+    // same cipher, same nonce construction, same replay counter. Nothing on the
+    // normal transmit path may call it -- a node that can forge its peers'
+    // frames is exactly what the tag is there to prevent.
+    size_t encryptAs(uint32_t uid, uint32_t counter, uint8_t* buf, size_t len, size_t cap);
+
     // Counts, for the status view: frames rejected because the tag did not
     // verify (wrong group key, corruption or forgery) and frames rejected as
     // replays.

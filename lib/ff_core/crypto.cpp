@@ -45,7 +45,8 @@ void CcmCrypto::begin(uint32_t uid, const uint8_t key[kAesKeySize], uint32_t ini
 
 void CcmCrypto::setKey(const uint8_t key[kAesKeySize]) { aes_.setKey(key); }
 
-size_t CcmCrypto::encrypt(uint8_t* buf, size_t len, size_t cap) {
+size_t CcmCrypto::encryptAs(uint32_t uid, uint32_t counter, uint8_t* buf, size_t len,
+                            size_t cap) {
     // The plaintext packet is [6-byte header][payload]; the frame inserts the
     // counter after the header and appends the tag.
     if (len < kHeaderSize || cap < len + kFrameOverhead) {
@@ -59,18 +60,22 @@ size_t CcmCrypto::encrypt(uint8_t* buf, size_t len, size_t cap) {
         buf[kFrameHeaderLen + i - 1] = buf[kHeaderSize + i - 1];
     }
 
-    counter_++;
     uint8_t* cursor = buf + kFrameCounterOffset;
-    wire::put_u32(cursor, counter_);
+    wire::put_u32(cursor, counter);
 
     uint8_t nonce[kNonceLen];
-    buildNonce(uid_, counter_, nonce);
+    buildNonce(uid, counter, nonce);
 
     if (!ccmEncrypt(aes_, nonce, kNonceLen, buf, kFrameHeaderLen, buf + kFrameHeaderLen,
                     payload_len, buf + kFrameHeaderLen + payload_len, kFrameTagLen)) {
         return 0;
     }
     return kFrameHeaderLen + payload_len + kFrameTagLen;
+}
+
+size_t CcmCrypto::encrypt(uint8_t* buf, size_t len, size_t cap) {
+    counter_++;
+    return encryptAs(uid_, counter_, buf, len, cap);
 }
 
 CcmCrypto::ReplaySlot* CcmCrypto::slotFor(uint32_t uid, uint32_t now_ms, bool& fresh) {

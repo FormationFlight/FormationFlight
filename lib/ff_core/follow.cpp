@@ -230,36 +230,6 @@ bool followPeerStale(const Peer* peer, uint32_t now_ms, uint32_t timeout_ms) {
     return (now_ms - peer->last_position_ms) > timeout_ms;
 }
 
-// ---- Persistence codec --------------------------------------------------------
-
-// lround(), not a plain cast, so a compile-time default with a fractional
-// value rounds to nearest instead of truncating toward zero.
-FollowRecord followToRecord(const FollowConfig& cfg) {
-    FollowRecord rec{};
-    rec.version = kFollowRecordVersion;
-#define COPY_DIRECT(field) rec.field = cfg.field;
-    FOLLOW_CONFIG_DIRECT_FIELDS(COPY_DIRECT)
-#undef COPY_DIRECT
-#define COPY_ROUNDED(field) rec.field = static_cast<int16_t>(std::lround(cfg.field));
-    FOLLOW_CONFIG_ROUNDED_FIELDS(COPY_ROUNDED)
-#undef COPY_ROUNDED
-    rec.headingMode = static_cast<uint8_t>(cfg.headingMode);
-    return rec;
-}
-
-// int16 -> double widening is exact, so this direction has no rounding.
-FollowConfig followFromRecord(const FollowRecord& rec) {
-    FollowConfig cfg;
-#define COPY_DIRECT(field) cfg.field = rec.field;
-    FOLLOW_CONFIG_DIRECT_FIELDS(COPY_DIRECT)
-#undef COPY_DIRECT
-#define COPY_WIDEN(field) cfg.field = rec.field;
-    FOLLOW_CONFIG_ROUNDED_FIELDS(COPY_WIDEN)
-#undef COPY_WIDEN
-    cfg.headingMode = static_cast<FollowHeadingMode>(rec.headingMode);
-    return cfg;
-}
-
 // ---- Controller ---------------------------------------------------------------
 
 FollowController::FollowController(const PeerTable* peers, ILocationSource* self, IFollowFc* fc)
@@ -716,7 +686,7 @@ FollowStatus FollowController::status(uint32_t now_ms) const {
     return s;
 }
 
-bool FollowController::applyConfig(const FollowConfig& newConfig, const char** err) {
+bool followValidateConfig(const FollowConfig& newConfig, const char** err) {
     const char* localErr = nullptr;
     if (!err) err = &localErr;
 
@@ -824,6 +794,14 @@ bool FollowController::applyConfig(const FollowConfig& newConfig, const char** e
         return false;
     }
 
+    return true;
+}
+
+bool FollowController::applyConfig(const FollowConfig& newConfig, const char** err) {
+    if (!followValidateConfig(newConfig, err)) {
+        return false;
+    }
+
     const bool targetChanged = (newConfig.targetUid != config_.targetUid);
     config_ = newConfig;
     // A config change can make the previously-frozen triple meaningless, so
@@ -832,29 +810,6 @@ bool FollowController::applyConfig(const FollowConfig& newConfig, const char** e
     if (targetChanged) {
         forceReacquire();
     }
-    return true;
-}
-
-bool FollowController::loadRecord(const FollowRecord& rec) {
-    if (rec.version != kFollowRecordVersion) {
-        // Fresh store / nothing saved yet / stale schema: keep the defaults.
-        return false;
-    }
-    // Reuse applyConfig()'s validation so a corrupted record can't arm follow
-    // with insane geometry. forceReacquire() is a no-op at boot.
-    return applyConfig(followFromRecord(rec), nullptr);
-}
-
-bool FollowController::requestSave(uint32_t now_ms, FollowRecord& out, const char** err) {
-    const char* localErr = nullptr;
-    if (!err) err = &localErr;
-    if (everSaved_ && (now_ms - lastSaveMs_) < kFollowSaveMinIntervalMs) {
-        *err = "saved too recently, try again shortly";
-        return false;
-    }
-    out = followToRecord(config_);
-    everSaved_ = true;
-    lastSaveMs_ = now_ms;
     return true;
 }
 

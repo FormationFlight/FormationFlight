@@ -1,359 +1,447 @@
 'use strict';
-import { useState, useEffect, html } from './bundle.js';
-import { Icons, Setting, Button, Notification, Colored, tipColors } from './components.js';
-import { slotFromOffset, offsetFromSlot, validateConfig } from './follow-logic.js';
+import { h, useState, useEffect, useRef, html } from './bundle.js';
+import {
+  Icons, tipColors, Card, Colored, Setting, SectionTitle, Notification, ConfigActions,
+  present, num, age, DASH, uidToHex, hexToUid, isHexUid, latLon,
+} from './components.js';
+import { validateConfig, slotFromOffset, offsetFromSlot } from './follow-logic.js';
 
-// Permit using the web ui locally for development (mirrors main.js).
-const ENDPOINT_PREFIX = window.location.host != "192.168.4.1" ? "http://192.168.4.1" : "";
+// Duplicated deliberately, one line per module: scripts/mock_server.py rewrites
+// this exact statement in every .js it serves, and an imported constant would
+// survive the rewrite pointing at the wrong host. See main.js.
+const ENDPOINT_PREFIX = window.location.port === '' ? '' : 'http://192.168.4.1';
 
-// UI-only imperial readouts — all inputs/values are metric on the
-// wire; these never leave the browser and are never sent back on save.
-const M_TO_FT = 3.28084;
-const MPS_TO_MPH = 2.23694;
-const MPS_TO_KMH = 3.6;
-const asFt = m => `≈ ${(+m * M_TO_FT).toFixed(1)} ft`;
-const asMph = mps => `≈ ${(+mps * MPS_TO_MPH).toFixed(1)} mph / ${(+mps * MPS_TO_KMH).toFixed(1)} km/h`;
+function api(path, opts) {
+  return fetch(ENDPOINT_PREFIX + path, opts).then(r => r.text().then(body => {
+    if (!r.ok) throw new Error(body || ('HTTP ' + r.status));
+    if (!body) return null;
+    try { return JSON.parse(body); } catch (e) { return body; }
+  }));
+}
 
-const lockStateColors = {
-  IDLE: tipColors.gray,
-  ACQUIRING: tipColors.yellow,
-  LOCKED: tipColors.green,
-  LOCKED_HOLDING: tipColors.yellow,
+const HEADING_MODES = [
+  ['OFF', "Off - don't touch heading"],
+  ['COURSE', "Course - match the leader's direction of travel"],
+  ['POINT_LEADER', "Point at leader - aim the nose at their live position"],
+  ['FIXED', 'Fixed - hold the absolute heading below'],
+  ['COURSE_RELATIVE', "Course relative - the leader's course plus the offset below"],
+];
+
+const LOCK_STATES = {
+  IDLE: ['Idle', tipColors.gray, 'The trigger is not active, so nothing is being commanded.'],
+  ACQUIRING: ['Acquiring', tipColors.yellow, 'Triggered, but no followable peer yet - no fix, too stale, or nothing in range.'],
+  LOCKED: ['Locked', tipColors.green, 'Following a live peer. Waypoints are going to the flight controller.'],
+  LOCKED_HOLDING: ['Holding', tipColors.yellow, 'Locked, but the leader has gone quiet - flying the last good solution.'],
 };
 
-const slotLongOptions = [['AHEAD', 'Ahead'], ['CENTER', 'Center'], ['BEHIND', 'Behind']];
-const slotLatOptions = [['LEFT', 'Left'], ['CENTER', 'Center'], ['RIGHT', 'Right']];
-const slotVertOptions = [['BELOW', 'Below'], ['LEVEL', 'Level'], ['ABOVE', 'Above']];
-const headingModeOptions = [
-  ['OFF', 'Off (leave heading alone)'],
-  ['COURSE', 'Direction of Travel'],
-  ['POINT_LEADER', 'Point at Leader'],
-  ['FIXED', 'Fixed Compass Heading'],
-  ['COURSE_RELATIVE', 'Offset From Course'],
+// FollowConditionCode, reported through the condition-flags GVAR. Sequential,
+// not a bitmask: when several are true in one cycle the highest value wins.
+const CONDITION_CODES = {
+  0: ['None', 'Nothing to report this cycle.'],
+  1: ['Altitude floor clamped', 'The commanded altitude hit minAltM and was raised to it.'],
+  2: ['Target too far', 'The solved slot was further than maxTargetDistM, so it was refused.'],
+  3: ['RC gap settings invalid', 'The RC-derived slot failed the geometry rules and the last good one is frozen in.'],
+};
+
+const STATUS_GVAR_VALUES = { 0: 'IDLE', 1: 'ACQUIRING', 2: 'LOCKED', 3: 'HOLDING' };
+
+// GVAR / RC pickers. -1 is a real, meaningful value in both - it means the
+// feature writes nothing at all - so it gets a name rather than a number.
+const gvarOptions = [[-1, 'Disabled']].concat([0, 1, 2, 3, 4, 5, 6, 7].map(i => [i, 'GVAR ' + i]));
+const rcOptions = [[-1, 'Disabled']].concat(
+  Array.apply(null, { length: 16 }).map((_, i) => [i + 1, 'Channel ' + (i + 1)]));
+
+// ---- The friendly slot grid --------------------------------------------------
+//
+// AHEAD/BEHIND, LEFT/RIGHT, ABOVE/BELOW is a view, not a storage format. What is
+// stored and flown is the signed track-relative metres underneath, and they stay
+// on screen so the two can never drift apart in someone's head.
+
+const AXES = [
+  { key: 'ofsLongM', label: 'Fore / aft', pos: 'AHEAD', neg: 'BEHIND', zero: 'IN LINE',
+    tip: 'Along the leader\'s track. Behind is the conventional chase slot; ahead means they are closing on you.' },
+  { key: 'ofsLatM', label: 'Left / right', pos: 'RIGHT', neg: 'LEFT', zero: 'CENTRED',
+    tip: 'Across the leader\'s track, from their point of view.' },
+  { key: 'ofsVertM', label: 'Up / down', pos: 'ABOVE', neg: 'BELOW', zero: 'LEVEL',
+    tip: 'Vertical separation. A slot that is directly above or below with no horizontal offset has to clear the minimum vertical separation instead of the 3D one, because GPS altitude error is the thing being absorbed.' },
 ];
-const gvarIndexOptions = [[-1, 'Disabled']].concat([0,1,2,3,4,5,6,7].map(i => [i, String(i)]));
-// A native <select> with 17 entries renders unreliably in Firefox for
-// Android (cuts off/mispositions), so RC channel fields use a +/- spinner
-// instead — -1 is the disabled sentinel, shown as "Disabled"; 1-16 are
-// channels.
-const rcChannelMin = -1;
-const rcChannelMax = 16;
-const rcChannelLabelFn = v => v === -1 ? 'Disabled' : String(v);
 
-// Mirrors InavPlatformType (src/lib/MSP/MSP.h) — only used for the
-// autothrottle platform-gate explanatory tip.
-const platformTypeNames = ['Multirotor', 'Airplane', 'Helicopter', 'Tricopter', 'Rover', 'Boat'];
-const platformTypeName = t => platformTypeNames[t] || 'Unknown';
+function OffsetEditor({ cfg, setField }) {
+  return html`
+<div>
+  ${AXES.map(a => {
+    const v = +cfg[a.key] || 0;
+    const slot = slotFromOffset(v, a.pos, a.neg, a.zero);
+    const gap = Math.abs(v);
+    const opts = [[a.pos, a.pos], [a.zero, a.zero], [a.neg, a.neg]];
+    return html`
+    <div key=${a.key} class="grid grid-cols-2 gap-2 my-1">
+      <label class="flex items-center text-sm text-gray-700 dark:text-slate-300 mr-2 font-medium">
+        ${a.label}<${Tip} text=${a.tip} />
+      <//>
+      <div class="flex items-center gap-2">
+        <div class="flex-1">
+          ${h(SlotSelect, { value: slot, options: opts, setfn: s => setField(a.key, offsetFromSlot(s, gap, a.pos, a.neg)) })}
+        <//>
+        <div class="flex-1">
+          ${h(GapInput, {
+            value: gap, disabled: slot === a.zero,
+            setfn: g => setField(a.key, offsetFromSlot(slot, g, a.pos, a.neg)),
+          })}
+        <//>
+      <//>
+    <//>`;
+  })}
+  <p class="text-xs text-gray-400 mt-2 font-mono">
+    stored as ofsLongM ${signed(cfg.ofsLongM)} · ofsLatM ${signed(cfg.ofsLatM)} · ofsVertM ${signed(cfg.ofsVertM)} (metres)
+  <//>
+<//>`;
+}
 
-export default function FollowPanel() {
-  const [config, setConfig] = useState(null);
-  const [advanced, setAdvanced] = useState(false);
-  const [status, setStatus] = useState(null);
-  const [peers, setPeers] = useState(null);
-  const [saveResult, setSaveResult] = useState(null);
-  const [validationError, setValidationError] = useState(null);
+const signed = v => (present(v) ? (v > 0 ? '+' : '') + (+v) : DASH);
 
-  // "advanced" is a local display preference only — both views edit the
-  // same canonical ofsLongM/ofsLatM/ofsVertM fields, so there's
-  // no server-side mode to restore it from.
-  const applyFetchedConfig = r => setConfig(r);
-  const refreshConfig = () => fetch(ENDPOINT_PREFIX + '/followmanager/config').then(r => r.json()).then(applyFetchedConfig);
-  const refreshStatus = () => fetch(ENDPOINT_PREFIX + '/followmanager/status').then(r => r.json()).then(setStatus);
-  const refreshPeers = () => fetch(ENDPOINT_PREFIX + '/peermanager/status').then(r => r.json()).then(setPeers);
+const Tip = ({ text }) => (text ? html`
+<span class="tooltip-wrap" tabindex="0">
+  <${Icons.info} class="w-4 h-4 tooltip-icon" />
+  <span class="tooltip-bubble" role="tooltip">${text}<//>
+<//>` : '');
 
-  useEffect(() => {
-    refreshConfig();
-    refreshStatus();
-    refreshPeers();
-    // Status/peers poll continuously so the panel is useful as a bench-test
-    // aid; config is only re-fetched after a successful save,
-    // since polling it would clobber whatever the user is mid-edit on.
-    const t = setInterval(() => { refreshStatus(); refreshPeers(); }, 1000);
-    return () => clearInterval(t);
-  }, []);
+const SlotSelect = ({ value, options, setfn }) => html`
+<select onchange=${ev => setfn(ev.target.value)}
+  class="w-full rounded font-normal border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 py-0.5 px-1 text-gray-600 dark:text-slate-200 focus:outline-none text-sm">
+  ${options.map(o => html`<option key=${o[0]} value=${o[0]} selected=${o[0] === value}>${o[1]}<//>`)}
+<//>`;
 
-  // Renders validationError inline, in red, but only within the panel it's
-  // actually about — avoids implying an error confined to one panel (e.g.
-  // Safety Bounds) when it may be about a field elsewhere on the page.
-  const sectionError = section => validationError && validationError.section === section &&
-    html`<div class="text-sm text-red-900 mb-2">${validationError.message}<//>`;
+const GapInput = ({ value, setfn, disabled }) => html`
+<div class="flex w-full items-center rounded border border-gray-300 dark:border-slate-600 shadow-sm">
+  <input type="number" value=${value} disabled=${disabled} oninput=${ev => setfn(ev.target.value)}
+    class="font-normal text-sm rounded w-full flex-1 py-0.5 px-2 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-slate-800 disabled:text-gray-500" />
+  <span class="inline-flex font-normal py-1 border-l border-gray-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 items-center px-2 text-gray-500 dark:text-slate-400 text-xs">m<//>
+<//>`;
 
-  const mksetfn = k => (v => setConfig(x => Object.assign({}, x, { [k]: v })));
-  // Grid-view setters: recompute the canonical offset from a slot label or
-  // a gap magnitude, keeping whichever of the two wasn't just edited.
-  const mkslotfn = (offsetKey, posLabel, negLabel) => (slot => setConfig(x => Object.assign({}, x, {
-    [offsetKey]: offsetFromSlot(slot, Math.abs(x[offsetKey]), posLabel, negLabel),
-  })));
-  const mkgapfn = (offsetKey, posLabel, negLabel) => (gapM => setConfig(x => Object.assign({}, x, {
-    [offsetKey]: offsetFromSlot(slotFromOffset(x[offsetKey], posLabel, negLabel, posLabel), gapM, posLabel, negLabel),
-  })));
+/** The same friendly grid, read-only, over a live signed offset from the API. */
+function OffsetReadout({ offset, title, note }) {
+  if (!offset) {
+    return html`
+    <div>
+      <div class="text-xs uppercase tracking-wide text-gray-400 mb-1">${title}<//>
+      <p class="text-sm text-slate-400">none yet<//>
+    <//>`;
+  }
+  const rows = [
+    [offset.long_m, 'AHEAD', 'BEHIND', 'IN LINE'],
+    [offset.lat_m, 'RIGHT', 'LEFT', 'CENTRED'],
+    [offset.vert_m, 'ABOVE', 'BELOW', 'LEVEL'],
+  ];
+  return html`
+<div>
+  <div class="text-xs uppercase tracking-wide text-gray-400 mb-1">${title}<//>
+  <div class="grid grid-cols-3 gap-2">
+    ${rows.map((r, i) => html`
+    <div key=${i} class="rounded bg-slate-100 dark:bg-slate-700 px-2 py-1">
+      <div class="text-xs font-semibold text-slate-600 dark:text-slate-200">${slotFromOffset(r[0], r[1], r[2], r[3])}<//>
+      <div class="font-mono text-sm text-slate-800 dark:text-slate-100">${num(Math.abs(r[0]), 1, ' m')}<//>
+    <//>`)}
+  <//>
+  <p class="text-xs text-gray-400 mt-1 font-mono">${signed(round1(offset.long_m))} / ${signed(round1(offset.lat_m))} / ${signed(round1(offset.vert_m))} m</p>
+  ${note && html`<p class="text-xs text-gray-400 mt-1">${note}<//>`}
+<//>`;
+}
 
-  // Posts the current form state to /followmanager/config (validate +
-  // apply to RAM only). Returns a promise resolving to whether the apply
-  // succeeded, so onsaveEeprom below knows whether it's safe to proceed to
-  // an EEPROM commit.
-  const applyLive = successMessage => {
-    const err = validateConfig(config);
-    if (err) {
-      setValidationError(err);
-      return Promise.resolve(false);
-    }
-    setValidationError(null);
+const round1 = v => (present(v) ? Math.round(v * 10) / 10 : v);
 
-    const body = new URLSearchParams();
-    body.append('ofsLongM', config.ofsLongM);
-    body.append('ofsLatM', config.ofsLatM);
-    body.append('ofsVertM', config.ofsVertM);
-    body.append('targetPeer', config.targetPeer);
-    body.append('emitHz', config.emitHz);
-    body.append('peerTimeoutMs', config.peerTimeoutMs);
-    body.append('minSepM', config.minSepM);
-    body.append('minVSepM', config.minVSepM);
-    body.append('maxTargetDistM', config.maxTargetDistM);
-    body.append('minAltM', config.minAltM);
-    body.append('minCourseSpeed', config.minCourseSpeed);
+// ---- Live status -------------------------------------------------------------
 
-    body.append('headingMode', config.headingMode);
-    body.append('headingDeg', config.headingDeg);
+const StatRow = ({ label, value, tip }) => html`
+<div class="flex items-baseline justify-between gap-2 py-0.5">
+  <span class="text-sm text-gray-500 dark:text-slate-400">${label}<${Tip} text=${tip} /><//>
+  <span class="text-sm font-mono text-slate-800 dark:text-slate-100">${value}<//>
+<//>`;
 
-    body.append('statusGvarIndex', config.statusGvarIndex);
-    body.append('conditionFlagsGvarIndex', config.conditionFlagsGvarIndex);
+function FollowStatusPanel({ status }) {
+  const f = (status && status.follow) || null;
+  if (!f) {
+    return html`<${Card} title="Live" icon=${Icons.scan}>
+      <p class="text-sm text-slate-400">This build reports no Follow controller.<//>
+    <//>`;
+  }
+  const st = LOCK_STATES[f.state] || [f.state, tipColors.gray, ''];
+  const lockedUid = f.locked_uid && f.locked_uid !== '00000000' ? f.locked_uid : null;
+  const fc = (status && status.fc) || {};
+  const platform = { 0: 'multirotor', 1: 'airplane', 255: 'not answered yet' }[f.platform];
 
-    body.append('rcLongChannel', config.rcLongChannel);
-    body.append('rcLatChannel', config.rcLatChannel);
-    body.append('rcVertChannel', config.rcVertChannel);
-
-    body.append('targetSpeedGvarIndex', config.targetSpeedGvarIndex);
-    body.append('autothrottleEngageGvarIndex', config.autothrottleEngageGvarIndex);
-    body.append('autothrottleEnableRcChannel', config.autothrottleEnableRcChannel);
-    body.append('autothrottleEnableMinThresholdUs', config.autothrottleEnableMinThresholdUs);
-    body.append('autothrottleEnableMaxThresholdUs', config.autothrottleEnableMaxThresholdUs);
-    body.append('speedCorrectionAccelCmS2', config.speedCorrectionAccelCmS2);
-    body.append('minTargetSpeedMps', config.minTargetSpeedMps);
-    body.append('maxTargetSpeedMps', config.maxTargetSpeedMps);
-
-    body.append('debug', config.debug);
-
-    return fetch(ENDPOINT_PREFIX + '/followmanager/config', { method: 'POST', body })
-      .then(r => r.ok
-        ? r.json().then(r => { applyFetchedConfig(r); setSaveResult({ status: true, message: successMessage }); return true; })
-        : r.text().then(t => { setSaveResult({ status: false, message: t }); return false; }));
-  };
-
-  const onsave = () => applyLive('Applied (live, session-only)');
-
-  // Applies the current form state to RAM (same as onsave), then
-  // — only if that succeeded — commits it to EEPROM so it
-  // survives a reboot.
-  const onsaveEeprom = () => applyLive('Applied — saving to EEPROM…').then(ok => {
-    if (!ok) return false;
-    return fetch(ENDPOINT_PREFIX + '/followmanager/commit', { method: 'POST' })
-      .then(r => r.ok
-        ? r.text().then(() => { setSaveResult({ status: true, message: 'Saved permanently to EEPROM' }); return true; })
-        : r.text().then(t => { setSaveResult({ status: false, message: 'Applied, but EEPROM save failed: ' + t }); return false; }));
-  });
-
-  if (!config || !status || !peers) return '';
-
-  const targetPeerOptions = [[0, 'First Active']].concat(
-    (peers.peers || []).map(p => [p.rawId, `${p.id} (${p.name})`])
-  );
+  // Pre-arm warnings. These are the things that will stop Follow doing anything
+  // useful the moment the trigger goes active, and they are worth surfacing on
+  // the ground rather than discovering in the air.
+  const warnings = [];
+  if (!fc.connected) warnings.push('No flight controller on MSP. Nothing can be commanded.');
+  if (status && status.location && !status.location.valid) warnings.push('This node has no position fix.');
+  if (f.prearm_failed) {
+    warnings.push('The RC-derived slot failed its pre-arm check, so the last known good offset is frozen in. Compare the two offsets below.');
+  }
+  if (f.state === 'ACQUIRING') warnings.push('Triggered but unlocked: no peer currently has a fresh position fix within range.');
+  if (status && status.node && status.node.listen_only) warnings.push('Listen-only is on, so this node is invisible to the aircraft it is chasing.');
 
   return html`
-<div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      Status
+<${Card} title="Live" icon=${Icons.scan}
+  right=${html`<${Colored} text=${st[0]} colors=${st[1]} title=${st[2]} />`}>
+  ${warnings.length > 0 && html`
+  <div class="mb-3 rounded bg-yellow-100 dark:bg-yellow-800 px-3 py-2">
+    <div class="flex items-center gap-2 text-sm font-semibold text-yellow-900 dark:text-yellow-100">
+      <${Icons.warn} class="w-4 h-4" /> Pre-arm
     <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      <div class="grid grid-cols-2 gap-2 my-1">
-        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Gate<//>
-        <div class="flex items-center"><${Colored} colors=${status.gateActive ? tipColors.green : tipColors.gray} text=${status.gateActive ? 'active (GCS NAV)' : 'inactive'} /><//>
-      <//>
-      <div class="grid grid-cols-2 gap-2 my-1">
-        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Lock State<//>
-        <div class="flex items-center"><${Colored} colors=${lockStateColors[status.state] || tipColors.gray} text=${status.state} /><//>
-      <//>
-      <div class="grid grid-cols-2 gap-2 my-1">
-        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Locked Peer<//>
-        <span class="text-sm text-gray-700">${status.lockedId ? `${status.lockedId} (${status.lockedName})` : 'none'}<//>
-      <//>
-      ${status.lastTarget && html`
-      <div class="grid grid-cols-2 gap-2 my-1">
-        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Last Target<//>
-        <span class="text-sm text-gray-700">${(status.lastTarget.lat / 1e7).toFixed(6)}, ${(status.lastTarget.lon / 1e7).toFixed(6)} @ ${(status.lastTarget.altCm / 100).toFixed(1)}m, hdg ${status.lastTarget.headingDeg}° (${(status.lastTarget.ageMs / 1000).toFixed(1)}s ago)<//>
-      <//>
-      `}
+    <ul class="mt-1">
+      ${warnings.map((w, i) => html`<li key=${i} class="text-xs text-yellow-900 dark:text-yellow-100">· ${w}<//>`)}
     <//>
-  <//>
+  <//>`}
 
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2 justify-between">
-      <span>Follow Slot<//>
-      <button type="button" class="text-xs text-blue-600 hover:underline font-normal normal-case" onclick=${() => setAdvanced(v => !v)}>
-        ${advanced ? 'Use friendly grid' : 'Advanced (raw offsets)'}
+  <${StatRow} label="Trigger gate" value=${f.gate_active ? 'active' : 'inactive'}
+    tip="Whether the configured trigger (GCS-NAV mode, or the AUX switch) is currently asserted." />
+  <${StatRow} label="Locked peer" value=${lockedUid ? `${f.locked_name || ''} ${lockedUid}` : 'none'} />
+  <${StatRow} label="FC" value=${fc.connected ? `${fc.variant || '?'} ${fc.version || ''}` : 'not connected'} />
+  <${StatRow} label="Platform" value=${platform || DASH}
+    tip="INAV's mixer platform type, as the FC reported it. Autothrottle only applies to fixed wing." />
+
+  <${SectionTitle} title="Target" />
+  ${f.target ? html`
+    <${StatRow} label="Position" value=${latLon(f.target.lat, f.target.lon)} />
+    <${StatRow} label="Altitude" value=${num(f.target.alt_cm / 100, 1, ' m')}
+      tip="Home-relative, as sent to the flight controller in waypoint 255." />
+    <${StatRow} label="Heading" value=${present(f.target.heading_deg) && f.target.heading_deg ? f.target.heading_deg + '°' : 'not commanded'} />
+    <${StatRow} label="Solved" value=${age(f.target.age_ms) + ' ago'} />
+  ` : html`<p class="text-sm text-slate-400">No target solved yet.<//>`}
+
+  <${SectionTitle} title="Offsets" />
+  <div class="flex flex-col gap-3">
+    <${OffsetReadout} offset=${f.live_offset} title="Live offset"
+      note="Where the slot actually is right now, including any RC axis trim." />
+    ${f.prearm_offset && html`
+      <${OffsetReadout} offset=${f.prearm_offset} title="Pre-arm candidate"
+        note=${f.prearm_failed
+          ? 'This is what the sticks were asking for when the pre-arm check refused it.'
+          : 'The offset the RC channels produced at the pre-arm check.'} />`}
+  <//>
+  ${f.rc_slot_frozen && html`
+  <p class="text-xs text-yellow-700 dark:text-yellow-200 mt-2">
+    RC slot frozen: the live stick positions are being ignored and the last valid offset is held.
+  <//>`}
+
+  <${SectionTitle} title="Reported to the FC" />
+  <${StatRow} label="Status GVAR"
+    value=${present(f.status_gvar) ? `${f.status_gvar} (${STATUS_GVAR_VALUES[f.status_gvar] || '?'})` : 'disabled'}
+    tip="Absent means that GVAR slot is switched off, which is not the same as it reading 0 - 0 is IDLE." />
+  <${StatRow} label="Condition GVAR"
+    value=${present(f.condition_gvar)
+      ? `${f.condition_gvar} (${(CONDITION_CODES[f.condition_gvar] || ['?'])[0]})`
+      : 'disabled'}
+    tip=${present(f.condition_gvar) ? (CONDITION_CODES[f.condition_gvar] || ['', ''])[1] : 'That GVAR slot is switched off.'} />
+  <${StatRow} label="Autothrottle"
+    value=${f.autothrottle_armed ? (f.autothrottle_engaged ? 'engaged' : 'armed') : 'not armed'} />
+  ${f.autothrottle_engaged && html`
+  <${StatRow} label="Target speed" value=${num((f.target_speed_cms || 0) / 100, 1, ' m/s')} />`}
+<//>`;
+}
+
+// ---- The page ----------------------------------------------------------------
+
+export default function FollowPage({ status }) {
+  const [cfg, setCfg] = useState(null);
+  const [base, setBase] = useState(null);
+  const [result, setResult] = useState(null);
+  const [unsaved, setUnsaved] = useState(false);
+  const [uidText, setUidText] = useState('');
+  const loaded = useRef(false);
+
+  const load = () => api('/api/config').then(r => {
+    setCfg(r.follow);
+    setBase(r.follow);
+    if (!loaded.current) {
+      loaded.current = true;
+      setUidText(r.follow.targetUid ? uidToHex(r.follow.targetUid) : '');
+    }
+  });
+  useEffect(() => { load().catch(e => setResult({ ok: false, text: e.message })); }, []);
+
+  const setField = (k, v) => setCfg(c => ({ ...c, [k]: v }));
+  const mk = k => v => setField(k, v);
+  // Numeric fields come out of the inputs as strings; the validator and the
+  // firmware both want numbers, so coerce once, here, rather than everywhere.
+  const mkNum = k => v => setField(k, v === '' ? '' : +v);
+
+  const uidBad = uidText !== '' && !isHexUid(uidText);
+  const candidate = cfg ? { ...cfg, targetUid: uidText === '' ? 0 : hexToUid(uidText) } : null;
+  const numericCandidate = candidate ? coerceFollowNumbers(candidate, base) : null;
+  const invalid = numericCandidate ? validateConfig(numericCandidate) : null;
+  const blocked = uidBad
+    ? 'Target UID must be 1-8 hexadecimal characters, or empty for "nearest followable peer".'
+    : invalid ? invalid.message : null;
+
+  const post = () => api('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ follow: numericCandidate }),
+  }).then(r => { setCfg(r.follow); setBase(r.follow); return r; });
+
+  const apply = () => post()
+    .then(() => { setUnsaved(true); setResult({ ok: true, text: 'Applied to the running node' }); })
+    .catch(e => setResult({ ok: false, text: e.message }));
+  const save = () => post()
+    .then(() => api('/api/config/save', { method: 'POST' }))
+    .then(() => { setUnsaved(false); setResult({ ok: true, text: 'Saved to flash' }); })
+    .catch(e => setResult({ ok: false, text: e.message }));
+
+  if (!cfg) return html`<div class="m-4 text-sm text-slate-400">Loading Follow configuration…<//>`;
+
+  const peers = (status && status.peers) || [];
+  const err = sec => (invalid && invalid.section === sec
+    ? html`<p class="text-xs text-red-600 mt-1">${invalid.message}<//>` : '');
+  const rcInUse = cfg.rcLongChannel !== -1 || cfg.rcLatChannel !== -1 || cfg.rcVertChannel !== -1;
+  const atInUse = cfg.autothrottleEnableRcChannel !== -1;
+
+  return html`
+<div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+  <div class="lg:col-span-2 flex flex-col gap-4">
+    <${Card} title="Slot geometry" icon=${Icons.scan}>
+      ${result && html`<${Notification} ok=${result.ok} timeout=${result.ok ? 2500 : 9000}
+        text=${result.text} close=${() => setResult(null)} />`}
+      <p class="text-xs text-gray-400 mb-3">
+        Where to sit relative to the leader, in their own track-relative frame - so the slot rotates with them
+        rather than staying pinned to a compass direction.
       <//>
+      <${OffsetEditor} cfg=${cfg} setField=${setField} />
+      ${err('bounds')}
     <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      ${!advanced ? html`
-        <div class="flex gap-4">
-          <div class="flex-1"><${Setting} title="Longitudinal" tip="Whether your craft flies ahead of, behind, or level with the leader, measured along the leader's direction of travel." value=${slotFromOffset(config.ofsLongM, 'AHEAD', 'BEHIND', 'CENTER')} setfn=${mkslotfn('ofsLongM', 'AHEAD', 'BEHIND')} type="select" options=${slotLongOptions} /><//>
-          <div class="flex-1"><${Setting} title="Longitudinal Gap" tip="Distance to keep ahead of or behind the leader, in meters." value=${Math.abs(config.ofsLongM)} setfn=${mkgapfn('ofsLongM', 'AHEAD', 'BEHIND')} type="number" addonRight="m" imperial=${asFt(Math.abs(config.ofsLongM))} /><//>
+
+    <${Card} title="Trigger and target" icon=${Icons.bolt}>
+      <${Setting} title="Trigger" value=${cfg.triggerMode || 'GCSNAV'} type="static"
+        tip="Compiled in at build time (FOLLOW_TRIGGER_MODE), not editable here. GCSNAV follows while INAV's GCS-NAV mode is on; AUX follows a switch." />
+      <div class="grid grid-cols-2 gap-2 my-1">
+        <label class="flex items-center text-sm text-gray-700 dark:text-slate-300 mr-2 font-medium">
+          Target peer<${Tip} text="Empty locks onto the nearest followable peer at acquire time. A UID pins it to one specific aircraft - and because a UID is a stable identity, it cannot be inherited by a different aircraft the way a v1 slot id could." />
         <//>
-        <div class="flex gap-4">
-          <div class="flex-1"><${Setting} title="Lateral" tip="Whether your craft flies to the left, right, or directly in line with the leader, viewed from behind the leader looking forward." value=${slotFromOffset(config.ofsLatM, 'RIGHT', 'LEFT', 'CENTER')} setfn=${mkslotfn('ofsLatM', 'RIGHT', 'LEFT')} type="select" options=${slotLatOptions} /><//>
-          <div class="flex-1"><${Setting} title="Lateral Gap" tip="Sideways distance to keep from the leader's flight path, in meters." value=${Math.abs(config.ofsLatM)} setfn=${mkgapfn('ofsLatM', 'RIGHT', 'LEFT')} type="number" addonRight="m" imperial=${asFt(Math.abs(config.ofsLatM))} /><//>
+        <div class="flex flex-col">
+          <div class="flex w-full items-center rounded border ${uidBad ? 'border-red-500' : 'border-gray-300 dark:border-slate-600'} shadow-sm">
+            <input type="text" value=${uidText} placeholder="(nearest peer)" spellcheck="false"
+              oninput=${ev => setUidText(ev.target.value.trim())}
+              class="font-normal font-mono text-sm rounded w-full flex-1 py-0.5 px-2 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 focus:outline-none" />
+          <//>
+          ${peers.length > 0 && html`
+          <div class="flex flex-wrap gap-1 mt-1">
+            <button type="button" onclick=${() => setUidText('')}
+              class="px-1.5 py-0.5 text-xs rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200">nearest<//>
+            ${peers.map(p => html`<button key=${p.uid} type="button" onclick=${() => setUidText(p.uid)}
+              class="px-1.5 py-0.5 text-xs font-mono rounded ${uidText === p.uid ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200'}">${p.name || p.uid}<//>`)}
+          <//>`}
         <//>
-        <div class="flex gap-4">
-          <div class="flex-1"><${Setting} title="Vertical" tip="Whether your craft flies above, below, or at the same altitude as the leader." value=${slotFromOffset(config.ofsVertM, 'ABOVE', 'BELOW', 'LEVEL')} setfn=${mkslotfn('ofsVertM', 'ABOVE', 'BELOW')} type="select" options=${slotVertOptions} /><//>
-          <div class="flex-1"><${Setting} title="Vertical Gap" tip="Altitude difference to keep from the leader, in meters." value=${Math.abs(config.ofsVertM)} setfn=${mkgapfn('ofsVertM', 'ABOVE', 'BELOW')} type="number" addonRight="m" imperial=${asFt(Math.abs(config.ofsVertM))} /><//>
-        <//>
-      ` : html`
-        <${Setting} title="Longitudinal Offset" tip="Signed distance along the leader's direction of travel: positive is ahead of the leader, negative is behind. This is the same value the friendly grid's Longitudinal fields edit." value=${config.ofsLongM} setfn=${mksetfn('ofsLongM')} type="number" addonRight="m" addonLeft="+ahead" imperial=${asFt(config.ofsLongM)} />
-        <${Setting} title="Lateral Offset" tip="Signed sideways distance from the leader's flight path: positive is to the right, negative is to the left." value=${config.ofsLatM} setfn=${mksetfn('ofsLatM')} type="number" addonRight="m" addonLeft="+right" imperial=${asFt(config.ofsLatM)} />
-        <${Setting} title="Vertical Offset" tip="Signed altitude difference from the leader: positive is above, negative is below." value=${config.ofsVertM} setfn=${mksetfn('ofsVertM')} type="number" addonRight="m" addonLeft="+above" imperial=${asFt(config.ofsVertM)} />
-      `}
-    <//>
-  <//>
-
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      Safety Bounds
-    <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      ${sectionError('bounds')}
-
-      <${Setting} title="Min Separation" tip="Smallest allowed 3D distance from the leader. A follow slot that works out to less than this is rejected." value=${config.minSepM} setfn=${mksetfn('minSepM')} type="number" addonRight="m" imperial=${asFt(config.minSepM)} />
-      <${Setting} title="Min Vertical Separation (when stacked)" tip="When the follow slot sits directly above or below the leader with no horizontal offset, the smallest vertical gap allowed, to keep craft from stacking too close." value=${config.minVSepM} setfn=${mksetfn('minVSepM')} type="number" addonRight="m" imperial=${asFt(config.minVSepM)} />
-      <${Setting} title="Max Target Distance" tip="If the leader is ever farther away than this, following is aborted rather than letting this craft chase across an unbounded distance." value=${config.maxTargetDistM} setfn=${mksetfn('maxTargetDistM')} type="number" addonRight="m" imperial=${asFt(config.maxTargetDistM)} />
-      <${Setting} title="Min Altitude Floor" tip="Lowest altitude this craft will ever be commanded to while following, regardless of the leader's altitude, so it won't be commanded into the ground." value=${config.minAltM} setfn=${mksetfn('minAltM')} type="number" addonRight="m" imperial=${asFt(config.minAltM)} />
-      <${Setting} title="Min Course Speed" tip="Minimum ground speed the leader must be moving at for its direction of travel to be trusted as a heading reference. Below this speed, the last known direction is held instead of following GPS course jitter." value=${config.minCourseSpeed} setfn=${mksetfn('minCourseSpeed')} type="number" addonRight="m/s" imperial=${asMph(config.minCourseSpeed)} />
-    <//>
-  <//>
-
-  <div class="py-1 divide-y border rounded bg-white flex flex-col self-start">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      Heading
-    <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      <${Setting} title="Mode" tip="How this craft's nose direction is controlled while following: leave it alone, point it in the direction of travel, point it at the leader, hold a fixed compass heading, or offset it from the direction of travel." value=${config.headingMode} setfn=${mksetfn('headingMode')} type="select" options=${headingModeOptions} />
-      ${(config.headingMode === 'FIXED' || config.headingMode === 'COURSE_RELATIVE') && html`
-        <${Setting}
-          title=${config.headingMode === 'FIXED' ? 'Heading (absolute)' : 'Heading Offset From Course'}
-          tip=${config.headingMode === 'FIXED'
-            ? 'Compass heading to hold, in degrees (0° = North, 90° = East).'
-            : 'Offset added to the direction-of-travel heading, in degrees. Positive turns the nose to the right of the direction of travel.'}
-          value=${config.headingDeg} setfn=${mksetfn('headingDeg')} type="number" addonRight="°" />
-      `}
-    <//>
-  <//>
-
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center text-gray-600 px-4 py-2">
-      Trigger & Target
-    <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      ${sectionError('trigger')}
-      <${Setting} title="Trigger Mode" tip="How following gets switched on. This is fixed by firmware configuration and shown here for reference only." value=${config.triggerMode} setfn=${() => {}} type="text" disabled=${true} />
-      <${Setting} title="Target Peer" tip="Which other craft to follow. 'First Active' automatically locks onto the first peer heard broadcasting a valid position." value=${config.targetPeer} setfn=${mksetfn('targetPeer')} type="select" options=${targetPeerOptions} />
-      <${Setting} title="Emit Rate" tip="How often this craft broadcasts its own position and speed to peers, in updates per second. Higher rates give smoother following at the cost of more radio airtime." value=${config.emitHz} setfn=${mksetfn('emitHz')} type="number" addonRight="Hz" />
-      <${Setting} title="Peer Timeout" tip="How long to wait without hearing from the target peer before treating it as lost and releasing the follow lock." value=${config.peerTimeoutMs} setfn=${mksetfn('peerTimeoutMs')} type="number" addonRight="ms" />
-    <//>
-  <//>
-
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center justify-between text-gray-600 px-4 py-2">
-      <span>OSD Status (GVAR)<//>
-      <${Colored} text="optional" />
-    <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      ${sectionError('gvar')}
-      <${Setting} title="Status GVAR Index" tip="Which INAV Global Variable to write the follow lock-state code to (0=inactive, 1=searching, 2=locked, 3=holding, 4=id lost). Configure a matching Custom OSD element in INAV Configurator to display it." value=${config.statusGvarIndex} setfn=${mksetfn('statusGvarIndex')} type="select" options=${gvarIndexOptions} />
-      <${Setting} title="Condition Flags GVAR Index" tip="Which INAV Global Variable to write a secondary condition code to (0=no condition, 1=altitude floor clamped, 2=target too far, 3=RC-driven slot frozen/pre-arm check failed); more conditions may be added to this same slot in the future." value=${config.conditionFlagsGvarIndex} setfn=${mksetfn('conditionFlagsGvarIndex')} type="select" options=${gvarIndexOptions} />
-      <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0 or later on the follower FC. Values are written but ignored on older firmware.</div>
-      <${Setting} cls="grid grid-cols-2 gap-2 my-1 pt-3 mt-2 border-t" title="Debug (GVARs 0-3)" tip="Writes the locked target's north/east offset from your own position (cm), altitude (cm), and heading to GVARs 0, 1, 2, and 3 every cycle, for bench-testing in the goggles. Session-only — always resets to Off on reboot, never saved to EEPROM." value=${config.debug} setfn=${mksetfn('debug')} type="switch" />
-    <//>
-  <//>
-
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center justify-between text-gray-600 px-4 py-2">
-      <span>RC Axis Control<//>
-      <${Colored} text="optional" />
-    <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      ${sectionError('rc')}
-      <div class="text-xs text-gray-500 mb-2">Once an axis has a channel assigned, its configured gap becomes a live-adjustable range (stick centered = centered slot, full deflection = the configured gap in that direction) rather than a fixed point.</div>
-      <${Setting} title="Longitudinal Channel" tip="RC channel that live-adjusts the longitudinal (ahead/behind) slot between -Gap and +Gap. -1 disables and uses the fixed configured value." value=${config.rcLongChannel} setfn=${mksetfn('rcLongChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
-      ${config.rcLongChannel !== -1 && config.ofsLongM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Longitudinal Gap is 0 — this channel currently has no effect.<//>`}
-      <${Setting} title="Lateral Channel" tip="RC channel that live-adjusts the lateral (left/right) slot between -Gap and +Gap. -1 disables." value=${config.rcLatChannel} setfn=${mksetfn('rcLatChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
-      ${config.rcLatChannel !== -1 && config.ofsLatM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Lateral Gap is 0 — this channel currently has no effect.<//>`}
-      <${Setting} title="Vertical Channel" tip="RC channel that live-adjusts the vertical (above/below) slot between -Gap and +Gap. -1 disables." value=${config.rcVertChannel} setfn=${mksetfn('rcVertChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
-      ${config.rcVertChannel !== -1 && config.ofsVertM === 0 && html`<div class="text-xs text-yellow-700 mb-2">Vertical Gap is 0 — this channel currently has no effect.<//>`}
-      <div class="text-xs text-gray-500 mt-2">Crossing a stacked or in-line axis from one side of the leader to the other requires first widening one of the other two RC-assigned axes past Min Separation — the slot won't fly through the leader to get there. This is expected behavior, not a bug.</div>
-      ${status.rcSlotFrozen && html`<div class="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-3 py-2 text-sm mt-2">Slot is currently frozen at its last safe position — current RC input would produce an unsafe slot.<//>`}
-      ${status.liveOffset && html`<div class="text-xs text-gray-500 mt-2">Live offset: ${status.liveOffset.longM.toFixed(1)}m long, ${status.liveOffset.latM.toFixed(1)}m lat, ${status.liveOffset.vertM.toFixed(1)}m vert<//>`}
-      ${status.preArmCandidateOffset && html`<div class="text-xs text-gray-500 mt-2">Candidate offset (disarmed, bench-test): ${status.preArmCandidateOffset.longM.toFixed(1)}m long, ${status.preArmCandidateOffset.latM.toFixed(1)}m lat, ${status.preArmCandidateOffset.vertM.toFixed(1)}m vert<//>`}
-    <//>
-  <//>
-
-  <div class="py-1 divide-y border rounded bg-white flex flex-col">
-    <div class="font-light uppercase flex items-center justify-between text-gray-600 px-4 py-2">
-      <span>Speed Autothrottle (Fixed-Wing)<//>
-      <${Colored} text="optional" />
-    <//>
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      ${sectionError('gvar')}
-      ${sectionError('autothrottle')}
-      ${status.platformType !== 1 && html`<div class="bg-gray-50 border border-gray-200 text-gray-600 rounded-md px-3 py-2 text-sm mb-2">Requires a fixed-wing (airplane) mixer on the follower FC — detected platform: ${platformTypeName(status.platformType)}.<//>`}
-      <${Setting} title="Target Speed GVAR Index" tip="Which INAV Global Variable receives the commanded ground-speed setpoint (cm/s), fed directly into PID3's setpoint." value=${config.targetSpeedGvarIndex} setfn=${mksetfn('targetSpeedGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
-      <${Setting} title="Autothrottle Engage GVAR Index" tip="Which INAV Global Variable receives the engage flag (1=engaged, 0=not) the INAV-side Logic Conditions use to gate the throttle override." value=${config.autothrottleEngageGvarIndex} setfn=${mksetfn('autothrottleEngageGvarIndex')} type="select" options=${gvarIndexOptions} disabled=${status.platformType !== 1} />
-      <${Setting} title="Arm Channel" tip="RC channel used as the autothrottle arm switch. -1 disables and means always armed whenever the lock/airframe conditions are otherwise satisfied. Pre-configurable even before a compatible FC is connected." value=${config.autothrottleEnableRcChannel} setfn=${mksetfn('autothrottleEnableRcChannel')} type="spinner" min=${rcChannelMin} max=${rcChannelMax} labelFn=${rcChannelLabelFn} />
-      <div class="flex gap-4">
-        <div class="flex-1"><${Setting} title="Arm Range Min" tip="Lower bound (µs) of the arm switch's 'armed' pulse-width range. Together with the max bound, this closed range lets a 2-way, 3-way, or 6-pos switch's specific detent(s) mean armed, not just a single switch-high threshold. Pre-configurable even before an Arm Channel is assigned." value=${config.autothrottleEnableMinThresholdUs} setfn=${mksetfn('autothrottleEnableMinThresholdUs')} type="number" addonRight="µs" /><//>
-        <div class="flex-1"><${Setting} title="Arm Range Max" tip="Upper bound (µs) of the arm switch's 'armed' pulse-width range." value=${config.autothrottleEnableMaxThresholdUs} setfn=${mksetfn('autothrottleEnableMaxThresholdUs')} type="number" addonRight="µs" /><//>
       <//>
-      <${Setting} title="Slot-Lag Correction Accel" tip="Max closing acceleration/deceleration used to speed up/slow down beyond the leader's raw ground speed and correct for lagging/leading the follow slot. Higher values catch up faster but brake harder on final approach into the slot; 0 = pure feedforward (mirror the leader's speed exactly)." value=${config.speedCorrectionAccelCmS2} setfn=${mksetfn('speedCorrectionAccelCmS2')} type="number" addonRight="cm/s²" disabled=${status.platformType !== 1} />
-      <${Setting} title="Min Target Speed" tip="Lower clamp on the commanded speed setpoint. Set comfortably above this airframe's stall speed (roughly a third above stall is a reasonable starting point) — there is no dynamic sink-rate protection yet, so this is the feature's only stall-safety mechanism this iteration." value=${config.minTargetSpeedMps} setfn=${mksetfn('minTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.minTargetSpeedMps)} disabled=${status.platformType !== 1} />
-      <${Setting} title="Max Target Speed" tip="Upper clamp on the commanded speed setpoint." value=${config.maxTargetSpeedMps} setfn=${mksetfn('maxTargetSpeedMps')} type="number" addonRight="m/s" imperial=${asMph(config.maxTargetSpeedMps)} disabled=${status.platformType !== 1} />
-      <div class="text-xs text-gray-500 mt-2">Requires INAV 9.0+ (GVARs) and MSP2_INAV_MIXER support (INAV 1.9+) on the follower FC, plus an INAV-side Logic Condition that reads the Target Speed and Autothrottle Engage GVARs above and drives the mixer's PID3 setpoint accordingly.</div>
-      ${status.autothrottleArmed !== undefined && html`
-      <div class="grid grid-cols-2 gap-2 my-1 pt-3 mt-2 border-t">
-        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">RC Switch<//>
-        <div class="flex items-center"><${Colored} colors=${status.autothrottleArmed ? tipColors.green : tipColors.gray} text=${status.autothrottleArmed ? 'armed' : 'disarmed'} /><//>
+      <${Setting} title="Update rate" value=${cfg.emitHz} setfn=${mkNum('emitHz')} type="number" addonRight="Hz"
+        tip="How often the control cycle runs and a fresh waypoint goes to the flight controller. Faster tracks better but costs MSP bandwidth on the same link the rest of the telemetry uses." />
+      <${Setting} title="Peer timeout" value=${cfg.peerTimeoutMs} setfn=${mkNum('peerTimeoutMs')} type="number" addonRight="ms"
+        tip="How stale the leader's last POSITION may be before the lock goes to holding. An announce alone does not count - a peer beaconing without a fix is not followable." />
+      ${err('trigger')}
+    <//>
+
+    <${Card} title="Safety bounds" icon=${Icons.shield}>
+      <p class="text-xs text-gray-400 mb-3">
+        These are refusals, not suggestions: a slot that fails them is rejected by the firmware as well, so a
+        config accepted here can never be turned down later.
       <//>
-      `}
-      ${status.autothrottleEngaged !== undefined && html`
-      <div class="grid grid-cols-2 gap-2 my-1">
-        <label class="flex items-center text-sm text-gray-700 mr-2 font-medium">Engaged<//>
-        <div class="flex items-center"><${Colored} colors=${status.autothrottleEngaged ? tipColors.green : tipColors.gray} text=${status.autothrottleEngaged ? `yes (${(status.targetSpeedCmS / 100).toFixed(1)} m/s target)` : 'no'} /><//>
+      <${Setting} title="Min separation" value=${cfg.minSepM} setfn=${mkNum('minSepM')} type="number" addonRight="m"
+        tip="Minimum 3D magnitude of the slot. It forbids the degenerate 'fly into the leader' offset outright." />
+      <${Setting} title="Min vertical separation" value=${cfg.minVSepM} setfn=${mkNum('minVSepM')} type="number" addonRight="m"
+        tip="Applies only to stacked slots - directly above or below with essentially no horizontal offset. It is sized to absorb GPS vertical error, which is far worse than horizontal, not just physical clearance." />
+      <${Setting} title="Max target distance" value=${cfg.maxTargetDistM} setfn=${mkNum('maxTargetDistM')} type="number" addonRight="m"
+        tip="Runtime sanity bound on how far the solved target may be from us. A solution beyond it is refused rather than chased, which is what stops a stale or spoofed position dragging the aircraft away." />
+      <${Setting} title="Altitude floor" value=${cfg.minAltM} setfn=${mkNum('minAltM')} type="number" addonRight="m"
+        tip="Absolute floor on the commanded home-relative altitude. A clamp rather than a refusal: the target is raised to it and the condition GVAR says so." />
+      <${Setting} title="Min course speed" value=${cfg.minCourseSpeed} setfn=${mkNum('minCourseSpeed')} type="number" addonRight="m/s"
+        tip="Below this leader ground speed their reported course is noise, so the last valid course is held instead - otherwise a hovering leader would spin the whole slot geometry around." />
+      ${err('bounds')}
+    <//>
+
+    <${Card} title="Heading" icon=${Icons.scan}>
+      <${Setting} title="Heading mode" value=${cfg.headingMode} setfn=${mk('headingMode')} type="select" options=${HEADING_MODES}
+        tip="What to command as nose heading, sent through waypoint 255's p1 field and MSP_SET_HEAD. Off leaves the FC's own heading logic alone." />
+      <${Setting} title="Heading angle" value=${cfg.headingDeg} setfn=${mkNum('headingDeg')} type="number" addonRight="°"
+        disabled=${cfg.headingMode !== 'FIXED' && cfg.headingMode !== 'COURSE_RELATIVE'}
+        tip="An absolute compass heading in Fixed mode, or an offset added to the leader's course in Course-relative mode." />
+    <//>
+
+    <${Card} title="RC axis control" icon=${Icons.bolt}>
+      <p class="text-xs text-gray-400 mb-3">
+        Optionally drive one or more slot axes from a stick or knob, so the slot can be trimmed in flight.
+        An axis left disabled uses its configured offset above. Each axis needs its own channel.
       <//>
-      `}
+      <${Setting} title="Fore / aft channel" value=${cfg.rcLongChannel} setfn=${mk('rcLongChannel')} type="select" options=${rcOptions} />
+      <${Setting} title="Left / right channel" value=${cfg.rcLatChannel} setfn=${mk('rcLatChannel')} type="select" options=${rcOptions} />
+      <${Setting} title="Up / down channel" value=${cfg.rcVertChannel} setfn=${mk('rcVertChannel')} type="select" options=${rcOptions} />
+      ${rcInUse && html`<p class="text-xs text-gray-400 mt-2">
+        A live RC slot still has to pass the same geometry rules. When it does not, the last valid offset is
+        frozen in and the condition GVAR reports it, rather than the aircraft flying the bad slot.
+      <//>`}
+      ${err('rc')}
     <//>
   <//>
 
-  ${status.rcPreArmCheckFailed && html`
-  <div class="lg:col-span-2 py-1 border rounded bg-white flex flex-col">
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      <div class="bg-red-50 border border-red-200 text-red-800 rounded-md px-4 py-2 text-sm flex items-center gap-2">
-        <${Icons.info} class="w-5 h-5 shrink-0" />
-        Current RC stick/channel positions would produce an unsafe slot the instant follow engages. Center your sticks (or widen another RC-assigned axis) before arming.
-      <//>
-    <//>
-  <//>
-  `}
+  <div class="flex flex-col gap-4">
+    <${FollowStatusPanel} status=${status} />
 
-  <div class="lg:col-span-2 py-1 border rounded bg-white flex flex-col">
-    <div class="py-2 px-5 flex-1 flex flex-col relative">
-      <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-4 py-2 text-sm flex items-center gap-2 mb-2">
-        <${Icons.info} class="w-5 h-5 shrink-0" />
-        Apply applies changes immediately but they're lost on reboot. Use Save to EEPROM to make them permanent.
+    <${Card} title="GVAR reporting" icon=${Icons.list}>
+      <p class="text-xs text-gray-400 mb-3">
+        INAV global variables Follow writes, so logic conditions and the OSD can react to lock state.
+        Disabled means nothing is sent at all - zero MSP traffic until a pilot opts in.
       <//>
-      ${saveResult && html`<${Notification} ok=${saveResult.status} text=${saveResult.message} close=${() => setSaveResult(null)} />`}
-      <div class="flex place-content-end gap-2">
-        <${Button} icon=${Icons.save} onclick=${onsave} title="Apply" />
-        <${Button} icon=${Icons.shield} onclick=${onsaveEeprom} title="Save to EEPROM" />
+      <${Setting} title="Status GVAR" value=${cfg.statusGvarIndex} setfn=${mk('statusGvarIndex')} type="select" options=${gvarOptions}
+        tip="Receives 0 idle, 1 acquiring, 2 locked, 3 holding. Never renumber these in a logic condition." />
+      <${Setting} title="Condition GVAR" value=${cfg.conditionFlagsGvarIndex} setfn=${mk('conditionFlagsGvarIndex')} type="select" options=${gvarOptions}
+        tip="Receives a condition code: 0 none, 1 altitude floor clamped, 2 target too far, 3 RC gap settings invalid. Sequential rather than a bitmask - if several are true in one cycle the highest wins." />
+      <${Setting} title="Debug GVARs" value=${cfg.debug} setfn=${mk('debug')} type="switch"
+        tip="Writes the raw north/east/altitude/heading solution into GVARs 0-3 for bench work. RAM only: it is never persisted and is off again after a reboot." />
+      ${err('gvar')}
+    <//>
+
+    <${Card} title="Autothrottle" icon=${Icons.bolt}>
+      <p class="text-xs text-gray-400 mb-3">
+        Fixed-wing only. Follow publishes a target speed that an INAV logic condition can feed to cruise
+        throttle, so the follower closes or opens the slot gap instead of only steering at it.
       <//>
+      <${Setting} title="Arm channel" value=${cfg.autothrottleEnableRcChannel} setfn=${mk('autothrottleEnableRcChannel')} type="select" options=${rcOptions}
+        tip="The switch that arms autothrottle. Until this is set, none of the speed settings below matter and their defaults are allowed to sit un-configured." />
+      <${Setting} title="Arm range min" value=${cfg.autothrottleEnableMinThresholdUs} setfn=${mkNum('autothrottleEnableMinThresholdUs')} type="number" addonRight="µs"
+        disabled=${!atInUse} tip="Autothrottle arms while that channel reads between these two pulse widths." />
+      <${Setting} title="Arm range max" value=${cfg.autothrottleEnableMaxThresholdUs} setfn=${mkNum('autothrottleEnableMaxThresholdUs')} type="number" addonRight="µs"
+        disabled=${!atInUse} />
+      <${Setting} title="Min speed" value=${cfg.minTargetSpeedMps} setfn=${mkNum('minTargetSpeedMps')} type="number" addonRight="m/s"
+        disabled=${!atInUse} tip="Lower clamp on the published target speed. Keep it above the follower's stall speed - this number is the only thing between a slot-lag correction and a spin." />
+      <${Setting} title="Max speed" value=${cfg.maxTargetSpeedMps} setfn=${mkNum('maxTargetSpeedMps')} type="number" addonRight="m/s"
+        disabled=${!atInUse} tip="Upper clamp. Must be greater than the minimum." />
+      <${Setting} title="Slot-lag accel" value=${cfg.speedCorrectionAccelCmS2} setfn=${mkNum('speedCorrectionAccelCmS2')} type="number" addonRight="cm/s²"
+        disabled=${!atInUse}
+        tip="How hard to correct along-track position error, as a kinematic braking law. 0 is pure feedforward - match the leader's speed and let the gap be whatever it is." />
+      <${Setting} title="Target speed GVAR" value=${cfg.targetSpeedGvarIndex} setfn=${mk('targetSpeedGvarIndex')} type="select" options=${gvarOptions}
+        tip="Receives the target speed in cm/s while autothrottle is engaged." />
+      <${Setting} title="Engage GVAR" value=${cfg.autothrottleEngageGvarIndex} setfn=${mk('autothrottleEngageGvarIndex')} type="select" options=${gvarOptions}
+        tip="Receives 1 while autothrottle is engaged and 0 otherwise, so a logic condition can gate the throttle override on it." />
+      ${err('autothrottle')}
+    <//>
+
+    <${Card}>
+      <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved}
+        disabled=${!!blocked} blockedReason=${blocked} />
     <//>
   <//>
 <//>`;
+}
+
+// Same job as main.js's coerceNumbers, scoped to the flat Follow block: a
+// half-typed number must not be posted as 0.
+function coerceFollowNumbers(edited, base) {
+  const out = {};
+  Object.keys(edited).forEach(k => {
+    const e = edited[k], b = base ? base[k] : undefined;
+    if (typeof b === 'number' && (e === '' || e === null || !isFinite(+e))) out[k] = b;
+    else if (typeof b === 'number') out[k] = +e;
+    else out[k] = e;
+  });
+  return out;
 }

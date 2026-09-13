@@ -106,13 +106,9 @@ extern void test_gvar_unchanged_value_resent_after_heartbeat_elapses();
 extern void test_gvar_index_minus_one_never_sends();
 extern void test_condition_code_priority_highest_value_wins_not_first_computed();
 
-// test_config_and_record.cpp
+// test_config_validation.cpp
 extern void test_applyConfig_validation_rules_table();
 extern void test_rejected_applyConfig_leaves_live_config_untouched();
-extern void test_record_round_trip_preserves_fields_with_documented_rounding();
-extern void test_record_version_mismatch_is_rejected_and_keeps_defaults();
-extern void test_record_save_rate_limited_second_call_fails_first_persists();
-extern void test_record_codec_carries_every_field();
 extern void test_status_conditional_fields_present_and_absent_as_documented();
 
 // test_cross_mirror_fixture.cpp
@@ -211,10 +207,6 @@ int main(int, char**) {
 
     RUN_TEST(test_applyConfig_validation_rules_table);
     RUN_TEST(test_rejected_applyConfig_leaves_live_config_untouched);
-    RUN_TEST(test_record_round_trip_preserves_fields_with_documented_rounding);
-    RUN_TEST(test_record_version_mismatch_is_rejected_and_keeps_defaults);
-    RUN_TEST(test_record_save_rate_limited_second_call_fails_first_persists);
-    RUN_TEST(test_record_codec_carries_every_field);
     RUN_TEST(test_status_conditional_fields_present_and_absent_as_documented);
 
     RUN_TEST(test_applyConfig_matches_every_fixture_case);

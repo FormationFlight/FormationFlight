@@ -18,8 +18,9 @@
 //     MSP adapter (hal/MspFcLink). No call here ever waits on a serial port.
 //   - time is injected (service(now_ms)); no millis(), no globals, so the whole
 //     controller runs under host tests with fakes.
-//   - persistence is a POD FollowRecord the caller stores (hal/FollowConfigStore
-//     puts it in EEPROM); JSON for a future web UI is the caller's job too.
+//   - persistence is not its problem: the whole node configuration, this block
+//     included, is one JSON document owned by ff_core/config.h and written to
+//     LittleFS by hal/ConfigStore. v1's per-feature EEPROM record is gone.
 //
 #include <cstddef>
 #include <cstdint>
@@ -167,8 +168,6 @@ constexpr double kFollowPrearmMatchEpsilonM = 0.05;
 // Resend an unchanged GVAR at least this often (one dropped write can't leave
 // the OSD stale forever).
 constexpr uint32_t kFollowGvarHeartbeatMs = 5000;
-// Minimum interval between persistence commits (guards against a spammed save).
-constexpr uint32_t kFollowSaveMinIntervalMs = 2000;
 
 enum FollowLockState : uint8_t {
     FOLLOW_LOCK_IDLE = 0,
@@ -254,47 +253,6 @@ struct FollowConfig {
     X(maxTargetDistM) X(minAltM) X(minCourseSpeed) X(headingDeg)         \
     X(minTargetSpeedMps) X(maxTargetSpeedMps)
 
-// Persisted form of FollowConfig. Its own versioned record so a fresh or stale
-// store is detected independently of anything else: a version mismatch means
-// "nothing saved yet", and the compile-time defaults stay in force.
-// Version 7: v2 port -- targetPeer (u8 slot id) became targetUid (u32).
-constexpr uint16_t kFollowRecordVersion = 7;
-struct FollowRecord {
-    uint16_t version;
-
-    uint32_t targetUid;
-    uint16_t emitHz;
-    uint32_t peerTimeoutMs;
-    int16_t statusGvarIndex;
-    int16_t conditionFlagsGvarIndex;
-    int16_t rcLongChannel;
-    int16_t rcLatChannel;
-    int16_t rcVertChannel;
-    int16_t targetSpeedGvarIndex;
-    int16_t autothrottleEngageGvarIndex;
-    int16_t autothrottleEnableRcChannel;
-    int16_t autothrottleEnableMinThresholdUs;
-    int16_t autothrottleEnableMaxThresholdUs;
-    int16_t speedCorrectionAccelCmS2;
-
-    int16_t ofsLongM;
-    int16_t ofsLatM;
-    int16_t ofsVertM;
-    int16_t minSepM;
-    int16_t minVSepM;
-    int16_t maxTargetDistM;
-    int16_t minAltM;
-    int16_t minCourseSpeed;
-    int16_t headingDeg;
-    int16_t minTargetSpeedMps;
-    int16_t maxTargetSpeedMps;
-
-    uint8_t headingMode;
-};
-
-FollowRecord followToRecord(const FollowConfig& cfg);
-FollowConfig followFromRecord(const FollowRecord& rec);
-
 // The flight controller, as Follow sees it. Reads are answered from a cache the
 // adapter keeps fresh on its own schedule; writes are buffered, never awaited.
 class IFollowFc {
@@ -370,6 +328,11 @@ bool candidateOffsetOk(const FollowOffset& candidate, const FollowOffset& refere
                        double minSepM, double minVSepM);
 bool rcCandidateMatchesStaticDefault(const FollowOffset& candidate, const FollowConfig& config);
 
+// Every rule applyConfig() enforces, as a free function so the config layer can
+// validate a candidate Follow block without needing a controller instance.
+// *err is left pointing at a static message on failure.
+bool followValidateConfig(const FollowConfig& cfg, const char** err = nullptr);
+
 // A peer is stale if absent/invalid, beaconing without a GPS fix, or its last
 // *position* is older than timeout_ms (an announce alone does not make a peer
 // followable).
@@ -390,13 +353,6 @@ public:
     // peer acquire if targetUid changed) and returns true. On failure leaves the
     // live config untouched and points *err at a static message.
     bool applyConfig(const FollowConfig& newConfig, const char** err = nullptr);
-
-    // Persistence. loadRecord() applies a stored record if its version matches
-    // and it validates; returns false (config untouched) otherwise.
-    bool loadRecord(const FollowRecord& rec);
-    // Rate-limited: returns false with *err set if a save happened within
-    // kFollowSaveMinIntervalMs; otherwise fills out and stamps the save time.
-    bool requestSave(uint32_t now_ms, FollowRecord& out, const char** err = nullptr);
 
     FollowStatus status(uint32_t now_ms) const;
 
@@ -428,8 +384,6 @@ private:
     FollowConfig config_;
     bool started_ = false;
     uint32_t nextRunMs_ = 0;
-    bool everSaved_ = false;
-    uint32_t lastSaveMs_ = 0;
 
     FollowLockState state_ = FOLLOW_LOCK_IDLE;
     uint32_t lockedUid_ = 0;

@@ -1,109 +1,154 @@
 'use strict';
 
-// Pure logic extracted from follow.js -- no DOM/Preact
-// dependency, so this module is importable both by follow.js (the UI) and
-// by a plain Node test (test/follow-logic.test.js), run with
-// `node --test`, no build step, no new dependency.
+// Pure Follow logic -- no DOM, no Preact, no fetch. Importable both by follow.js
+// (the UI) and by a plain Node test (`node --test`), which is why it has no
+// imports of its own: adding one would drag the whole bundle into the test.
+//
+// Everything here mirrors a rule that the firmware also enforces
+// (ff::followValidateConfig in lib/ff_core/follow.cpp). Client-side validation
+// is a UX nicety -- it lets Save say *which* field is wrong before a round trip
+// -- and never a substitute for the server-side check, which a raw REST client
+// gets regardless.
 
-// Mirrors FollowManager::applyConfig()'s stacked-slot epsilon
-// (src/lib/Follow/FollowManager.cpp) so client-side validation agrees with
-// the server-side check for the same config — both must exist,
-// client-side isn't a substitute for server-side.
+// ff::kFollowStackedHorizontalEpsilonM. Below this horizontal magnitude a slot
+// counts as "stacked", and the vertical gap rule applies instead.
 export const STACKED_HORIZONTAL_EPSILON_M = 0.5;
 
-// targetPeer is 0 = FIRST_ACTIVE or a peer identity. On v2 firmware that is a
-// 32-bit node UID, so there is no range rule (the C++ applyConfig() has none);
-// the v1 UI's 1-6 slot-id select is just a narrower way of producing one.
-// Mirrors MSP.h's MSP_MAX_SUPPORTED_CHANNELS (src/lib/MSP/MSP.h).
-const MSP_MAX_SUPPORTED_CHANNELS = 16;
+// ff::kMspMaxRcChannels -- MSP_RC's channel count.
+export const MSP_MAX_SUPPORTED_CHANNELS = 16;
 
-// The AHEAD/BEHIND/LEFT/RIGHT/ABOVE/BELOW "friendly grid" is purely a
-// client-side view over the canonical signed offset that's actually stored
-// (ofsLongM/ofsLatM/ofsVertM) — the server only ever sees that one
-// representation.
+// GVAR slots INAV exposes.
+const MAX_GVAR_INDEX = 7;
+
+// The AHEAD/BEHIND, LEFT/RIGHT, ABOVE/BELOW grid is purely a client-side view
+// over the canonical signed offsets that are actually stored and flown
+// (ofsLongM / ofsLatM / ofsVertM, metres in the leader's track-relative frame).
+// The firmware only ever sees the signed numbers.
 export function slotFromOffset(v, posLabel, negLabel, zeroLabel) {
   return v > 0 ? posLabel : v < 0 ? negLabel : zeroLabel;
 }
 
-// Recomputes a signed offset from a slot label + unsigned gap, e.g. going
-// from ('BEHIND', 15) back to -15.
+// The inverse: ('BEHIND', 15) back to -15. Takes the magnitude of gapM so a
+// stray minus typed into the gap box can't silently flip the slot.
 export function offsetFromSlot(slot, gapM, posLabel, negLabel) {
   const g = Math.abs(+gapM);
   return slot === posLabel ? g : slot === negLabel ? -g : 0;
 }
 
-// Client-side mirror of FollowManager::applyConfig()'s validation
-// (offset geometry rules + basic field sanity). Blocks Save on failure; the server
-// re-validates independently, so this is a UX nicety, not the guard.
-// Returns { section, message } (section names the panel that owns the
-// offending field, so the error can render next to the inputs it's about)
-// or null if cfg is valid.
-export function validateConfig(cfg) {
-  if (!(cfg.emitHz > 0)) return { section: 'trigger', message: 'Emit rate must be > 0' };
-  if (!(cfg.peerTimeoutMs > 0)) return { section: 'trigger', message: 'Peer timeout must be > 0' };
-  if (cfg.minSepM < 0 || cfg.minVSepM < 0 || cfg.minAltM < 0) {
-    return { section: 'bounds', message: 'Min separation / vertical separation / altitude floor must be >= 0' };
-  }
-  if (!(cfg.maxTargetDistM > 0)) return { section: 'bounds', message: 'Max target distance must be > 0' };
-  if (cfg.minCourseSpeed < 0) return { section: 'bounds', message: 'Min course speed must be >= 0' };
-  if (cfg.targetPeer < 0) return { section: 'trigger', message: 'Target Peer must be >= 0' };
-
-  const long = +cfg.ofsLongM, lat = +cfg.ofsLatM, vert = +cfg.ofsVertM;
+// The geometry half of the check, split out because service() applies the same
+// rules to a live RC-derived offset, not just the configured one.
+// Returns a message string, or null when the offset is acceptable.
+export function offsetGeometryError(offset, minSepM, minVSepM) {
+  const long = +offset.longitudinal_m, lat = +offset.lateral_m, vert = +offset.vertical_m;
   const horizontalMag = Math.sqrt(long * long + lat * lat);
   const mag3d = Math.sqrt(horizontalMag * horizontalMag + vert * vert);
-  if (mag3d < cfg.minSepM) return { section: 'bounds', message: 'Slot magnitude is below Min Separation' };
-  if (horizontalMag < STACKED_HORIZONTAL_EPSILON_M && Math.abs(vert) < cfg.minVSepM) {
-    return { section: 'bounds', message: 'Stacked slot\'s vertical offset is below Min Vertical Separation' };
+  // Minimum 3D separation: forbids the degenerate "fly into the leader" slot.
+  if (mag3d < minSepM) return 'slot magnitude is below minSepM (minimum 3D separation)';
+  // A stacked slot has to clear the leader by more than GPS vertical error.
+  if (horizontalMag < STACKED_HORIZONTAL_EPSILON_M && Math.abs(vert) < minVSepM) {
+    return "stacked slot's vertical offset is below minVSepM";
   }
-  const gvarFields = [
-    ['statusGvarIndex', 'Status'], ['conditionFlagsGvarIndex', 'Condition Flags'],
-    ['targetSpeedGvarIndex', 'Target Speed'], ['autothrottleEngageGvarIndex', 'Autothrottle Engage'],
-  ];
-  for (const [k, label] of gvarFields) {
-    if (cfg[k] !== -1 && (cfg[k] < -1 || cfg[k] > 7)) {
-      return { section: 'gvar', message: `${label} GVAR Index must be -1 (Disabled) or 0-7` };
-    }
+  return null;
+}
+
+const GVAR_FIELDS = [
+  ['statusGvarIndex', 'Status', 'gvar'],
+  ['conditionFlagsGvarIndex', 'Condition Flags', 'gvar'],
+  ['targetSpeedGvarIndex', 'Target Speed', 'autothrottle'],
+  ['autothrottleEngageGvarIndex', 'Autothrottle Engage', 'autothrottle'],
+];
+
+const RC_AXIS_FIELDS = [
+  ['rcLongChannel', 'rcLongChannel'],
+  ['rcLatChannel', 'rcLatChannel'],
+  ['rcVertChannel', 'rcVertChannel'],
+];
+
+/**
+ * Client-side mirror of ff::followValidateConfig().
+ *
+ * The rules are checked in the same order the firmware checks them, so a config
+ * with two faults reports the same one here as it would over REST -- otherwise
+ * fixing the field the UI complained about would just surface a different error
+ * from the device, which reads as the UI being wrong.
+ *
+ * Returns `{ section, message }` -- `section` names the panel that owns the
+ * offending field, so the error can be rendered next to the inputs it is about
+ * -- or null when the config is valid.
+ */
+export function validateConfig(cfg) {
+  if (!(cfg.emitHz > 0)) return { section: 'trigger', message: 'emitHz must be > 0' };
+  if (!(cfg.peerTimeoutMs > 0)) return { section: 'trigger', message: 'peerTimeoutMs must be > 0' };
+  if (cfg.minSepM < 0 || cfg.minVSepM < 0 || cfg.minAltM < 0) {
+    return { section: 'bounds', message: 'minSepM/minVSepM/minAltM must be >= 0' };
   }
-  const assignedGvarFields = gvarFields.filter(([k]) => cfg[k] !== -1);
-  for (let i = 0; i < assignedGvarFields.length; i++) {
-    for (let j = i + 1; j < assignedGvarFields.length; j++) {
-      if (cfg[assignedGvarFields[i][0]] === cfg[assignedGvarFields[j][0]]) {
-        return { section: 'gvar', message: `${assignedGvarFields[i][1]} and ${assignedGvarFields[j][1]} GVAR indices must be different (or both Disabled)` };
-      }
+  if (!(cfg.maxTargetDistM > 0)) return { section: 'bounds', message: 'maxTargetDistM must be > 0' };
+  if (cfg.minCourseSpeed < 0) return { section: 'bounds', message: 'minCourseSpeed must be >= 0' };
+
+  // targetUid: the firmware has no range rule (0 = nearest followable peer, any
+  // other value is a valid 32-bit UID). This only catches what a text box can
+  // produce that a uint32_t cannot hold, and stays quiet when the field is
+  // absent so a partial config still validates.
+  if (cfg.targetUid !== undefined && cfg.targetUid !== null) {
+    const uid = +cfg.targetUid;
+    if (!Number.isInteger(uid) || uid < 0 || uid > 0xFFFFFFFF) {
+      return { section: 'trigger', message: 'targetUid must be a 32-bit value (0 = nearest peer)' };
     }
   }
 
-  const rcAxisFields = [
-    ['rcLongChannel', 'Longitudinal'], ['rcLatChannel', 'Lateral'], ['rcVertChannel', 'Vertical'],
-  ];
-  for (const [k, label] of rcAxisFields) {
-    if (cfg[k] !== -1 && (cfg[k] < 1 || cfg[k] > MSP_MAX_SUPPORTED_CHANNELS)) {
-      return { section: 'rc', message: `${label} Channel must be -1 (Disabled) or 1-${MSP_MAX_SUPPORTED_CHANNELS}` };
+  for (const [key, label, section] of GVAR_FIELDS) {
+    if (cfg[key] < -1 || cfg[key] > MAX_GVAR_INDEX) {
+      return { section, message: `${key} must be -1 (disabled) or 0-${MAX_GVAR_INDEX} (${label})` };
     }
   }
-  const rcChannels = rcAxisFields.map(([k]) => cfg[k]).filter(c => c !== -1);
-  if (new Set(rcChannels).size !== rcChannels.length) {
-    return { section: 'rc', message: 'Each RC axis must use a different channel (or Disabled)' };
+  for (const [key] of RC_AXIS_FIELDS) {
+    if (cfg[key] !== -1 && (cfg[key] < 1 || cfg[key] > MSP_MAX_SUPPORTED_CHANNELS)) {
+      return { section: 'rc', message: `${key} must be -1 (disabled) or 1-${MSP_MAX_SUPPORTED_CHANNELS}` };
+    }
   }
   if (cfg.autothrottleEnableRcChannel !== -1 &&
       (cfg.autothrottleEnableRcChannel < 1 || cfg.autothrottleEnableRcChannel > MSP_MAX_SUPPORTED_CHANNELS)) {
-    return { section: 'autothrottle', message: `Arm Channel must be -1 (Disabled) or 1-${MSP_MAX_SUPPORTED_CHANNELS}` };
+    return { section: 'autothrottle', message: `autothrottleEnableRcChannel must be -1 (disabled) or 1-${MSP_MAX_SUPPORTED_CHANNELS}` };
+  }
+
+  // Overlap rules. Two features writing the same GVAR, or two axes reading the
+  // same stick, is always a misconfiguration rather than a clever trick.
+  const usedGvars = GVAR_FIELDS.filter(([k]) => cfg[k] !== -1);
+  for (let i = 0; i < usedGvars.length; i++) {
+    for (let j = i + 1; j < usedGvars.length; j++) {
+      if (cfg[usedGvars[i][0]] === cfg[usedGvars[j][0]]) {
+        return { section: usedGvars[i][2], message: 'GVAR indices must be unique (or -1/disabled)' };
+      }
+    }
+  }
+  const rcChannels = RC_AXIS_FIELDS.map(([k]) => cfg[k]).filter(c => c !== -1);
+  if (new Set(rcChannels).size !== rcChannels.length) {
+    return { section: 'rc', message: 'rcLongChannel/rcLatChannel/rcVertChannel must be unique (or -1/disabled)' };
   }
   if (cfg.autothrottleEnableRcChannel !== -1 && rcChannels.includes(cfg.autothrottleEnableRcChannel)) {
-    return { section: 'autothrottle', message: 'Autothrottle Arm Channel must be different from the RC axis channels (or Disabled)' };
+    return { section: 'autothrottle', message: 'autothrottleEnableRcChannel must differ from the RC axis channels (or -1/disabled)' };
   }
   if (cfg.autothrottleEnableMaxThresholdUs <= cfg.autothrottleEnableMinThresholdUs) {
-    return { section: 'autothrottle', message: 'Autothrottle Arm Range Max must be greater than Min' };
+    return { section: 'autothrottle', message: 'autothrottleEnableMaxThresholdUs must be > autothrottleEnableMinThresholdUs' };
   }
-  // Only matters once the pilot has assigned an arm channel -- i.e.
-  // intends to use autothrottle. The 0/0 defaults are an invalid range on
-  // their own so they can sit un-configured until then.
+  // The speed clamps only matter once a pilot has wired up an arm channel, so
+  // the compiled-in 0/0 (an invalid range on its own) can sit there until then.
   if (cfg.autothrottleEnableRcChannel !== -1 &&
       (!(cfg.minTargetSpeedMps > 0) || !(cfg.maxTargetSpeedMps > cfg.minTargetSpeedMps))) {
-    return { section: 'autothrottle', message: 'Min Target Speed must be > 0 and Max Target Speed must be > Min Target Speed when Arm Channel is set' };
+    return {
+      section: 'autothrottle',
+      message: 'minTargetSpeedMps must be > 0 and maxTargetSpeedMps must be > minTargetSpeedMps when autothrottleEnableRcChannel is set',
+    };
   }
   if (cfg.speedCorrectionAccelCmS2 < 0) {
-    return { section: 'autothrottle', message: 'Slot-Lag Correction Accel must be >= 0' };
+    // Fed through copysignf() as a magnitude; negative would brake the wrong way.
+    return { section: 'autothrottle', message: 'speedCorrectionAccelCmS2 must be >= 0' };
   }
+
+  const geo = offsetGeometryError(
+    { longitudinal_m: cfg.ofsLongM, lateral_m: cfg.ofsLatM, vertical_m: cfg.ofsVertM },
+    cfg.minSepM, cfg.minVSepM);
+  if (geo) return { section: 'bounds', message: geo };
+
   return null;
 }

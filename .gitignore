@@ -11,6 +11,6 @@ platformio.ini
 # ...but our library manifests and test fixtures are real source, not build artifacts.
 !lib/**/library.json
 !docs/spec/fixtures/*.json
-src/lib/WiFi/staticfilehandler.inc
-src/lib/WiFi/webcontent.h
+src/hal/staticfilehandler.inc
+src/hal/webcontent.h
 *.pyc

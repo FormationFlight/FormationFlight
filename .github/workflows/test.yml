@@ -67,5 +67,5 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Run mock_server.py validate_config() tests
+      - name: Run mock_server.py tests (v2 API + config validation)
         run: python3 test/test_mock_server.py
