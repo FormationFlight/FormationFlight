@@ -39,6 +39,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 from mock_server import (  # noqa: E402
+    config_to_json,
     FRAME_LOG_CAPACITY,
     FRAME_RESULTS,
     HEADING_MODE_NAMES,
@@ -66,7 +67,7 @@ def follow_from_fixture(baseline, overrides):
     """Builds a Follow config block from a fixture case.
 
     The fixture keeps the v1 key name `targetPeer`; in v2 that field is
-    `follow.targetUid` (a 32-bit peer UID, 0 = first active). The C++ mirror
+    `follow.targetUid` (a 32-bit peer UID, 0 = nearest peer). The C++ mirror
     does the same remap in test_cross_mirror_fixture.cpp's configFromJson(),
     so all three validators see the same case.
     """
@@ -576,7 +577,7 @@ class ConfigApiTest(ApiTestCase):
             self.node.ever_saved = False
 
     def test_get_config_matches_the_defaults(self):
-        self.assertEqual(self.get_json("/api/config"), default_config())
+        self.assertEqual(self.get_json("/api/config"), config_to_json(default_config()))
 
     def test_post_merges_and_returns_the_new_config(self):
         status, body, _ = self.request(
@@ -629,7 +630,7 @@ class ConfigApiTest(ApiTestCase):
         status, body, _ = self.request("POST", "/api/config/reset")
         self.assertEqual(status, 200, body)
         self.assertEqual(body, "reset")
-        self.assertEqual(self.get_json("/api/config"), default_config())
+        self.assertEqual(self.get_json("/api/config"), config_to_json(default_config()))
 
     def test_save_is_rate_limited(self):
         """Flash has a finite number of erase cycles; a Save button does not."""

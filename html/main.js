@@ -3,7 +3,7 @@ import { h, render, useRef, useState, useEffect, html, Router } from './bundle.j
 import LoadingSpinner, {
   Icons, tipColors, Button, Colored, Stat, Setting, Notification, Banner, Card, Note,
   SectionTitle, ConfigActions, PeerTable, RadarScope, RadioCard, FrameLogView, Sparkline,
-  Th, Td, peerPartial, present, num, uptime, latLon, speedMs, courseDeg, DASH,
+  Th, Td, peerPartial, present, num, age, uptime, latLon, speedMs, courseDeg, DASH,
 } from './components.js';
 import FollowPage from './follow.js';
 
@@ -191,7 +191,9 @@ function Dashboard({ status }) {
       tipText=${cryptoOpen ? 'open' : badCrypto ? badCrypto + ' rejected' : 'ok'}
       tipIcon=${cryptoOpen ? Icons.warn : badCrypto ? Icons.warn : Icons.ok}
       tipColors=${cryptoOpen ? tipColors.yellow : badCrypto ? tipColors.yellow : tipColors.green}
-      subText=${html`${num(crypto.bad_tag)} bad tag · ${num(crypto.replay)} replay · tx counter ${num(crypto.tx_counter)}`} />
+      subText=${cryptoOpen
+        ? 'No cipher. Frames go out in the clear and anything can be injected.'
+        : html`${num(crypto.bad_tag)} bad tag · ${num(crypto.replay)} replay · tx counter ${num(crypto.tx_counter)}`} />
   <//>
 
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -385,9 +387,6 @@ function Settings() {
   return html`
 <div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
   <${Card} title="Node" icon=${Icons.settings}>
-    ${result && html`<${Notification} ok=${result.ok} timeout=${result.ok ? 2500 : 9000}
-      text=${result.text} close=${() => setResult(null)} />`}
-
     <${Setting} title="Name" value=${cfg.node.name} setfn=${mk('node', 'name')}
       tip="What other aircraft show for this node, up to 15 characters. Leave it empty and the node derives a name from its UID at boot, so it is never nameless." />
     <${Setting} title="Listen only" value=${cfg.node.listen_only} setfn=${mk('node', 'listen_only')} type="switch"
@@ -397,7 +396,7 @@ function Settings() {
       note="The passphrase is stretched to the 128-bit AES-CCM group key; everyone who should see each other sets the same one." />
     <${Setting} title="Group passphrase" value=${cfg.security.passphrase} setfn=${mk('security', 'passphrase')}
       placeholder="(default key)"
-      tip="Empty is NOT 'no encryption': it means the default key, which is public, so traffic is still encrypted and authenticated but anyone with stock firmware can read it. The literal word 'none' disables the cipher entirely - bench use only. A stored passphrase reads back as dots, and posting the dots back leaves it alone." />
+      tip="Empty is NOT 'no encryption': it means the default key, which is public, so traffic is still encrypted and authenticated but anyone with stock firmware can read it. The literal word 'none' disables the cipher entirely - bench use only. A stored passphrase reads back as dots, and posting the dots back leaves it alone. Changing it only takes effect at the next boot." />
     <p class="text-xs text-gray-400 mt-1">
       ${cfg.security.passphrase === 'none'
         ? 'Cipher disabled. Frames go out in the clear and anything can be injected.'
@@ -442,7 +441,6 @@ function Settings() {
         tip="Ceiling on the interval - the worst update rate you are willing to accept on a crowded channel. Must be at least the fastest interval." />
       <${Setting} title="Jitter" value=${rate.jitter_frac} setfn=${mk('rate', 'jitter_frac')} type="number"
         tip="Random spread applied to every transmission, as a fraction of the interval. It is what stops nodes that computed the same interval from colliding on the same schedule forever. 0 to 0.99." />
-      <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved} />
     <//>
 
     <${Card} title="Peers, MSP and GNSS" icon=${Icons.list}>
@@ -454,7 +452,6 @@ function Settings() {
         tip="How often peer positions are pushed to the flight controller as MSP radar targets, which is what puts them on the OSD." />
       <${Setting} title="GNSS rate" value=${cfg.gnss.rate_hz} setfn=${mk('gnss', 'rate_hz')} type="number" addonRight="Hz"
         tip="Update rate requested from a directly attached GNSS receiver, 1-25 Hz. Irrelevant when position comes from the flight controller over MSP." />
-      <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved} />
     <//>
 
     <${Card} title="Factory reset" icon=${Icons.warn}>
@@ -472,6 +469,8 @@ function Settings() {
 
   <div class="lg:col-span-2">
     <${Card}>
+      ${result && html`<${Notification} ok=${result.ok} timeout=${result.ok ? 2500 : 9000}
+        text=${result.text} close=${() => setResult(null)} />`}
       <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved} />
     <//>
   <//>
@@ -486,6 +485,9 @@ const SIM_MODES = [
   ['circle', 'Circle - orbits the point at the radius'],
   ['hex', 'Hexagon - closed circuit, stepped turns, altitude ramp'],
 ];
+
+// The device holds four at once and answers a fifth with a 409.
+const MAX_SIM_PEERS = 4;
 
 const blankSimPeer = () => ({
   uid: '', name: 'SIM1', mode: 'hex', lat: 0, lon: 0, alt_m: 120,
@@ -513,8 +515,12 @@ function Simulator({ status, sim, refreshSim }) {
   const setEnabled = on => {
     setBusy(true);
     return postJson('/api/config', { sim: { enabled: on } })
-      .then(() => postEmpty('/api/config/save'))
-      .then(() => setResult({ ok: true, text: on ? 'Simulator enabled' : 'Simulator disabled' }))
+      .then(() => postEmpty('/api/config/save')
+        // The apply already took effect; only the flash write can be refused
+        // here (saves are rate-limited to one every two seconds), and saying so
+        // is better than implying the toggle did not work.
+        .catch(e => { throw new Error(e.message + ' - the change is live, but has not been written to flash.'); }))
+      .then(() => setResult({ ok: true, text: on ? 'Simulator enabled and saved' : 'Simulator disabled and saved' }))
       .catch(e => setResult({ ok: false, text: e.message }))
       .then(() => setBusy(false));
   };
@@ -541,6 +547,7 @@ function Simulator({ status, sim, refreshSim }) {
 
   const peers = (sim && sim.peers) || [];
   const needsRadius = draft.mode === 'circle' || draft.mode === 'hex';
+  const full = peers.length >= MAX_SIM_PEERS;
 
   return html`
 <div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -573,9 +580,13 @@ function Simulator({ status, sim, refreshSim }) {
       disabled=${!needsRadius}
       tip="Orbit radius for circle mode, hexagon side length for hex mode. Must be greater than zero for both." />
     <div class="flex justify-end mt-4">
-      <${Button} title="Add peer" icon=${Icons.plus} onclick=${addPeer} disabled=${!enabled} />
+      <${Button} title="Add peer" icon=${Icons.plus} onclick=${addPeer} disabled=${!enabled || full} />
     <//>
-    ${!enabled && html`<p class="text-xs text-gray-400 mt-2 text-right">Enable the simulator first - the device refuses peers while it is off.<//>`}
+    ${!enabled
+      ? html`<p class="text-xs text-gray-400 mt-2 text-right">Enable the simulator first - the device refuses peers while it is off.<//>`
+      : full
+        ? html`<p class="text-xs text-gray-400 mt-2 text-right">${MAX_SIM_PEERS} simulated peers is the limit. Remove one to add another.<//>`
+        : html`<p class="text-xs text-gray-400 mt-2 text-right">Posting a UID that already exists replaces that peer and restarts its path.<//>`}
   <//>
 
   <${Card} title="Running simulated peers" icon=${Icons.list}
@@ -588,7 +599,8 @@ function Simulator({ status, sim, refreshSim }) {
         <table class="min-w-full border-separate border-spacing-0">
           <thead><tr>
             <${Th} title="UID" /><${Th} title="Name" /><${Th} title="Mode" />
-            <${Th} title="Position" /><${Th} title="Speed" /><${Th} title="State" /><${Th} title="" />
+            <${Th} title="Position" /><${Th} title="Speed" /><${Th} title="Elapsed" />
+            <${Th} title="State" /><${Th} title="" />
           </tr></thead>
           <tbody>
             ${peers.map(p => html`
@@ -598,6 +610,8 @@ function Simulator({ status, sim, refreshSim }) {
               <${Td} text=${p.mode} />
               <${Td} cls="font-mono" text=${present(p.lat) ? (+p.lat).toFixed(5) + ', ' + (+p.lon).toFixed(5) : DASH} />
               <${Td} cls="font-mono" text=${num(p.speed_ms, 1, ' m/s')} />
+              <${Td} cls="font-mono text-slate-500 dark:text-slate-400" text=${present(p.elapsed_ms) ? age(p.elapsed_ms) : DASH}
+                title="How long this peer has been flying its path. It restarts whenever the peer is posted again." />
               <${Td}><${Colored} text=${p.running ? 'running' : 'stopped'}
                 colors=${p.running ? tipColors.green : tipColors.gray}
                 title=${p.running ? 'Transmitting on the virtual radio.' : 'Defined, but the simulator is off.'} /><//>

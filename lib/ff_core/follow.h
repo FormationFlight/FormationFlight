@@ -9,7 +9,7 @@
 // the seams, which now match the Node core:
 //
 //   - peers come from the UID-keyed ff::PeerTable (Node::peers()), not the v1
-//     slot-id PeerManager. The target is a 32-bit UID (0 = first active), and
+//     slot-id PeerManager. The target is a 32-bit UID (0 = nearest peer), and
 //     because a UID is a stable identity the v1 "slot id reused by a different
 //     aircraft" hold-state hack is gone.
 //   - our own position comes from ff::ILocationSource, the same source the

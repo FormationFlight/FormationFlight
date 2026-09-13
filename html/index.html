@@ -26,10 +26,12 @@
     <link href="formationflight.css" rel="stylesheet" />
     <link href="tailwind.css" rel="stylesheet" />
     <!-- Loaded last: it supplies the dark: variants and the handful of ordinary
-         utilities the vendored tailwind.css build was purged of. -->
+         utilities the vendored tailwind.css build was purged of, plus the two
+         surface classes that stand in for dark:bg-slate-900 (see theme.css:
+         that one utility exists in tailwind.css, but as a media query). -->
     <link href="theme.css" rel="stylesheet" />
   </head>
-  <body class="h-full field-bg"></body>
+  <body class="h-full page-bg"></body>
   <script src="history.min.js"></script>
   <script type="module" src="main.js"></script>
 </html>

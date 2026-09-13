@@ -39,6 +39,8 @@
 
 using namespace ff;
 
+static constexpr size_t kJsonCapacity = 4096;
+
 void setUp() {}
 void tearDown() {}
 
@@ -729,6 +731,49 @@ void test_a_non_string_value_leaves_a_string_field_alone() {
     assertSettingsEqual(before, cfg);
 }
 
+// targetUid is a UID, so it travels as an 8-char lower-case hex string like
+// every other UID in the API rather than as a JSON number. Pinned here because
+// it is the one field whose wire type differs from its struct type, and a
+// silent regression to a number would only show up as a UI that cannot target
+// a peer.
+void test_target_uid_is_carried_as_hex() {
+    Settings cfg;
+    cfg.follow.targetUid = 0xAABBCCDDu;
+
+    DynamicJsonDocument doc(kJsonCapacity);
+    JsonObject root = doc.to<JsonObject>();
+    configToJson(cfg, root);
+    TEST_ASSERT_TRUE(root["follow"]["targetUid"].is<const char*>());
+    TEST_ASSERT_EQUAL_STRING("aabbccdd", root["follow"]["targetUid"].as<const char*>());
+
+    // And back, into a struct that held something else, so a no-op would fail.
+    Settings loaded;
+    loaded.follow.targetUid = 0x11111111u;
+    const char* err = nullptr;
+    TEST_ASSERT_TRUE(configMergeJson(doc.as<JsonObjectConst>(), loaded, &err));
+    TEST_ASSERT_EQUAL_UINT32(0xAABBCCDDu, loaded.follow.targetUid);
+
+    // Zero is the "nearest peer" sentinel and must still round-trip.
+    cfg.follow.targetUid = 0;
+    DynamicJsonDocument zeroDoc(kJsonCapacity);
+    JsonObject zeroRoot = zeroDoc.to<JsonObject>();
+    configToJson(cfg, zeroRoot);
+    TEST_ASSERT_EQUAL_STRING("00000000", zeroRoot["follow"]["targetUid"].as<const char*>());
+    TEST_ASSERT_TRUE(configMergeJson(zeroDoc.as<JsonObjectConst>(), loaded, &err));
+    TEST_ASSERT_EQUAL_UINT32(0, loaded.follow.targetUid);
+}
+
+// A hand-written config file is easier to get right if a bare number also works.
+void test_target_uid_still_accepts_a_number() {
+    Settings cfg;
+    DynamicJsonDocument doc(1024);
+    JsonObject root = doc.to<JsonObject>();
+    root.createNestedObject("follow")["targetUid"] = 305419896;  // 0x12345678
+    const char* err = nullptr;
+    TEST_ASSERT_TRUE(configMergeJson(doc.as<JsonObjectConst>(), cfg, &err));
+    TEST_ASSERT_EQUAL_UINT32(0x12345678u, cfg.follow.targetUid);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
 
@@ -757,6 +802,8 @@ int main(int, char**) {
 
     RUN_TEST(test_over_long_strings_are_truncated_not_overflowed);
     RUN_TEST(test_a_non_string_value_leaves_a_string_field_alone);
+    RUN_TEST(test_target_uid_is_carried_as_hex);
+    RUN_TEST(test_target_uid_still_accepts_a_number);
 
     return UNITY_END();
 }

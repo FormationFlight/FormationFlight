@@ -2,9 +2,9 @@
 import { h, useState, useEffect, useRef, html } from './bundle.js';
 import {
   Icons, tipColors, Card, Colored, Setting, SectionTitle, Notification, ConfigActions,
-  present, num, age, DASH, uidToHex, hexToUid, isHexUid, latLon,
+  present, num, age, DASH, normUid, isHexUid, ZERO_UID, latLon,
 } from './components.js';
-import { validateConfig, slotFromOffset, offsetFromSlot } from './follow-logic.js';
+import { validateConfig, slotFromOffset, offsetFromSlot, offsetGeometryError } from './follow-logic.js';
 
 // Duplicated deliberately, one line per module: scripts/mock_server.py rewrites
 // this exact statement in every .js it serves, and an imported constant would
@@ -268,7 +268,8 @@ export default function FollowPage({ status }) {
     setBase(r.follow);
     if (!loaded.current) {
       loaded.current = true;
-      setUidText(r.follow.targetUid ? uidToHex(r.follow.targetUid) : '');
+      const t = r.follow.targetUid;
+      setUidText(t && t !== ZERO_UID ? t : '');
     }
   });
   useEffect(() => { load().catch(e => setResult({ ok: false, text: e.message })); }, []);
@@ -280,7 +281,7 @@ export default function FollowPage({ status }) {
   const mkNum = k => v => setField(k, v === '' ? '' : +v);
 
   const uidBad = uidText !== '' && !isHexUid(uidText);
-  const candidate = cfg ? { ...cfg, targetUid: uidText === '' ? 0 : hexToUid(uidText) } : null;
+  const candidate = cfg ? { ...cfg, targetUid: uidText === '' ? ZERO_UID : normUid(uidText) } : null;
   const numericCandidate = candidate ? coerceFollowNumbers(candidate, base) : null;
   const invalid = numericCandidate ? validateConfig(numericCandidate) : null;
   const blocked = uidBad
@@ -306,6 +307,12 @@ export default function FollowPage({ status }) {
   const peers = (status && status.peers) || [];
   const err = sec => (invalid && invalid.section === sec
     ? html`<p class="text-xs text-red-600 mt-1">${invalid.message}<//>` : '');
+  // The slot card only owns the geometry rules. Everything else that reports
+  // itself as a bounds problem (a bad maxTargetDistM, say) belongs under the
+  // bounds inputs, not under the offsets it has nothing to do with.
+  const geoErr = offsetGeometryError(
+    { longitudinal_m: cfg.ofsLongM, lateral_m: cfg.ofsLatM, vertical_m: cfg.ofsVertM },
+    cfg.minSepM, cfg.minVSepM);
   const rcInUse = cfg.rcLongChannel !== -1 || cfg.rcLatChannel !== -1 || cfg.rcVertChannel !== -1;
   const atInUse = cfg.autothrottleEnableRcChannel !== -1;
 
@@ -313,14 +320,12 @@ export default function FollowPage({ status }) {
 <div class="m-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
   <div class="lg:col-span-2 flex flex-col gap-4">
     <${Card} title="Slot geometry" icon=${Icons.scan}>
-      ${result && html`<${Notification} ok=${result.ok} timeout=${result.ok ? 2500 : 9000}
-        text=${result.text} close=${() => setResult(null)} />`}
       <p class="text-xs text-gray-400 mb-3">
         Where to sit relative to the leader, in their own track-relative frame - so the slot rotates with them
         rather than staying pinned to a compass direction.
       <//>
       <${OffsetEditor} cfg=${cfg} setField=${setField} />
-      ${err('bounds')}
+      ${geoErr && html`<p class="text-xs text-red-600 mt-1">${geoErr}<//>`}
     <//>
 
     <${Card} title="Trigger and target" icon=${Icons.bolt}>
@@ -437,6 +442,8 @@ export default function FollowPage({ status }) {
     <//>
 
     <${Card}>
+      ${result && html`<${Notification} ok=${result.ok} timeout=${result.ok ? 2500 : 9000}
+        text=${result.text} close=${() => setResult(null)} />`}
       <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved}
         disabled=${!!blocked} blockedReason=${blocked} />
     <//>

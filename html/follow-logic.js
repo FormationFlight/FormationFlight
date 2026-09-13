@@ -85,14 +85,14 @@ export function validateConfig(cfg) {
   if (!(cfg.maxTargetDistM > 0)) return { section: 'bounds', message: 'maxTargetDistM must be > 0' };
   if (cfg.minCourseSpeed < 0) return { section: 'bounds', message: 'minCourseSpeed must be >= 0' };
 
-  // targetUid: the firmware has no range rule (0 = nearest followable peer, any
-  // other value is a valid 32-bit UID). This only catches what a text box can
-  // produce that a uint32_t cannot hold, and stays quiet when the field is
-  // absent so a partial config still validates.
+  // targetUid: the firmware has no range rule (all-zero means nearest followable
+  // peer, anything else is a valid 32-bit UID). It travels as an 8-char hex
+  // string like every other UID, so this only catches what a text box can
+  // produce that is not one. Stays quiet when the field is absent, so a partial
+  // config still validates.
   if (cfg.targetUid !== undefined && cfg.targetUid !== null) {
-    const uid = +cfg.targetUid;
-    if (!Number.isInteger(uid) || uid < 0 || uid > 0xFFFFFFFF) {
-      return { section: 'trigger', message: 'targetUid must be a 32-bit value (0 = nearest peer)' };
+    if (!/^[0-9a-fA-F]{1,8}$/.test(String(cfg.targetUid).trim())) {
+      return { section: 'trigger', message: 'targetUid must be 1-8 hexadecimal characters' };
     }
   }
 

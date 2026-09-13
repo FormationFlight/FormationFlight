@@ -123,6 +123,26 @@
 .dark\:hover\:enabled\:bg-slate-600:hover:enabled:is(.dark *) { background-color: #475569 }
 .dark\:disabled\:bg-slate-800:disabled:is(.dark *) { background-color: #1e293b }
 
+/* ---- Surfaces -----------------------------------------------------------
+ *
+ * These two exist instead of `bg-slate-100 dark:bg-slate-900` and
+ * `bg-white dark:bg-slate-900`, and they are not stylistic.
+ *
+ * tailwind.css was built with darkMode:'media'. Its four surviving `dark:`
+ * utilities - including dark:bg-slate-900 - therefore sit inside
+ * `@media (prefers-color-scheme: dark)` with no `.dark` ancestor in the
+ * selector, so they fire off the operating system's preference and ignore the
+ * toggle in the header entirely. On a machine set to dark, a user who picked
+ * light mode got white cards with slate-900 input boxes inside them. There is
+ * no way to cancel one of those rules from a later stylesheet without also
+ * cancelling the light-mode background it is layered over, so the fix is to
+ * stop using the name. Everything else here is class-based and behaves.
+ */
+.page-bg { background-color: #f1f5f9 }   /* slate-100 */
+.field-bg { background-color: #ffffff }
+.dark .page-bg { background-color: #0f172a }   /* slate-900 */
+.dark .field-bg { background-color: #0f172a }
+
 /* ---- Local additions ----------------------------------------------------- */
 
 /* A radio a peer has NOT been heard on still occupies its slot in the row, and

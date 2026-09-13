@@ -137,7 +137,9 @@ EARTH_RADIUS_M = 6371000.0
 # C++ struct's fixed-width member would narrow it), "f" double, "b" bool.
 _FOLLOW_FIELD_TYPES = {
     # FOLLOW_CONFIG_DIRECT_FIELDS
-    "targetUid": ("i", 32, False),
+    # Carried on the wire as an 8-char hex string, like every other UID in the
+    # API; stored here as an int, matching the C++ struct member.
+    "targetUid": ("u", 32, False),
     "emitHz": ("i", 16, False),
     "peerTimeoutMs": ("i", 32, False),
     "statusGvarIndex": ("i", 16, True),
@@ -233,10 +235,18 @@ def default_config():
 SECRET_FIELDS = (("security", "passphrase"), ("wifi", "psk"), ("wifi", "ap_psk"))
 
 
+def config_to_json(cfg):
+    """configToJson(): the wire form of the config. Fields stored as native
+    integers that travel as strings are converted here, in one place."""
+    out = copy.deepcopy(cfg)
+    out["follow"]["targetUid"] = "%08x" % (out["follow"].get("targetUid", 0) & 0xFFFFFFFF)
+    return out
+
+
 def redact_config(cfg):
     """configToJson(..., redact_secrets=true): a set secret becomes the
     placeholder, an unset one stays the empty string."""
-    out = copy.deepcopy(cfg)
+    out = config_to_json(cfg)
     for section, key in SECRET_FIELDS:
         if out.get(section, {}).get(key):
             out[section][key] = REDACTED_SECRET
@@ -286,7 +296,17 @@ def _merge_scalar(src, key, dst, kind, bits=32, signed=True):
     if key not in src:
         return
     v = src[key]
-    if kind == "i":
+    if kind == "u":
+        # configMergeJson() takes a hex string, and still accepts a bare number
+        # so a hand-written config file is easy to get right.
+        if isinstance(v, str):
+            try:
+                dst[key] = int(v, 16) & 0xFFFFFFFF
+            except ValueError:
+                pass
+        else:
+            dst[key] = _as_int(v, 32, False)
+    elif kind == "i":
         dst[key] = _as_int(v, bits, signed)
     elif kind == "f":
         dst[key] = _as_float(v)

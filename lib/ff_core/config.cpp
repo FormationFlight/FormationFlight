@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace ff {
@@ -48,6 +50,18 @@ void mergeFollow(JsonObjectConst in, FollowConfig& f) {
 #define MERGE_ROUNDED(field) mergeVal(in, #field, f.field);
     FOLLOW_CONFIG_ROUNDED_FIELDS(MERGE_ROUNDED)
 #undef MERGE_ROUNDED
+    // targetUid travels as an 8-char hex string like every other UID in the API,
+    // so it has to be re-read after the macro above (which took it as a number
+    // and got 0). A bare number is still accepted, because a config file written
+    // by hand is easier to get right that way than to reject over a quote.
+    if (in.containsKey("targetUid")) {
+        JsonVariantConst v = in["targetUid"];
+        if (v.is<const char*>() && v.as<const char*>() != nullptr) {
+            f.targetUid = static_cast<uint32_t>(std::strtoul(v.as<const char*>(), nullptr, 16));
+        } else {
+            f.targetUid = v.as<uint32_t>();
+        }
+    }
     mergeVal(in, "debug", f.debug);
     if (in.containsKey("headingMode")) {
         const char* m = in["headingMode"].as<const char*>();
@@ -72,6 +86,12 @@ void followToJson(const FollowConfig& f, JsonObject out) {
     FOLLOW_CONFIG_DIRECT_FIELDS(JSON_FIELD)
     FOLLOW_CONFIG_ROUNDED_FIELDS(JSON_FIELD)
 #undef JSON_FIELD
+    // Overwrite the number the macro just wrote with the hex form. ArduinoJson
+    // copies a non-const char* rather than storing the pointer, so the local
+    // buffer going out of scope is safe (and test_config's round trip proves it).
+    char target_uid[9];
+    std::snprintf(target_uid, sizeof(target_uid), "%08x", static_cast<unsigned>(f.targetUid));
+    out["targetUid"] = target_uid;
     out["headingMode"] = followHeadingModeName(f.headingMode);
     out["triggerMode"] = followTriggerModeName(static_cast<FollowTriggerMode>(FOLLOW_TRIGGER_MODE));
     out["debug"] = f.debug;

@@ -84,14 +84,11 @@ export function uptime(ms) {
   return `${mm}m ${String(ss).padStart(2, '0')}s`;
 }
 
-// UIDs travel as 8-char lower-case hex in /api/status and /api/frames, but the
-// config carries follow.targetUid as a plain JSON number. These two convert
-// between the forms so only one of them ever reaches the screen.
-export const uidToHex = n => (present(n) ? (n >>> 0).toString(16).padStart(8, '0') : '');
-export const hexToUid = s => {
-  const v = parseInt(String(s || '').trim().replace(/^0x/i, ''), 16);
-  return isNaN(v) ? 0 : v >>> 0;
-};
+// Every UID in the API is an 8-char lower-case hex string, config included.
+// normUid pads what a user typed into that canonical form so a UID copied off
+// the dashboard and one typed as "5eed1" are the same value on the wire.
+export const normUid = s => String(s || '').trim().replace(/^0x/i, '').toLowerCase().padStart(8, '0');
+export const ZERO_UID = '00000000';
 export const isHexUid = s => /^[0-9a-fA-F]{1,8}$/.test(String(s || '').trim());
 
 /** Peer status bits from ff::PositionFlags. */
@@ -462,6 +459,15 @@ export function peerPartial(peer, radios) {
 }
 
 /** One radio's counters. The rejection counters are the interesting half. */
+// Hoisted for the same reason as SectionTitle: declared inside RadioCard it
+// would be a new function identity on every poll, and preact would rebuild
+// eighteen little DOM nodes a second instead of patching six numbers.
+const Counter = ({ label, value, tone, tip }) => html`
+  <div title=${tip} class="flex flex-col">
+    <span class="text-xs uppercase tracking-wide text-gray-400">${label}<//>
+    <span class="font-mono text-sm ${tone || 'text-slate-800 dark:text-slate-100'}">${num(value)}<//>
+  <//>`;
+
 export function RadioCard({ radio }) {
   const r = radio;
   const rejected = (r.rx_crypto_fail || 0) + (r.rx_replay || 0) + (r.rx_decode_fail || 0);
@@ -469,11 +475,6 @@ export function RadioCard({ radio }) {
     : r.sim ? ['simulated', 'bg-violet-100 text-violet-900 dark:bg-violet-900 dark:text-violet-100']
       : rejected > 0 ? ['rejecting', tipColors.yellow]
         : ['enabled', tipColors.green];
-  const Counter = ({ label, value, tone, tip }) => html`
-  <div title=${tip} class="flex flex-col">
-    <span class="text-xs uppercase tracking-wide text-gray-400">${label}<//>
-    <span class="font-mono text-sm ${tone || 'text-slate-800 dark:text-slate-100'}">${num(value)}<//>
-  <//>`;
   return html`
 <${Card} title=${r.name} icon=${Icons.antenna}
   right=${html`<${Colored} text=${state[0]} colors=${state[1]} />`}>

@@ -16,9 +16,12 @@ is deliberate, so a newer UI against older firmware degrades rather than breaks.
 
 ## Conventions
 
-- UIDs are lower-case hex strings, 8 characters, no prefix: `"1a2b3c4d"`. They
-  are 32-bit values but JSON numbers are doubles, and a UID that round-trips
-  through a double is a UID that can come back wrong.
+- UIDs are lower-case hex strings, 8 characters, no prefix: `"1a2b3c4d"`. Every
+  UID in the API, config included, uses this form, so a UID copied off the
+  dashboard can be pasted straight into a setting. `"00000000"` is the
+  "no peer" / "pick one for me" sentinel. On the way in, 1 to 8 hex digits are
+  accepted and a bare JSON number still works, so a hand-edited config file is
+  easy to get right.
 - Latitude and longitude are integers in degrees x 1e7, matching the wire
   protocol and MSP. Altitude is metres, speed cm/s, course decidegrees.
 - Times are milliseconds. `*_ms` on its own is a duration or an uptime;
@@ -104,13 +107,21 @@ Absent is not the same as zero, and the firmware omits rather than zero-fills:
 - `peers[].distance_m`, `bearing_deg` and `rel_alt_m` appear only when this node
   has its own fix; without one there is nothing to measure from.
 - `crypto` carries its counters only when the cipher is on. With it off the
-  object is just `{"mode": "none"}`.
+  object is just `{"mode": "none"}`. `mode` is `"ccm"` or `"none"`.
+- `radios[].last_rssi` and `peers[].rssi` are `0` when there is no reading,
+  rather than absent: ESP-NOW and the virtual radio report no signal level at
+  all. Zero is not a plausible RSSI in dBm, so it is unambiguous, but it is the
+  one place this API uses a sentinel instead of omitting the field.
 
 `follow.locked_uid` and `follow.locked_name` are always present, reading
 `"00000000"` and `""` when nothing is locked.
 
 `radios[].sim` marks the virtual radio that simulated traffic arrives on, so the
 UI can make it obvious the numbers are not real RF.
+
+`peers[].flags` is the wire status bitmask from `ff::PositionFlags`: bit 0 (`1`)
+the peer reports itself armed, bit 1 (`2`) it has a GPS fix. A peer without a
+fix is tracked and displayed but is never followable.
 
 ## GET /api/config
 
@@ -172,9 +183,11 @@ after total counter N, so a polling client can ask for what it missed.
 `decode_fail`, `oversize`. `type` is 1 for a position beacon, 2 for an
 announce, 0 when the frame never decoded far enough to tell.
 
-`total` is the count since boot, which exceeds `capacity`; a client whose
-`since` is further behind than the ring is deep has missed frames and should say
-so rather than pretending the list is complete.
+Entries carry no sequence number of their own. They are newest-first, so entry
+`i` in the array has sequence `total - 1 - i`; that is what `since` is compared
+against. `total` is the count since boot and keeps climbing past `capacity`, so
+a client whose `since` is further behind than the ring is deep has missed
+frames, and should say how many rather than pretending the list is complete.
 
 ## Simulated traffic
 
@@ -240,4 +253,9 @@ makes it out.
 ## POST /update
 
 Firmware upload, multipart form, unchanged from v1. The response body is the
-result string; the node reboots on success.
+result string; the node reboots on success. An ESP8266 image may be `.bin` or
+`.bin.gz`; an ESP32 image must be `.bin`. Anything else is rejected on the first
+chunk, before a single byte is written to flash.
+
+There is no progress endpoint. A browser client should read upload progress from
+`XMLHttpRequest.upload`, which is why the UI does not use `fetch` here.

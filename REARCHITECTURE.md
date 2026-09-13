@@ -168,7 +168,7 @@ Done and committed on `v2`:
   reporting, fixed-wing autothrottle). It now lives in `ff_core/follow.*` as a
   pure, host-tested `FollowController` that reads the Node's UID-keyed
   `PeerTable` and `ILocationSource` and talks to the FC through an `IFollowFc`
-  seam. Targets are 32-bit UIDs (0 = first active); the v1 "slot id reused by
+  seam. Targets are 32-bit UIDs (0 = nearest peer); the v1 "slot id reused by
   another aircraft" hold-state hack is gone because a UID is a stable identity.
   Geodesy was extracted from v1's GNSSManager into pure `ff_core/geo.*`.
   The FC side is `hal/MspFcLink`, which replaces `MspLocationSource`: one

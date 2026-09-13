@@ -710,7 +710,8 @@ bool followValidateConfig(const FollowConfig& newConfig, const char** err) {
         *err = "minCourseSpeed must be >= 0";
         return false;
     }
-    // targetUid: any value is a valid UID (0 = first active); no range rule.
+    // targetUid: any value is a valid UID (0 = nearest followable peer); no
+    // range rule.
     if (newConfig.statusGvarIndex < -1 || newConfig.statusGvarIndex > 7) {
         *err = "statusGvarIndex must be -1 (disabled) or 0-7";
         return false;
