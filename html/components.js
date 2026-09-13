@@ -471,10 +471,15 @@ const Counter = ({ label, value, tone, tip }) => html`
 export function RadioCard({ radio }) {
   const r = radio;
   const rejected = (r.rx_crypto_fail || 0) + (r.rx_replay || 0) + (r.rx_decode_fail || 0);
+  // Frames lost inside the node rather than on the air. They outrank a
+  // rejection in the header because a rejection is someone else's traffic,
+  // while a drop is this node failing to keep up with its own.
+  const dropped = (r.rx_dropped || 0) + (r.tx_dropped || 0);
   const state = !r.enabled ? ['disabled', tipColors.gray]
     : r.sim ? ['simulated', 'bg-violet-100 text-violet-900 dark:bg-violet-900 dark:text-violet-100']
-      : rejected > 0 ? ['rejecting', tipColors.yellow]
-        : ['enabled', tipColors.green];
+      : dropped > 0 ? ['dropping', tipColors.red]
+        : rejected > 0 ? ['rejecting', tipColors.yellow]
+          : ['enabled', tipColors.green];
   return html`
 <${Card} title=${r.name} icon=${Icons.antenna}
   right=${html`<${Colored} text=${state[0]} colors=${state[1]} />`}>
@@ -485,6 +490,10 @@ export function RadioCard({ radio }) {
     <${Counter} label="Crypto fail" value=${r.rx_crypto_fail} tone=${r.rx_crypto_fail ? 'text-red-600' : ''} tip="Authentication tag did not verify: a different group passphrase, corruption, or someone else's traffic." />
     <${Counter} label="Replay" value=${r.rx_replay} tone=${r.rx_replay ? 'text-yellow-600' : ''} tip="Frame counter was not above the last one accepted from that sender - a recorded frame re-injected, or a peer that rebooted inside the 10 s resync window." />
     <${Counter} label="Decode fail" value=${r.rx_decode_fail} tone=${r.rx_decode_fail ? 'text-red-600' : ''} tip="Decrypted cleanly but the payload was not a packet this firmware understands." />
+  <//>
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Counter} label="RX dropped" value=${r.rx_dropped} tone=${r.rx_dropped ? 'text-red-600' : ''} tip="Frames the driver threw away because its receive ring filled before the main loop drained it. Lost inside this node, so no on-air counter anywhere will show them - this is the first sign the node is over its budget." />
+    <${Counter} label="TX dropped" value=${r.tx_dropped} tone=${r.tx_dropped ? 'text-red-600' : ''} tip="Transmits the driver refused because the radio was still busy with the previous frame, or because the send queue was full. The frame never went out and nothing on the air records it." />
   <//>
   <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
     <div class="flex flex-col" title="Signal strength of the most recent frame received on this radio.">
@@ -510,6 +519,63 @@ export function RadioCard({ radio }) {
       <span class="font-mono text-sm text-slate-800 dark:text-slate-100">${num(r.peers)}<//>
     <//>
   <//>
+<//>`;
+}
+
+/**
+ * WiFi, which lives next to the radios because the channel is really an
+ * ESP-NOW property: the two share one 2.4 GHz radio and cannot be on different
+ * channels. Joining an external network hands the choice to the router, so the
+ * channel the node is on and the channel it was told to use can come apart -
+ * and when they do, ESP-NOW quietly stops hearing everyone still on the
+ * configured one while every counter here keeps looking healthy.
+ */
+export function WifiCard({ wifi }) {
+  const w = wifi || {};
+  const sta = w.mode === 'ap_sta';
+  const mismatch = present(w.channel) && present(w.configured_channel)
+    && w.channel !== w.configured_channel;
+  const value = 'font-mono text-sm text-slate-800 dark:text-slate-100';
+  const label = 'text-xs uppercase tracking-wide text-gray-400';
+  const channelTone = mismatch ? 'text-red-600' : 'text-slate-800 dark:text-slate-100';
+  // The chip carries the association state too: in ap_sta the node does not
+  // block on the join, so "joined" and "still trying" are both normal states
+  // and worth telling apart at a glance.
+  const chip = !sta ? ['own AP', tipColors.gray, 'Running our own AP only, so nothing else gets a say in the channel.']
+    : w.sta_connected ? ['AP + joined', tipColors.green, 'Running our own AP and associated with another network, which is the one choosing the channel.']
+      : ['AP + joining', tipColors.yellow, 'Set to join another network but not associated yet. The node boots, beacons and flies regardless; the association completes in the background or it does not.'];
+  return html`
+<${Card} title="WiFi" icon=${Icons.link}
+  right=${html`<${Colored} text=${chip[0]} colors=${chip[1]} title=${chip[2]} />`}>
+  <div class="grid grid-cols-2 gap-3">
+    <div class="flex flex-col" title="The channel the radio is actually on, and therefore the channel ESP-NOW is talking on.">
+      <span class=${label}>Channel<//>
+      <span class="font-mono text-sm ${channelTone}">${num(w.channel)}<//>
+    <//>
+    <div class="flex flex-col" title="The channel this node was configured for. A router we joined overrides it.">
+      <span class=${label}>Configured<//>
+      <span class="font-mono text-sm ${channelTone}">${num(w.configured_channel)}<//>
+    <//>
+  <//>
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <div class="flex flex-col" title="Clients associated with this node's own access point - whoever has this page open, mostly.">
+      <span class=${label}>AP clients<//>
+      <span class=${value}>${num(w.ap_clients)}<//>
+    <//>
+    ${sta && html`
+    <div class="flex flex-col" title="Signal strength of the network this node joined. Nothing to do with the peer link.">
+      <span class=${label}>Station RSSI<//>
+      <span class=${value}>${present(w.sta_rssi) ? w.sta_rssi + ' dBm' : DASH}<//>
+    <//>`}
+  <//>
+  ${mismatch && html`
+  <div class="mt-4 flex items-start gap-2 text-sm text-red-900 dark:text-red-200 bg-red-100 dark:bg-red-900 rounded px-3 py-2">
+    <${Icons.warn} class="w-5 h-5 shrink-0" />
+    <span>
+      <span class="font-semibold">On channel ${w.channel}, not the configured ${w.configured_channel}.<//>
+      ${' '}ESP-NOW follows the channel the radio is actually on, so peers configured for a different one will not be heard at all.
+    <//>
+  <//>`}
 <//>`;
 }
 

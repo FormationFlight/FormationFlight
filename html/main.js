@@ -2,7 +2,7 @@
 import { h, render, useRef, useState, useEffect, html, Router } from './bundle.js';
 import LoadingSpinner, {
   Icons, tipColors, Button, Colored, Stat, Setting, Notification, Banner, Card, Note,
-  SectionTitle, ConfigActions, PeerTable, RadarScope, RadioCard, FrameLogView, Sparkline,
+  SectionTitle, ConfigActions, PeerTable, RadarScope, RadioCard, WifiCard, FrameLogView, Sparkline,
   Th, Td, peerPartial, present, num, age, uptime, latLon, speedMs, courseDeg, DASH,
 } from './components.js';
 import FollowPage from './follow.js';
@@ -320,6 +320,7 @@ function Radios({ status }) {
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     ${radios.map(r => html`<${RadioCard} key=${r.index} radio=${r} />`)}
     ${!radios.length && html`<p class="text-sm text-slate-400">No radios reported.<//>`}
+    ${status.wifi && html`<${WifiCard} wifi=${status.wifi} />`}
   <//>
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
     <div class="lg:col-span-2">
@@ -424,6 +425,13 @@ function Settings() {
       tip="Network to join when 'Run own AP' is off. Required in that mode." />
     <${Setting} title="Join password" value=${wifi.psk} setfn=${mk('wifi', 'psk')} disabled=${wifi.ap}
       tip="Password for that network. Reads back as dots once set; posting the dots back leaves it alone." />
+    <${Setting} title="Channel" value=${wifi.channel} setfn=${mk('wifi', 'channel')} type="number"
+      tip="Channel for the node's own AP, 1-13, and therefore for ESP-NOW: the two share one radio. Every node that should hear every other over ESP-NOW must agree on it, and 1, 6 and 11 are the non-overlapping choices. Joining an external network hands the choice to that router instead - the Radios page shows the channel actually in use." />
+    <p class="text-xs text-gray-400 mt-1">
+      ${wifi.ap
+        ? 'ESP-NOW runs on this channel. Nodes set to a different one will not hear this node at all.'
+        : 'Ignored while joining a network: the router picks the channel, and ESP-NOW follows it.'}
+    <//>
 
   <//>
 

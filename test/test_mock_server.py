@@ -152,7 +152,8 @@ class DefaultConfigTest(unittest.TestCase):
         self.assertEqual(cfg["gnss"], {"rate_hz": 10})
         self.assertEqual(cfg["radios"], {"espnow_enabled": True, "lora_enabled": True,
                                          "lora_power_dbm": 0})
-        self.assertEqual(cfg["wifi"], {"ap": True, "ssid": "", "psk": "", "ap_psk": ""})
+        self.assertEqual(cfg["wifi"], {"ap": True, "ssid": "", "psk": "", "ap_psk": "",
+                                       "channel": 1})
         self.assertEqual(cfg["sim"], {"enabled": False})
 
     def test_follow_defaults_mirror_follow_h(self):
@@ -242,6 +243,15 @@ class ConfigValidateTest(unittest.TestCase):
         self.check(lambda c: c["radios"].update(lora_power_dbm=-1), msg)
         self.check(lambda c: c["radios"].update(lora_power_dbm=31), msg)
         self.check(lambda c: c["radios"].update(lora_power_dbm=30), None)
+
+    def test_wifi_channel(self):
+        """ESP-NOW shares the WiFi radio, so this is the channel the whole mesh
+        has to agree on. 14 is Japan-only and the ESP will not take it."""
+        msg = "wifi.channel must be 1-13"
+        self.check(lambda c: c["wifi"].update(channel=0), msg)
+        self.check(lambda c: c["wifi"].update(channel=14), msg)
+        self.check(lambda c: c["wifi"].update(channel=1), None)
+        self.check(lambda c: c["wifi"].update(channel=13), None)
 
     def test_wifi_station_needs_an_ssid(self):
         self.check(lambda c: c["wifi"].update(ap=False),
@@ -420,7 +430,7 @@ class StatusShapeTest(ApiTestCase):
     def test_status_top_level_shape(self):
         doc = self.get_json("/api/status")
         for key in ("node", "location", "radios", "peers", "crypto", "stats", "fc",
-                    "follow", "sim", "reboot_required", "config_corrupt"):
+                    "follow", "sim", "wifi", "reboot_required", "config_corrupt"):
             self.assertIn(key, doc)
         self.assertIsInstance(doc["reboot_required"], bool)
         self.assertIsInstance(doc["config_corrupt"], bool)
@@ -451,10 +461,17 @@ class StatusShapeTest(ApiTestCase):
             for key in ("index", "name", "enabled", "sim", "tx", "rx_ok",
                         "rx_crypto_fail", "rx_replay", "rx_decode_fail", "rx_self",
                         "last_rssi", "last_rx_age_ms", "beacon_interval_ms",
-                        "airtime_ms", "peers"):
+                        "airtime_ms", "peers", "rx_dropped", "tx_dropped"):
                 self.assertIn(key, radio, radio.get("name"))
             self.assertIsInstance(radio["sim"], bool)
             self.assertIsInstance(radio["enabled"], bool)
+            # Frames lost inside the node. Always present, even at zero: the UI
+            # has to be able to tell "none dropped" from "this firmware does not
+            # report it".
+            self.assertIsInstance(radio["rx_dropped"], int)
+            self.assertIsInstance(radio["tx_dropped"], int)
+            self.assertGreaterEqual(radio["rx_dropped"], 0)
+            self.assertGreaterEqual(radio["tx_dropped"], 0)
 
     def test_peer_blocks(self):
         peers = self.get_json("/api/status")["peers"]
@@ -483,6 +500,39 @@ class StatusShapeTest(ApiTestCase):
             self.assertIn(key, doc["fc"])
         self.assertIn(doc["fc"]["platform"], (0, 1, 2, 3, 4, 5, 255))
         self.assertEqual(set(doc["sim"]), {"enabled", "peers"})
+
+    def test_wifi_block_in_ap_mode(self):
+        """Running our own AP, the configured channel is the channel: nobody
+        else gets a say, so the two must agree."""
+        wifi = self.get_json("/api/status")["wifi"]
+        self.assertEqual(set(wifi), {"mode", "channel", "configured_channel", "ap_clients"})
+        self.assertEqual(wifi["mode"], "ap")
+        self.assertEqual(wifi["channel"], wifi["configured_channel"])
+        self.assertTrue(1 <= wifi["channel"] <= 13)
+        self.assertIsInstance(wifi["ap_clients"], int)
+        # The station keys only exist in ap_sta; there is no station to describe.
+        self.assertNotIn("sta_connected", wifi)
+        self.assertNotIn("sta_rssi", wifi)
+
+    def test_wifi_block_in_station_mode(self):
+        """Joining a network hands the channel to the router, so `channel` and
+        `configured_channel` can disagree -- and ESP-NOW follows `channel`,
+        which is why the mock makes them disagree on purpose."""
+        try:
+            status, body, _ = self.request(
+                "POST", "/api/config",
+                {"wifi": {"ap": False, "ssid": "bench", "channel": 11}})
+            self.assertEqual(status, 200, body)
+            wifi = self.get_json("/api/status")["wifi"]
+            self.assertEqual(wifi["mode"], "ap_sta")
+            self.assertEqual(wifi["configured_channel"], 11)
+            self.assertNotEqual(wifi["channel"], wifi["configured_channel"])
+            self.assertIsInstance(wifi["sta_connected"], bool)
+            self.assertLess(wifi["sta_rssi"], 0)
+        finally:
+            status, body, _ = self.request(
+                "POST", "/api/config", {"wifi": {"ap": True, "channel": 1}})
+            self.assertEqual(status, 200, body)
 
     def test_follow_block_and_its_absent_when_unknown_fields(self):
         follow = self.get_json("/api/status")["follow"]

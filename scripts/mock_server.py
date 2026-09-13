@@ -225,7 +225,7 @@ def default_config():
         "msp": {"radar_interval_ms": 100},
         "gnss": {"rate_hz": 10},
         "radios": {"espnow_enabled": True, "lora_enabled": True, "lora_power_dbm": 0},
-        "wifi": {"ap": True, "ssid": "", "psk": "", "ap_psk": ""},
+        "wifi": {"ap": True, "ssid": "", "psk": "", "ap_psk": "", "channel": 1},
         "sim": {"enabled": False},
         "follow": default_follow_config(),
     }
@@ -443,6 +443,10 @@ def validate_config(cfg):
         return "at least one radio must be enabled"
     if radios.get("lora_power_dbm", 0) < 0 or radios.get("lora_power_dbm", 0) > 30:
         return "radios.lora_power_dbm must be 0 (target default) or 1-30"
+    # The AP's channel, and therefore ESP-NOW's: the two share one radio. 14 is
+    # Japan-only and the ESP refuses it, so the range stops at 13.
+    if wifi.get("channel", 1) < 1 or wifi.get("channel", 1) > 13:
+        return "wifi.channel must be 1-13"
     if not wifi.get("ap") and not wifi.get("ssid"):
         return "wifi.ssid is required when wifi.ap is false"
     # WPA2 will not accept a shorter key, and an AP that silently comes up open
@@ -506,6 +510,7 @@ def merge_config(incoming, cfg):
         _copy_str(s, "ssid", nxt["wifi"], MAX_SSID_LEN)
         _copy_str(s, "psk", nxt["wifi"], MAX_PSK_LEN)
         _copy_str(s, "ap_psk", nxt["wifi"], MAX_PSK_LEN)
+        _merge_scalar(s, "channel", nxt["wifi"], "i", 8, False)
     s = section("sim")
     if s is not None:
         _merge_scalar(s, "enabled", nxt["sim"], "b")
@@ -712,6 +717,10 @@ class MovingPeer:
 
 NODE_UID = 0x1A2B3C4D
 NODE_VERSION = "v2.0.0-mock"
+
+# The channel a router puts us on once we join an external network, which is
+# what makes the actual and the configured channel differ in station mode.
+ROUTER_CHANNEL = 6
 HOME_LAT = 37.0
 HOME_LON = -122.0
 HOME_ALT_M = 120.0
@@ -740,7 +749,15 @@ RADIO_AIRTIME_MS = {RADIO_ESPNOW: 0.4, RADIO_LORA: 61.2, RADIO_SIM: 0.0}
 
 def _new_radio_stats():
     return {"tx": 0, "rx_ok": 0, "rx_crypto_fail": 0, "rx_replay": 0,
-            "rx_decode_fail": 0, "rx_self": 0, "last_rx_ms": 0, "last_rssi": 0}
+            "rx_decode_fail": 0, "rx_self": 0, "last_rx_ms": 0, "last_rssi": 0,
+            "rx_dropped": 0, "tx_dropped": 0}
+
+
+# Frames lost inside the node rather than on the air, faked on LoRa only: 61 ms
+# of airtime per frame is what actually runs a node out of budget first, and
+# keeping one radio clean is what makes the UI's non-zero styling legible.
+LORA_TX_DROP_EVERY = 3    # one in three LoRa transmits finds the radio still busy
+LORA_RX_DROP_EVERY = 23   # receive ring overruns, in frames
 
 
 class MockNode:
@@ -854,6 +871,14 @@ class MockNode:
             if not self._radio_enabled(radio):
                 radio = self._first_enabled_radio()
             announce = (seq // 5) % 16 == 0
+            # Refused by the driver because the previous frame is still going
+            # out. Nothing is transmitted and nothing is logged: the frame log
+            # is the main loop's view, and this frame never left the driver.
+            # Offset so the node's very first transmit is never the dropped one
+            # -- a freshly started mock should look alive immediately.
+            if radio == RADIO_LORA and (seq // 20) % LORA_TX_DROP_EVERY == 2:
+                self.radio_stats[radio]["tx_dropped"] += 1
+                return
             self.radio_stats[radio]["tx"] += 1
             self.tx_counter += 1
             if announce:
@@ -870,6 +895,13 @@ class MockNode:
         if not self._radio_enabled(radio):
             radio = self._first_enabled_radio()
         rs = self.radio_stats[radio]
+
+        # Thrown away by the driver because its receive ring filled before the
+        # main loop drained it. Invisible everywhere else, including the frame
+        # log, which only ever sees what the main loop was handed.
+        if radio == RADIO_LORA and seq % LORA_RX_DROP_EVERY == 0:
+            rs["rx_dropped"] += 1
+            return
 
         # A believable error mix: mostly good frames, a crypto_fail often enough
         # that the debug view's error styling is visible within a few seconds.
@@ -1086,6 +1118,31 @@ class MockNode:
         lat, lon = point_at_distance(HOME_LAT, HOME_LON, 15.0 * t, 90.0)
         return lat, lon, HOME_ALT_M
 
+    def wifi_json(self):
+        """The `wifi` block of fillStatus(). ESP-NOW rides whatever channel the
+        WiFi radio ended up on, so `channel` is the one that matters and
+        `configured_channel` is only what was asked for.
+
+        Joining an external network hands the choice to the router, which is
+        exactly how the two come apart on real hardware -- so the mock's
+        station mode lands on a different channel on purpose, to give the UI's
+        mismatch warning something to show.
+        """
+        cfg = self.config["wifi"]
+        ap_only = bool(cfg.get("ap"))
+        configured = int(cfg.get("channel", 1))
+        wifi = {
+            "mode": "ap" if ap_only else "ap_sta",
+            "channel": configured if ap_only else ROUTER_CHANNEL,
+            "configured_channel": configured,
+            # Whoever has this page open.
+            "ap_clients": 1,
+        }
+        if not ap_only:
+            wifi["sta_connected"] = True
+            wifi["sta_rssi"] = -57
+        return wifi
+
     def status_json(self, now_ms):
         lat, lon, alt = self.self_location(now_ms)
         peers = self._peer_list()
@@ -1111,6 +1168,10 @@ class MockNode:
                 "beacon_interval_ms": self._beacon_interval_ms(len(on_radio), index),
                 "airtime_ms": RADIO_AIRTIME_MS[index],
                 "peers": len(on_radio),
+                # Frames lost inside the node rather than on the air, so no
+                # on-air counter anywhere shows them.
+                "rx_dropped": rs["rx_dropped"],
+                "tx_dropped": rs["tx_dropped"],
             })
 
         peer_docs = []
@@ -1188,6 +1249,7 @@ class MockNode:
                 "enabled": bool(cfg["sim"]["enabled"]),
                 "peers": len(self.sim_peers),
             },
+            "wifi": self.wifi_json(),
             # Not in docs/v2-web-api.md's example, but WebServer.cpp sends both:
             # a setting that only takes effect at boot has been changed, and the
             # stored config could not be parsed at boot (defaults in force, the
