@@ -28,10 +28,27 @@ public:
     // working, which is not: the GPS will have no power.
     bool present() const { return present_; }
 
-    // Battery and supply rail, volts. Zero when unknown (no PMIC, or no battery
-    // connected). The T-Beam is the only target that can currently answer.
-    float batteryVolts() const;
-    float supplyVolts() const;
+    // A snapshot of everything the PMIC can tell us. Every field is zero or
+    // false when there is no PMIC. Read together rather than one call at a
+    // time: each one is an I2C transaction.
+    struct Reading {
+        float battery_v = 0.0f;
+        float supply_v = 0.0f;
+        // Charge and discharge are reported separately by the PMIC, so a node
+        // on USB with a battery attached shows both a supply voltage and a
+        // charge current, which is the state people most often misread.
+        float charge_ma = 0.0f;
+        float discharge_ma = 0.0f;
+        float pmic_temp_c = 0.0f;
+        int16_t battery_pct = -1;  // -1 when the PMIC will not estimate one
+        bool battery_present = false;
+        bool charging = false;
+        bool usb_present = false;
+    };
+    Reading read() const;
+
+    float batteryVolts() const { return read().battery_v; }
+    float supplyVolts() const { return read().supply_v; }
 
 private:
     bool present_ = false;

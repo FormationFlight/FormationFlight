@@ -16,6 +16,7 @@
 #include <cstring>
 
 #include "geo.h"
+#include "log.h"
 #include "webcontent.h"
 
 namespace ff {
@@ -100,6 +101,50 @@ void sendJson(AsyncWebServerRequest* request, JsonDocument& doc, int code = 200)
 }
 
 double deg1e7(int32_t v) { return static_cast<double>(v) / 1e7; }
+
+// Why the node last restarted. The single most useful thing to know when a
+// board has been misbehaving, and invisible everywhere else.
+//
+// ESP32 only. The ESP8266 core answers the same question with
+// ESP.getResetReason(), which fillSystem() calls directly, so there is no
+// 8266 branch here to get out of step with it.
+#if !defined(PLATFORM_ESP8266)
+const char* resetReasonName() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:   return "power on";
+        case ESP_RST_EXT:       return "external reset";
+        case ESP_RST_SW:        return "software restart";
+        case ESP_RST_PANIC:     return "panic or exception";
+        case ESP_RST_INT_WDT:   return "interrupt watchdog";
+        case ESP_RST_TASK_WDT:  return "task watchdog";
+        case ESP_RST_WDT:       return "other watchdog";
+        case ESP_RST_DEEPSLEEP: return "deep sleep wake";
+        case ESP_RST_BROWNOUT:  return "brownout";
+        case ESP_RST_SDIO:      return "sdio";
+        default:                return "unknown";
+    }
+}
+#endif
+
+void fillSystem(JsonObject sys) {
+    sys["cpu_mhz"] = ESP.getCpuFreqMHz();
+    sys["free_heap"] = ESP.getFreeHeap();
+    sys["sketch_size"] = ESP.getSketchSize();
+    sys["free_sketch_space"] = ESP.getFreeSketchSpace();
+#if defined(PLATFORM_ESP8266)
+    sys["reset_reason"] = ESP.getResetReason();
+    // Fragmentation matters more than free heap on the 8266: a web request can
+    // fail for want of one contiguous block while plenty of heap is "free".
+    sys["heap_fragmentation_pct"] = ESP.getHeapFragmentation();
+    sys["largest_free_block"] = ESP.getMaxFreeBlockSize();
+    sys["flash_size"] = ESP.getFlashChipRealSize();
+#else
+    sys["reset_reason"] = resetReasonName();
+    sys["min_free_heap"] = ESP.getMinFreeHeap();
+    sys["largest_free_block"] = ESP.getMaxAllocHeap();
+    sys["flash_size"] = ESP.getFlashChipSize();
+#endif
+}
 
 }  // namespace
 
@@ -196,6 +241,11 @@ void fillStatus(WebDeps& d, JsonObject root) {
     loc["speed_cms"] = self.speed_cms;
     loc["course_ddeg"] = self.course_ddeg;
     loc["armed"] = self.armed;
+    loc["sats"] = self.sats;
+    loc["fix_type"] = self.fix_type;
+    if (self.hdop != 0) {
+        loc["hdop"] = self.hdop / 100.0;
+    }
 
     JsonArray radios = root.createNestedArray("radios");
     const uint32_t now = millis();
@@ -222,6 +272,24 @@ void fillStatus(WebDeps& d, JsonObject root) {
         // every other counter, and the first sign a node is over its budget.
         r["rx_dropped"] = drv != nullptr ? drv->rxDropped() : 0;
         r["tx_dropped"] = drv != nullptr ? drv->txDropped() : 0;
+        r["transmits"] = drv != nullptr && drv->transmits();
+        // Read back from the driver, not from the build flags: confirming the
+        // radio really is where the target intended is the first thing worth
+        // checking on a node that is not hearing anyone.
+        if (drv != nullptr) {
+            const RadioDriver::Info ri = drv->info();
+            if (ri.frequency_hz != 0) {
+                JsonObject m = r.createNestedObject("modulation");
+                m["frequency_hz"] = ri.frequency_hz;
+                m["bandwidth_khz"] = ri.bandwidth_khz;
+                m["spreading_factor"] = ri.spreading_factor;
+                m["coding_rate"] = ri.coding_rate;
+                m["power_dbm"] = ri.power_dbm;
+            }
+            if (ri.has_snr) {
+                r["last_snr_db"] = ri.last_snr_db;
+            }
+        }
     }
 
     JsonArray peers = root.createNestedArray("peers");
@@ -342,9 +410,19 @@ void fillStatus(WebDeps& d, JsonObject root) {
     // Only present on a board with a PMIC. A T-Beam reporting no power object
     // means its AXP192 did not answer, which also means its GPS has no power.
     if (d.power != nullptr && d.power->present()) {
+        const BoardPower::Reading p = d.power->read();
         JsonObject power = root.createNestedObject("power");
-        power["battery_v"] = d.power->batteryVolts();
-        power["supply_v"] = d.power->supplyVolts();
+        power["battery_v"] = p.battery_v;
+        power["supply_v"] = p.supply_v;
+        power["charge_ma"] = p.charge_ma;
+        power["discharge_ma"] = p.discharge_ma;
+        power["pmic_temp_c"] = p.pmic_temp_c;
+        power["battery_present"] = p.battery_present;
+        power["charging"] = p.charging;
+        power["usb_present"] = p.usb_present;
+        if (p.battery_pct >= 0) {
+            power["battery_pct"] = p.battery_pct;
+        }
     }
 
     JsonObject wifi = root.createNestedObject("wifi");
@@ -359,6 +437,27 @@ void fillStatus(WebDeps& d, JsonObject root) {
         wifi["sta_connected"] = WiFi.status() == WL_CONNECTED;
         wifi["sta_rssi"] = WiFi.RSSI();
     }
+
+    fillSystem(root.createNestedObject("system"));
+
+    if (d.loop_stats != nullptr) {
+        JsonObject lp = root.createNestedObject("loop");
+        lp["last_us"] = d.loop_stats->lastUs();
+        lp["min_us"] = d.loop_stats->minUs();
+        lp["max_us"] = d.loop_stats->maxUs();
+        lp["mean_us"] = d.loop_stats->meanUs();
+        lp["rate_hz"] = d.loop_stats->rateHz();
+        lp["samples"] = d.loop_stats->samples();
+        // A loop longer than the fastest beacon interval can miss a
+        // transmission outright. The mean hides these completely.
+        lp["overruns"] = d.loop_stats->overruns();
+        lp["overrun_threshold_us"] = d.loop_stats->overrunThresholdUs();
+    }
+
+    JsonObject lg = root.createNestedObject("log");
+    lg["total"] = logRing().total();
+    lg["warnings"] = logRing().warnings();
+    lg["errors"] = logRing().errors();
 
     root["reboot_required"] = WebServer::instance()->rebootRequired();
     root["config_corrupt"] = d.store != nullptr && d.store->lastLoadCorrupt();
@@ -478,6 +577,44 @@ void WebServer::registerRoutes() {
             }
         }
         sendJson(request, doc);
+    });
+
+    // The in-RAM log. On an ESP8266 target this is the ONLY safe log: the
+    // console UART is the MSP UART, so printing a diagnostic there injects
+    // bytes into the flight controller's serial link.
+    s->on("/api/log", HTTP_GET, [](AsyncWebServerRequest* request) {
+        const LogRing& lg = logRing();
+        uint32_t since = 0;
+        if (request->hasParam("since")) {
+            since = static_cast<uint32_t>(request->getParam("since")->value().toInt());
+        }
+        DynamicJsonDocument doc(kFramesJsonCapacity);
+        JsonObject root = doc.to<JsonObject>();
+        root["total"] = lg.total();
+        root["capacity"] = lg.capacity();
+        root["warnings"] = lg.warnings();
+        root["errors"] = lg.errors();
+        JsonArray arr = root.createNestedArray("entries");
+        for (size_t i = 0; i < lg.size(); i++) {
+            const uint32_t seq = lg.total() - 1 - static_cast<uint32_t>(i);
+            if (since != 0 && seq < since) {
+                break;
+            }
+            const LogEntry& e = lg.at(i);
+            JsonObject o = arr.createNestedObject();
+            o["ms"] = e.ms;
+            o["level"] = logLevelName(e.level);
+            o["text"] = e.text;
+            if (doc.overflowed()) {
+                break;
+            }
+        }
+        sendJson(request, doc);
+    });
+
+    s->on("/api/log", HTTP_DELETE, [](AsyncWebServerRequest* request) {
+        logRing().clear();
+        request->send(200, "text/plain", "cleared");
     });
 
     // ---- Simulated traffic ----------------------------------------------------
@@ -651,6 +788,8 @@ void handleFileUploadData(AsyncWebServerRequest* request, const String& filename
             return;
         }
         w->setOtaActive();
+        FF_LOGW("OTA started: %u bytes, radios parked until it finishes",
+                static_cast<unsigned>(request->contentLength()));
     }
 
     if (Update.write(data, len) != len) {
@@ -665,6 +804,7 @@ void handleFileUploadData(AsyncWebServerRequest* request, const String& filename
         }
         w->otaMessage() = "update complete, rebooting";
         w->otaStatus() = 200;
+        FF_LOGI("OTA complete, rebooting");
     }
 }
 

@@ -45,6 +45,21 @@ public:
     // False for a receive-only driver; see IRadioSet::radioTransmits().
     virtual bool transmits() const { return true; }
 
+    // What this radio is actually configured to do, read back from the driver
+    // rather than from the build flags. On a board that is not hearing anyone,
+    // confirming the frequency and modulation really are what the target
+    // intended is the first thing worth checking and the hardest to see.
+    struct Info {
+        uint32_t frequency_hz = 0;
+        float bandwidth_khz = 0.0f;
+        uint8_t spreading_factor = 0;
+        uint8_t coding_rate = 0;   // denominator: 5 means 4/5
+        int8_t power_dbm = 0;
+        bool has_snr = false;
+        float last_snr_db = 0.0f;
+    };
+    virtual Info info() const { return Info{}; }
+
     bool enabled() const { return enabled_; }
     void setEnabled(bool e) { enabled_ = e; }
 

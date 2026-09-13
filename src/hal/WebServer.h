@@ -7,6 +7,8 @@
 #endif
 
 #include "BoardPower.h"
+#include "log.h"
+#include "loop_stats.h"
 #include "ConfigStore.h"
 #include "MspFcLink.h"
 #include "SimRadio.h"
@@ -45,6 +47,7 @@ struct WebDeps {
     uint32_t uid = 0;
     uint8_t wifi_channel = 1;
     BoardPower* power = nullptr;  // null on boards with nothing to report
+    LoopStats* loop_stats = nullptr;
     // Called after a successful config POST so the caller can push whatever can
     // be changed without a reboot into the live objects.
     void (*on_config_applied)(const Settings&) = nullptr;
@@ -107,6 +110,9 @@ public:
         if (Update.isRunning()) {
             Update.end(false);
         }
+        // The browser gets this too, but the browser is often a phone that has
+        // already navigated away by the time the node answers.
+        FF_LOGE("OTA failed: %s", message.c_str());
     }
     String& otaMessage() { return ota_message_; }
     uint16_t& otaStatus() { return ota_status_; }

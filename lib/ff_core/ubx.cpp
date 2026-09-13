@@ -109,6 +109,10 @@ bool decodeNavPvt(const uint8_t* p, uint16_t len, UbxFix& out) {
     const bool gnss_ok = (flags & 0x01) != 0;
 
     out.valid = gnss_ok && (fix_type == 2 || fix_type == 3);
+    // A fixType of 3 with gnssFixOK clear is the receiver telling us it has a
+    // solution it does not trust. Reporting it as a 3D fix would be worse than
+    // reporting none, so the flag gates the number as well as `valid`.
+    out.fix_type = gnss_ok ? fix_type : 0;
     out.num_sat = readU8(p, 23);
     out.lon = readI32(p, 24);  // deg * 1e7
     out.lat = readI32(p, 28);  // deg * 1e7

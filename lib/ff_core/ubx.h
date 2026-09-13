@@ -35,6 +35,11 @@ constexpr uint16_t kUbxMaxPayload = 128;  // NAV-PVT is 92 bytes
 // Decoded subset of UBX-NAV-PVT, already in the wire protocol's units.
 struct UbxFix {
     bool valid = false;
+    // NAV-PVT's own fixType byte: 0 none, 1 dead reckoning, 2 2D, 3 3D,
+    // 4 GNSS+DR, 5 time only. Reported as the receiver sent it, so a caller can
+    // tell a 2D fix from a 3D one; `valid` stays the summary judgement, which
+    // also requires the gnssFixOK flag the receiver sets separately.
+    uint8_t fix_type = 0;
     uint8_t num_sat = 0;
     int32_t lat = 0;           // deg * 1e7
     int32_t lon = 0;           // deg * 1e7

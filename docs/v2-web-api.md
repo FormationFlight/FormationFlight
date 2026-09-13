@@ -41,7 +41,8 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
   },
   "location": {
     "valid": true, "source": "msp", "lat": 370000000, "lon": -1220000000,
-    "alt_m": 120, "speed_cms": 1500, "course_ddeg": 900, "armed": false
+    "alt_m": 120, "speed_cms": 1500, "course_ddeg": 900, "armed": false,
+    "sats": 12, "fix_type": 3, "hdop": 1.31
   },
   "radios": [
     {
@@ -49,7 +50,17 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
       "tx": 412, "rx_ok": 389, "rx_crypto_fail": 0, "rx_replay": 0,
       "rx_decode_fail": 0, "rx_self": 412, "last_rssi": -52,
       "last_rx_age_ms": 84, "beacon_interval_ms": 100, "airtime_ms": 0.4,
-      "peers": 2, "rx_dropped": 0, "tx_dropped": 0
+      "peers": 2, "rx_dropped": 0, "tx_dropped": 0, "transmits": true
+    },
+    {
+      "index": 1, "name": "LORA", "enabled": true, "sim": false,
+      "tx": 51, "rx_ok": 48, "rx_crypto_fail": 1, "rx_replay": 0,
+      "rx_decode_fail": 0, "rx_self": 2, "last_rssi": -66,
+      "last_rx_age_ms": 210, "beacon_interval_ms": 816, "airtime_ms": 61.2,
+      "peers": 1, "rx_dropped": 2, "tx_dropped": 3, "transmits": true,
+      "modulation": { "frequency_hz": 920000000, "bandwidth_khz": 500.0,
+        "spreading_factor": 8, "coding_rate": 7, "power_dbm": 10 },
+      "last_snr_db": 9.75
     }
   ],
   "peers": [
@@ -81,8 +92,24 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
     "prearm_offset": { "long_m": -15, "lat_m": 0, "vert_m": 10 }
   },
   "sim": { "enabled": false, "peers": 0 },
-  "power": { "battery_v": 4.02, "supply_v": 5.05 },
+  "power": {
+    "battery_v": 4.02, "supply_v": 5.05, "charge_ma": 240.0,
+    "discharge_ma": 0.0, "pmic_temp_c": 31.5, "battery_present": true,
+    "charging": true, "usb_present": true, "battery_pct": 87
+  },
   "wifi": { "mode": "ap", "channel": 1, "configured_channel": 1, "ap_clients": 0 },
+  "system": {
+    "cpu_mhz": 240, "free_heap": 24160, "sketch_size": 962192,
+    "free_sketch_space": 1310720, "reset_reason": "power on",
+    "largest_free_block": 19328, "flash_size": 4194304,
+    "min_free_heap": 23904
+  },
+  "loop": {
+    "last_us": 346, "min_us": 114, "max_us": 212868, "mean_us": 348,
+    "rate_hz": 2873, "samples": 201141, "overruns": 3,
+    "overrun_threshold_us": 100000
+  },
+  "log": { "total": 44, "warnings": 8, "errors": 1 },
   "reboot_required": false,
   "config_corrupt": false
 }
@@ -114,6 +141,20 @@ Absent is not the same as zero, and the firmware omits rather than zero-fills:
   rather than absent: ESP-NOW and the virtual radio report no signal level at
   all. Zero is not a plausible RSSI in dBm, so it is unambiguous, but it is the
   one place this API uses a sentinel instead of omitting the field.
+- `radios[].modulation` appears only for a driver that reports a frequency.
+  ESP-NOW and the virtual radio have none, so the object is absent for them
+  rather than present and full of zeros.
+- `radios[].last_snr_db` appears only for a driver that measures SNR - the LoRa
+  drivers, and only once one has actually received a frame. 0 dB is a perfectly
+  ordinary SNR, so it could not double as "no reading".
+- `location.hdop` appears only when the position source reports one. It is a
+  float (the wire value is x100 and the firmware divides). A source that does
+  not report it omits the field rather than publishing a flawless `0.0`.
+- `power` appears only on a board whose PMIC answered, and `power.battery_pct`
+  only when that PMIC will estimate one. "0%" and "no estimate" are very
+  different things to put in front of a pilot.
+- `loop` appears only on a build with loop timing wired to the web server. Every
+  shipping target has it; a bare host build may not.
 
 `follow.locked_uid` and `follow.locked_name` are always present, reading
 `"00000000"` and `""` when nothing is locked.
@@ -131,9 +172,120 @@ drained it, transmit because the radio was still busy with the previous frame.
 Neither shows up in any other counter, and either one climbing means the node is
 over its budget.
 
+`radios[].transmits` is false for a receive-only driver, which the simulated
+radio is: it injects frames and never keys an antenna.
+
+`radios[].modulation` is read back from the driver, not from the build flags or
+the config, and that is the whole point of it. On a node that is not hearing
+anyone, confirming the radio really is on the frequency and modulation the
+target intended is the first thing worth checking and the hardest thing to see
+any other way. Note that `power_dbm` is the driver's configured transmit power
+(the `LORA_POWER` build flag), which is not the same field as
+`radios.lora_power_dbm` in the config and can legitimately differ from it.
+`coding_rate` is the denominator: `7` means 4/7. `bandwidth_khz` is a float.
+
+### Fix quality
+
+`location.sats` and `location.fix_type` say how good the fix under
+`location.lat`/`lon` actually is. "No fix" and "a four-satellite fix wandering by
+30 m" are very different problems and look identical without them.
+
+`fix_type` uses UBX's NAV-PVT numbering, and that is the only scheme the API
+publishes - every `location.source` reports it the same way:
+
+| value | meaning |
+| --- | --- |
+| `0` | no fix |
+| `1` | dead reckoning only |
+| `2` | 2D fix |
+| `3` | 3D fix |
+| `4` | 3D fix + dead reckoning |
+| `5` | time only |
+
+A `"gnss"` source carries the receiver's own `fixType` byte through, except that
+a solution the receiver does not trust (its `gnssFixOK` flag clear) is reported
+as `0` rather than at the quality it claims. An `"msp"` source is converted on
+the way in - `MSP_RAW_GPS` numbers the same states `0`/`1`/`2`, and the firmware
+maps them to `0`/`2`/`3` before the value reaches the API - so a reader never
+sees MSP's numbering. Treat `3` (or `4`) as a 3D fix and `2` as 2D.
+
+`location.hdop` is horizontal dilution of precision as a float - the firmware
+divides the x100 wire value before sending it - and is omitted entirely when the
+source does not report one.
+
+### Board power
+
 `power` is present only on a board with a power-management IC that answered
 (the T-Beam's AXP192). Its absence on such a board is itself the diagnostic: the
-GPS and LoRa rails are unpowered. Boards without a PMIC never send it.
+GPS and LoRa rails are unpowered. Boards without a PMIC never send it, so the UI
+has to read an absent object as "no PMIC", never as zero volts.
+
+| field | meaning |
+| --- | --- |
+| `battery_v` | battery terminal voltage |
+| `supply_v` | USB / external supply voltage, `0` when there is none |
+| `charge_ma` | current *into* the battery |
+| `discharge_ma` | current *out of* the battery |
+| `pmic_temp_c` | the PMIC's own die temperature, not ambient |
+| `battery_present` | a battery is attached |
+| `charging` | the PMIC is charging it right now |
+| `usb_present` | external power is connected |
+| `battery_pct` | 0-100 estimate, **omitted** when the PMIC will not make one |
+
+Charge and discharge are separate readings, which is what makes a node on USB
+with a battery attached show a supply voltage *and* a charge current at the same
+time. That is the state people most often misread.
+
+### System
+
+`system` is always present and is the "why is this board behaving like this"
+block. `reset_reason` is the most useful field in it and is invisible everywhere
+else: it is a short string like `"power on"`, `"software restart"`,
+`"panic or exception"`, `"brownout"`, `"task watchdog"` or `"unknown"`.
+
+`cpu_mhz`, `free_heap`, `sketch_size`, `free_sketch_space`,
+`largest_free_block` and `flash_size` are always there. `free_heap` is the same
+reading as `node.free_heap`.
+
+Two fields are platform-specific, and a node sends one or the other, never both:
+
+- `heap_fragmentation_pct` (ESP8266 only). It matters more than free heap on an
+  8266: a web request can fail for want of one contiguous block while plenty of
+  heap is nominally free. `largest_free_block` is the other half of that story.
+- `min_free_heap` (ESP32 only): the low-water mark since boot, which catches a
+  transient the UI's polling would otherwise never see.
+
+The development mock sends both, so the UI path for each is reachable without
+that board on the bench. That is a property of the mock, not of the contract.
+
+### Loop timing
+
+`loop` is main-loop timing, from `ff::LoopStats`. ALOHA tolerates jitter by
+design, which is exactly why this is worth publishing: the firmware keeps
+working as it gets slower, right up until it does not.
+
+- `last_us`, `min_us`, `max_us`, `mean_us` - one iteration's duration in
+  microseconds. **`max_us` is the number that matters.** A 2 ms mean with a
+  300 ms peak is a node with a problem, and the mean alone looks healthy.
+- `rate_hz` - loops per second, derived from the mean.
+- `samples` - iterations measured.
+- `overruns` - iterations longer than `overrun_threshold_us`.
+- `overrun_threshold_us` - the threshold, set at boot from the shortest beacon
+  interval (`rate.min_interval_ms`). A loop longer than that can miss a
+  transmission outright, which no on-air counter would explain.
+
+`min_us`, `mean_us` and `rate_hz` read `0` before the first sample.
+
+`loop` is absent on a build with no loop timing wired to the web server.
+
+### Log counters
+
+`log` in the status document is counters only - `total`, `warnings` and
+`errors`, all since boot. The entries themselves are `GET /api/log`. A node that
+logged an error an hour ago and has scrolled past it still says so here, which
+is what makes the counters worth polling separately from the log view.
+
+### WiFi
 
 `wifi.mode` is `"ap"` or `"ap_sta"`; in `ap_sta` the object also carries
 `sta_connected` and `sta_rssi`. `channel` is the channel the radio is actually
@@ -221,6 +373,57 @@ Entries carry no sequence number of their own. They are newest-first, so entry
 against. `total` is the count since boot and keeps climbing past `capacity`, so
 a client whose `since` is further behind than the ring is deep has missed
 frames, and should say how many rather than pretending the list is complete.
+
+## GET /api/log
+
+The node's in-RAM log, newest first. On an ESP8266 target this is the **only**
+safe log there is: the console UART is the MSP UART, so printing a diagnostic
+there injects bytes into the flight controller's serial link. The usual answer,
+print and watch the console, is actively harmful on the boards most likely to
+need debugging, which is why this endpoint exists.
+
+```json
+{
+  "total": 1042,
+  "capacity": 48,
+  "warnings": 8,
+  "errors": 1,
+  "entries": [
+    { "ms": 91180, "level": "warn", "text": "LoRa tx dropped: radio still busy" },
+    { "ms": 89210, "level": "info", "text": "peer aabbccdd XYZ seen on LORA" }
+  ]
+}
+```
+
+`level` is one of `debug`, `info`, `warn`, `error`. `ms` is node uptime when the
+line was recorded. `text` is already truncated to what the ring can hold (72
+characters); a line long enough to be cut is one that should have been shorter.
+
+The ring is fixed-size and the oldest entry is overwritten, so `entries` never
+exceeds `capacity`. `warnings` and `errors` are counts **since boot**, not counts
+of what is currently in the ring: a node that logged an error and has long since
+scrolled past it still reports it.
+
+`?since=N` works exactly like `/api/frames`. Entries carry no sequence number of
+their own; they are newest-first, so entry `i` in the array has sequence
+`total - 1 - i`, and the server stops emitting as soon as it reaches one below
+`N`. A client polls with `since` set to the `total` it last saw. `since=0`, like
+an absent `since`, returns the whole ring.
+
+`total` counts everything ever logged and **never goes backwards**, including
+across a clear. A client whose `since` is further behind than the ring is deep
+has missed lines and should say how many rather than pretending the list is
+complete.
+
+## DELETE /api/log
+
+Empties the ring. `200` with the body `cleared`.
+
+It deliberately does **not** reset `total`, `warnings` or `errors`. Those are
+since-boot counters, and resetting `total` would send every outstanding client
+cursor backwards, asking for entries that no longer exist. "This node has hit an
+error since it booted" also does not stop being true because somebody pressed a
+button in a web page. Only a reboot clears them.
 
 ## Simulated traffic
 

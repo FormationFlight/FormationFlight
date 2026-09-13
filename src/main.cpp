@@ -18,6 +18,8 @@
 #include "crypto.h"
 #include "follow.h"
 #include "hal/BoardPower.h"
+#include "log.h"
+#include "loop_stats.h"
 #include "hal/ConfigStore.h"
 #include "hal/MspFcLink.h"
 #include "hal/MspRadarOutput.h"
@@ -47,6 +49,7 @@ namespace {
 ff::Settings g_settings;
 ff::ConfigStore g_store;
 ff::BoardPower g_power;
+ff::LoopStats g_loop;
 
 ff::RadioHub g_hub;
 ff::RadioEspNow g_espnow;
@@ -142,11 +145,42 @@ void applyLiveConfig(const ff::Settings& cfg) {
     }
 }
 
+uint32_t logClock() { return millis(); }
+
 }  // namespace
+
+// Mirrors the log ring to the USB console.
+//
+// ESP32 only, and deliberately so: on an ESP8266 target Serial *is* the MSP
+// link, and every character written here would land in the flight controller's
+// parser. The T-Beam and friends have UART0 free because MSP lives on Serial1,
+// so on those boards there is no reason not to have a console - and until now
+// there was none, which is why plugging one in produced nothing but the ROM
+// bootloader's own chatter at the wrong baud rate.
+#if defined(PLATFORM_ESP32)
+void consoleSink(const ff::LogEntry& e) {
+    Serial.printf("[%8lu] %-5s %s\n", static_cast<unsigned long>(e.ms),
+                  ff::logLevelName(e.level), e.text);
+}
+#endif
 
 void setup() {
     g_uid = deviceUid();
     randomSeed(micros() ^ g_uid);
+
+    // The log ring is the only safe log on an ESP8266 target, where the console
+    // UART is the MSP UART and printing would inject bytes into the flight
+    // controller's link. Set its clock before anything can log.
+    ff::logRing().setClock(logClock);
+#if defined(PLATFORM_ESP32)
+    // Before the first FF_LOG call, or boot is the one part of the log a
+    // console never sees. 115200 matches the ROM bootloader, so its output is
+    // legible in the same window instead of arriving as garbage.
+    Serial.begin(115200);
+    ff::logRing().setSink(consoleSink);
+#endif
+    FF_LOGI("FormationFlight %s booting, uid %08x", FIRMWARE_VERSION,
+            static_cast<unsigned>(g_uid));
 
     // Power rails before anything that lives on them. On the T-Beam the GPS and
     // the LoRa radio are behind a PMIC and come up off, so bringing SPI up first
@@ -154,8 +188,20 @@ void setup() {
     g_power.begin();
 
     // Configuration first: it decides which radios come up, and with what key.
-    g_store.begin();
+    if (!g_store.begin()) {
+        FF_LOGE("LittleFS would not mount: settings cannot be saved this boot");
+    }
     g_store.load(g_settings);
+    if (g_store.lastLoadCorrupt()) {
+        // The file is left on disk rather than overwritten, so it can still be
+        // recovered. Worth an error: the node is not running the settings
+        // someone thinks they gave it.
+        FF_LOGE("config.json did not parse: running compile-time defaults");
+    } else if (!g_store.mounted()) {
+        FF_LOGW("no filesystem: running compile-time defaults");
+    } else {
+        FF_LOGI("config loaded");
+    }
 
     // Pick the cipher. An explicit "none" is the bench escape hatch; anything
     // else, including an empty passphrase, is encrypted.
@@ -169,8 +215,13 @@ void setup() {
         // under the same key, and CCM's security rests on never reusing a nonce.
         g_ccm.begin(g_uid, key, random(1, 0x40000000));
         g_crypto = &g_ccm;
+        FF_LOGI("crypto on: AES-128-CCM");
     } else {
         g_crypto = &g_plaintext;
+        // Not a warning by accident. Frames go out in the clear and anything
+        // can inject one, so a node left in this state by mistake should say so
+        // every time it boots.
+        FF_LOGW("crypto OFF: frames are in the clear and unauthenticated");
     }
 
     snprintf(g_boot.passphrase, sizeof(g_boot.passphrase), "%s", g_settings.security.passphrase);
@@ -179,18 +230,42 @@ void setup() {
     // binds to the AP interface this creates. Getting this order wrong kills the
     // 2.4 GHz link while every counter still reads healthy.
     g_wifi_channel = ff::wifiBringUp(g_settings, g_uid);
+    // The channel is worth saying out loud every boot: two nodes on different
+    // channels cannot hear each other over ESP-NOW however healthy both look,
+    // and joining an external network hands the choice to the router.
+    FF_LOGI("wifi up: %s, channel %u", g_settings.wifi.ap ? "own AP" : "AP + joining",
+            static_cast<unsigned>(g_wifi_channel));
 
     if (g_settings.radios.espnow_enabled) {
-        g_espnow.begin(g_wifi_channel);
+        if (g_espnow.begin(g_wifi_channel)) {
+            FF_LOGI("ESP-NOW up on channel %u", static_cast<unsigned>(g_wifi_channel));
+        } else {
+            FF_LOGE("ESP-NOW failed to start");
+        }
         g_hub.add(&g_espnow);
         g_boot.espnow_constructed = true;
+    } else {
+        FF_LOGW("ESP-NOW disabled by config");
     }
 
 #if defined(LORA_FAMILY_SX128X) || defined(LORA_FAMILY_SX127X)
     if (g_settings.radios.lora_enabled) {
-        g_lora.begin();
+        // A LoRa module that did not answer over SPI is the failure most likely
+        // to be mistaken for a range problem: the node runs, beacons on
+        // ESP-NOW, and looks entirely healthy from the dashboard.
+        if (g_lora.begin()) {
+            FF_LOGI("LoRa up: %lu Hz, BW %d kHz, SF%d, CR 4/%d",
+                    static_cast<unsigned long>(g_lora.info().frequency_hz),
+                    static_cast<int>(g_lora.info().bandwidth_khz),
+                    static_cast<int>(g_lora.info().spreading_factor),
+                    static_cast<int>(g_lora.info().coding_rate));
+        } else {
+            FF_LOGE("LoRa radio did not initialise: nothing goes out on it");
+        }
         g_hub.add(&g_lora);
         g_boot.lora_constructed = true;
+    } else {
+        FF_LOGW("LoRa disabled by config");
     }
 #endif
 
@@ -255,8 +330,25 @@ void setup() {
 
     if (!cfg.listen_only) {
         g_follow = new ff::FollowController(&g_node->peers(), location, &g_fc);
-        g_follow->applyConfig(g_settings.follow, nullptr);
+        const char* follow_err = nullptr;
+        if (!g_follow->applyConfig(g_settings.follow, &follow_err)) {
+            // Follow silently does nothing when its config will not validate,
+            // and "the aircraft did not follow anything" is a bad way to find
+            // that out.
+            FF_LOGE("follow config rejected: %s", follow_err != nullptr ? follow_err : "invalid");
+        } else if (g_settings.follow.targetUid != 0) {
+            FF_LOGI("follow locked to uid %08x",
+                    static_cast<unsigned>(g_settings.follow.targetUid));
+        } else {
+            FF_LOGI("follow targeting the nearest peer with a fix");
+        }
+    } else {
+        FF_LOGI("listen only: this node receives and never transmits");
     }
+
+    // A loop longer than the fastest beacon interval can miss a transmission
+    // outright, so that is what counts as an overrun.
+    g_loop.setOverrunThresholdUs(g_settings.rate.min_interval_ms * 1000u);
 
     ff::WebDeps web;
     web.cfg = &g_settings;
@@ -272,11 +364,15 @@ void setup() {
     web.uid = g_uid;
     web.wifi_channel = g_wifi_channel;
     web.power = &g_power;
+    web.loop_stats = &g_loop;
     web.on_config_applied = applyLiveConfig;
     g_web.begin(web);
+    FF_LOGI("ready: %u radio%s, web UI on port 80", static_cast<unsigned>(g_hub.radioCount()),
+            g_hub.radioCount() == 1 ? "" : "s");
 }
 
 void loop() {
+    const uint32_t loop_start_us = micros();
     const uint32_t now = millis();
 
     // A firmware upload is erasing and writing flash. On ESP8266 that stalls the
@@ -315,4 +411,9 @@ void loop() {
     }
 
     g_web.loop(now);
+
+    // Measured last so it covers the whole iteration. ALOHA tolerates jitter by
+    // design, which is exactly why this is worth watching: the node keeps
+    // working as it slows down, right up until it does not.
+    g_loop.addSample(micros() - loop_start_us);
 }

@@ -3,6 +3,7 @@ import { h, render, useRef, useState, useEffect, html, Router } from './bundle.j
 import LoadingSpinner, {
   Icons, tipColors, Button, Colored, Stat, Setting, Notification, Banner, Card, Note,
   SectionTitle, ConfigActions, PeerTable, RadarScope, RadioCard, WifiCard, FrameLogView, Sparkline,
+  PowerCard, NoPowerCard, SystemCard, LoopCard, LogView, LOG_FILTERS, GnssCard,
   Th, Td, peerPartial, present, num, age, uptime, latLon, speedMs, courseDeg, DASH,
 } from './components.js';
 import FollowPage from './follow.js';
@@ -120,6 +121,10 @@ const NavLink = ({ title, icon, href, url, badge }) => html`
 function Sidebar({ url, show, status }) {
   const version = (status && status.node && status.node.version) || '';
   const simOn = !!(status && status.sim && status.sim.enabled);
+  // Counted since boot, not held in the ring, so a node that logged an error an
+  // hour ago still wears the badge after the ring has scrolled past it.
+  const errors = (status && status.log && status.log.errors) || 0;
+  const warnings = (status && status.log && status.log.warnings) || 0;
   return html`
 <div class="-translate-x-full transition-all duration-300 transform
             fixed top-0 left-0 bottom-0 z-[60] w-72 bg-white dark:bg-slate-800 border-r
@@ -137,6 +142,9 @@ function Sidebar({ url, show, status }) {
       <${NavLink} title="Settings" icon=${Icons.settings} href="/settings" url=${url} />
       <${NavLink} title="Simulator" icon=${Icons.beaker} href="/sim" url=${url}
         badge=${simOn ? html`<${Colored} text="ON" colors="bg-violet-600 text-white" />` : null} />
+      <${NavLink} title="System" icon=${Icons.cpu} href="/system" url=${url}
+        badge=${errors ? html`<${Colored} text=${errors} colors=${tipColors.red} />`
+          : warnings ? html`<${Colored} text=${warnings} colors=${tipColors.yellow} />` : null} />
       <${NavLink} title="Update" icon=${Icons.upArrowBox} href="/update" url=${url} />
     <//>
   <//>
@@ -156,6 +164,10 @@ function Dashboard({ status }) {
   const lockedUid = follow.locked_uid && follow.locked_uid !== '00000000' ? follow.locked_uid : null;
 
   const fixOk = !!loc.valid;
+  const power = status.power;
+  // 3.5 V on a single cell. Not a percentage anyone should trust, but the
+  // voltage is measured and the threshold is the one the PMIC cares about.
+  const cellLow = !!(power && power.battery_present && power.battery_v > 0 && power.battery_v < 3.5);
   const cryptoOpen = crypto.mode === 'none';
   const badCrypto = (crypto.bad_tag || 0) + (crypto.replay || 0);
 
@@ -167,7 +179,7 @@ function Dashboard({ status }) {
 
   return html`
 <div class="p-2">
-  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
     <${Stat} title="Node" icon=${Icons.home} text=${node.name || node.uid || DASH}
       tipText=${node.listen_only ? 'listen only' : ''} tipColors=${tipColors.yellow}
       tipIcon=${node.listen_only ? Icons.warn : null}
@@ -178,7 +190,7 @@ function Dashboard({ status }) {
       tipIcon=${fixOk ? Icons.ok : Icons.warn}
       tipColors=${fixOk ? tipColors.green : tipColors.yellow}
       subText=${fixOk
-        ? html`${num(loc.alt_m, 0, ' m')} · ${speedMs(loc.speed_cms)} · ${courseDeg(loc.course_ddeg)}${loc.armed ? ' · ARMED' : ''}`
+        ? html`${num(loc.alt_m, 0, ' m')} · ${speedMs(loc.speed_cms)} · ${courseDeg(loc.course_ddeg)}${present(loc.sats) ? ' · ' + loc.sats + ' sats' : ''}${loc.armed ? ' · ARMED' : ''}`
         : 'Nothing is beaconed and Follow cannot run without a position.'} />
     <${Stat} title="Peers" icon=${Icons.antenna} text=${peers.length}
       tipText=${partial ? partial + ' partial' : ''}
@@ -194,6 +206,15 @@ function Dashboard({ status }) {
       subText=${cryptoOpen
         ? 'No cipher. Frames go out in the clear and anything can be injected.'
         : html`${num(crypto.bad_tag)} bad tag · ${num(crypto.replay)} replay · tx counter ${num(crypto.tx_counter)}`} />
+    ${power && html`
+    <${Stat} title="Power" icon=${Icons.battery}
+      text=${power.battery_present ? num(power.battery_v, 2, ' V') : 'USB'}
+      tipText=${power.battery_present ? (power.charging ? 'charging' : cellLow ? 'low' : 'on battery') : 'no cell'}
+      tipIcon=${cellLow ? Icons.warn : null}
+      tipColors=${cellLow ? tipColors.yellow : power.charging ? tipColors.green : tipColors.gray}
+      subText=${power.battery_present
+        ? html`${num(power.discharge_ma, 0, ' mA')} out · ${num(power.charge_ma, 0, ' mA')} in · ${num(power.pmic_temp_c, 0, ' °C')}`
+        : html`Running off USB at ${num(power.supply_v, 2, ' V')}. It stops the instant that is unplugged.`} />`}
   <//>
 
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -207,6 +228,11 @@ function Dashboard({ status }) {
       right=${html`<span class="text-xs text-slate-400">north up<//>`}>
       <${RadarScope} peers=${peers} radios=${radios} location=${loc} lockedUid=${lockedUid} />
     <//>
+  <//>
+
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 ${power ? 'lg:grid-cols-2' : ''} gap-4">
+    <${GnssCard} location=${loc} />
+    ${power && html`<${PowerCard} power=${power} />`}
   <//>
 <//>`;
 }
@@ -710,6 +736,154 @@ function Update() {
 
 // ---- App ---------------------------------------------------------------------
 
+// ---- System ------------------------------------------------------------------
+
+// Rolling history for the power and loop plots, sampled off the status the App
+// already polls. Same deal as the radio history: it costs the device nothing
+// and lives only as long as the tab is open.
+const SYS_HIST_N = 240; // ~4 min at the 1 s status cadence
+
+function SystemHistory({ status }) {
+  const [hist, setHist] = useState({ batt: [], draw: [], heap: [], loop: [] });
+  const last = useRef(0);
+  useEffect(() => {
+    if (!status) return;
+    const now = Date.now();
+    if (now - last.current < 250) return; // same sample arriving twice
+    last.current = now;
+    const p = status.power || {};
+    const l = status.loop || {};
+    const sys = status.system || {};
+    const push = (arr, v) => {
+      const a = (arr || []).concat(present(v) ? +v : null);
+      return a.length > SYS_HIST_N ? a.slice(-SYS_HIST_N) : a;
+    };
+    setHist(h => ({
+      batt: push(h.batt, p.battery_present ? p.battery_v : null),
+      draw: push(h.draw, p.battery_present ? (p.discharge_ma || 0) - (p.charge_ma || 0) : null),
+      heap: push(h.heap, present(sys.free_heap) ? sys.free_heap / 1024 : null),
+      loop: push(h.loop, present(l.max_us) ? l.max_us / 1000 : null),
+    }));
+  }, [status]);
+
+  const hasPower = !!(status && status.power && status.power.battery_present);
+  return html`
+<${Card} title="History" icon=${Icons.bolt}
+  right=${html`<span class="text-xs text-slate-400">last ~4 min<//>`}>
+  ${hasPower && html`
+    <${Sparkline} series=${hist.batt} label="Cell voltage" unit=" V" digits=2 color="stroke-green-500" />
+    <${Sparkline} series=${hist.draw} label="Cell current, + out / - in" unit=" mA" color="stroke-blue-500" />`}
+  <${Sparkline} series=${hist.heap} label="Free heap" unit=" KB" color="stroke-slate-400" />
+  <${Sparkline} series=${hist.loop} label="Worst loop" unit=" ms" digits=1 color="stroke-violet-500" />
+  <p class="text-xs text-gray-400">
+    Free heap that only ever falls is a leak. The worst-loop trace is the running maximum, so it is a staircase
+    by construction: what matters is whether it takes a step while you are doing something in particular.
+  <//>
+<//>`;
+}
+
+const LOG_POLL_MS = 1000;
+const LOG_SCROLLBACK = 400;
+
+function System({ status }) {
+  const [log, setLog] = useState({ entries: [], total: null, capacity: null, warnings: 0, errors: 0 });
+  const [logError, setLogError] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [paused, setPaused] = useState(false);
+  const [clearResult, setClearResult] = useState(null);
+  const pausedRef = useRef(false);
+  const sinceRef = useRef(0);
+  pausedRef.current = paused;
+
+  // Owned by this page, so navigating away really stops it. `since` is the
+  // sequence of the newest line we already hold; the device returns only what
+  // was logged after it.
+  useEffect(() => {
+    let stopped = false, timer = null;
+    const tick = () => {
+      if (stopped) return;
+      if (pausedRef.current) { timer = setTimeout(tick, LOG_POLL_MS); return; }
+      api('/api/log' + (sinceRef.current ? '?since=' + sinceRef.current : ''))
+        .then(r => {
+          if (stopped || !r) return;
+          setLogError(null);
+          sinceRef.current = r.total;
+          setLog(prev => ({
+            total: r.total,
+            capacity: r.capacity,
+            warnings: r.warnings,
+            errors: r.errors,
+            entries: (r.entries || []).concat(prev.entries).slice(0, LOG_SCROLLBACK),
+          }));
+        })
+        .catch(e => { if (!stopped) setLogError(e.message); })
+        .then(() => { if (!stopped) timer = setTimeout(tick, LOG_POLL_MS); });
+    };
+    tick();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, []);
+
+  const clearLog = () => api('/api/log', { method: 'DELETE' })
+    .then(() => {
+      // The device keeps its running total across a clear so a client cursor
+      // never walks backwards. Drop what we are holding, keep the cursor.
+      setLog(p => ({ ...p, entries: [] }));
+      setClearResult({ ok: true, text: 'Log cleared' });
+    })
+    .catch(e => setClearResult({ ok: false, text: e.message }));
+
+  if (!status) return '';
+  const power = status.power;
+  // The firmware omits the whole power object when the PMIC did not answer, so
+  // status alone cannot tell "this board has none" from "this board's died".
+  // The log can: BoardPower logs an error naming the chip when it is missing.
+  const pmicMissing = log.entries.some(e => e.level === 'error' && /axp/i.test(e.text));
+
+  return html`
+<div class="p-2">
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    ${power ? html`<${PowerCard} power=${power} />` : html`<${NoPowerCard} expected=${pmicMissing} />`}
+    <${SystemCard} system=${status.system} node=${status.node} />
+    <${LoopCard} loop=${status.loop} />
+  <//>
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div class="lg:col-span-2">
+      <${Card} title="Device log" icon=${Icons.document} cls="overflow-hidden"
+        right=${html`
+        <div class="flex items-center gap-2">
+          ${LOG_FILTERS.map(([k, label]) => html`
+            <button key=${k} type="button" onclick=${() => setFilter(k)}
+              class="px-2 py-0.5 text-xs font-medium rounded ${filter === k
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}">${label}<//>`)}
+          <button type="button" onclick=${() => setPaused(v => !v)}
+            class="px-2 py-0.5 text-xs font-medium rounded ${paused
+              ? 'bg-yellow-100 text-yellow-900 dark:bg-yellow-800 dark:text-yellow-100'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}">
+            ${paused ? 'paused' : 'live'}
+          <//>
+          <button type="button" onclick=${clearLog}
+            class="px-2 py-0.5 text-xs font-medium rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+            title="Empty the device's ring. The warning and error counts survive: a node that logged an error an hour ago has still logged one.">clear<//>
+        <//>`}>
+        <${LogView} ...${log} error=${logError} filter=${filter} />
+      <//>
+      ${clearResult && html`<${Notification} ok=${clearResult.ok} timeout=${clearResult.ok ? 1500 : 6000}
+        text=${clearResult.text} close=${() => setClearResult(null)} />`}
+    <//>
+    <${SystemHistory} status=${status} />
+  <//>
+  <div class="p-4 sm:p-2 mx-auto">
+    <${Note} title="Why the log lives here and not on a serial console">
+      On an ESP8266 target the console UART <em>is<//> the MSP UART. Anything printed for a human goes straight
+      into the flight controller's serial link, so the node keeps its diagnostics in RAM and serves them over
+      HTTP instead. The ring holds ${log.capacity || 'a few dozen'} lines; everything older is gone, which is
+      what the "logged since boot" count is there to tell you.
+    <//>
+  <//>
+<//>`;
+}
+
 // One tick per entry, round-robin, so each request stays small and the device is
 // never asked for two things at once. /api/sim is only worth a tick when the
 // simulator is on or the user is looking at its page.
@@ -797,12 +971,19 @@ const App = function () {
     <${Banner} tone="warn" title="Reboot required.">
       A setting that only takes effect at boot has changed.
     <//>`}
+    ${status && status.log && status.log.errors > 0 && url !== '/system' && html`
+    <${Banner} tone="bad" icon=${Icons.warn}
+      title=${status.log.errors + ' error' + (status.log.errors === 1 ? '' : 's') + ' logged since boot.'}>
+      <a href="#/system" class="underline">Read the device log<//> - on this hardware the console UART is the
+      flight controller's link, so this is the only place those lines go.
+    <//>`}
     <${Router} onChange=${ev => { setUrl(ev.url); setShowSidebar(window.innerWidth > 1200); }} history=${History.createHashHistory()}>
       <${Dashboard} default=${true} status=${status} />
       <${Radios} path="/radios" status=${status} />
       <${FollowPage} path="/follow" status=${status} />
       <${Settings} path="/settings" />
       <${Simulator} path="/sim" status=${status} sim=${sim} refreshSim=${() => simRefresh.current()} />
+      <${System} path="/system" status=${status} />
       <${Update} path="/update" />
     <//>
   <//>

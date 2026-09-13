@@ -22,6 +22,7 @@ public:
     bool popRx(RxFrame& out) override { return rx_.pop(out); }
     const char* name() const override { return "SX127x"; }
 
+    Info info() const override;
     uint32_t rxDropped() const override { return rx_.dropped(); }
     uint32_t txDropped() const override { return tx_dropped_; }
     void onDioIsr() { dio_pending_ = true; }
@@ -36,6 +37,8 @@ private:
     bool transmitting_ = false;
     uint32_t tx_start_ms_ = 0;
     uint32_t tx_dropped_ = 0;
+    float last_snr_db_ = 0.0f;
+    bool have_snr_ = false;
     uint32_t tx_timeouts_ = 0;
 
     // If a transmit-done interrupt is ever missed the radio would sit in

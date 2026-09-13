@@ -67,6 +67,8 @@ void DirectGpsLocationSource::handlePvt() {
     cached_.alt_m = fix.alt_m;
     cached_.speed_cms = fix.speed_cms;
     cached_.course_ddeg = fix.course_ddeg;
+    cached_.sats = fix.num_sat;
+    cached_.fix_type = fix.fix_type;
     last_pvt_ms_ = millis();
 }
 

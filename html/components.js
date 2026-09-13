@@ -27,6 +27,12 @@ export const Icons = {
   plus: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /> </svg>`,
   sun: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /> </svg>`,
   moon: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /> </svg>`,
+  battery: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M21 10.5h.375c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125H21M3.75 18h15A2.25 2.25 0 0021 15.75v-7.5A2.25 2.25 0 0018.75 6h-15A2.25 2.25 0 001.5 8.25v7.5A2.25 2.25 0 003.75 18z" /> </svg>`,
+  cpu: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" /> </svg>`,
+  clock: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /> </svg>`,
+  satellite: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 100-18 9 9 0 000 18zm0 0a8.949 8.949 0 004.951-1.488A3.987 3.987 0 0013 16a4 4 0 00-4 4c0 .308.035.608.1.897M12 3a8.949 8.949 0 00-4.951 1.488A3.987 3.987 0 0111 8a4 4 0 01-4 4c-.35 0-.687-.045-1.008-.129" /> </svg>`,
+  document: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /> </svg>`,
+  wrench: props => html`<svg class=${props.class} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"> <path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z" /> </svg>`,
 };
 
 // Light mode: pale tint + dark ink. Dark mode flips it - a deep tint with light
@@ -99,6 +105,9 @@ export const PEER_FLAG_HAS_FIX = 2;
 export const speedMs = cms => (present(cms) ? (cms / 100).toFixed(1) + ' m/s' : DASH);
 /** Course is decidegrees on the wire. */
 export const courseDeg = ddeg => (present(ddeg) ? Math.round(ddeg / 10) + '°' : DASH);
+
+/** Radio frequencies are Hz on the wire and nobody reads nine digits. */
+export const mhz = hz => (present(hz) ? (hz / 1e6).toFixed(3) + ' MHz' : DASH);
 
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 export const compass = deg => (present(deg) ? COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8] : DASH);
@@ -495,11 +504,16 @@ export function RadioCard({ radio }) {
     <${Counter} label="RX dropped" value=${r.rx_dropped} tone=${r.rx_dropped ? 'text-red-600' : ''} tip="Frames the driver threw away because its receive ring filled before the main loop drained it. Lost inside this node, so no on-air counter anywhere will show them - this is the first sign the node is over its budget." />
     <${Counter} label="TX dropped" value=${r.tx_dropped} tone=${r.tx_dropped ? 'text-red-600' : ''} tip="Transmits the driver refused because the radio was still busy with the previous frame, or because the send queue was full. The frame never went out and nothing on the air records it." />
   <//>
-  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+  <div class="grid ${present(r.last_snr_db) ? 'grid-cols-3' : 'grid-cols-2'} gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
     <div class="flex flex-col" title="Signal strength of the most recent frame received on this radio.">
       <span class="text-xs uppercase tracking-wide text-gray-400">Last RSSI<//>
       <span class="font-mono text-sm text-slate-800 dark:text-slate-100">${present(r.last_rssi) && r.last_rssi !== 0 ? r.last_rssi + ' dBm' : DASH}<//>
     <//>
+    ${present(r.last_snr_db) && html`
+    <div class="flex flex-col" title=${'Signal to noise ratio of the last frame. LoRa demodulates below the noise floor, so a negative SNR is normal and is the real measure of how much margin is left - at SF8 the link gives out around -10 dB.'}>
+      <span class="text-xs uppercase tracking-wide text-gray-400">Last SNR<//>
+      <span class="font-mono text-sm ${r.last_snr_db <= -8 ? 'text-yellow-600' : 'text-slate-800 dark:text-slate-100'}">${num(r.last_snr_db, 1, ' dB')}<//>
+    <//>`}
     <div class="flex flex-col" title="Time since the last frame arrived on this radio.">
       <span class="text-xs uppercase tracking-wide text-gray-400">Last RX<//>
       <span class="font-mono text-sm text-slate-800 dark:text-slate-100">${r.last_rx_age_ms ? age(r.last_rx_age_ms) + ' ago' : 'never'}<//>
@@ -519,8 +533,31 @@ export function RadioCard({ radio }) {
       <span class="font-mono text-sm text-slate-800 dark:text-slate-100">${num(r.peers)}<//>
     <//>
   <//>
+  ${r.modulation && html`<${ModulationLine} m=${r.modulation} />`}
 <//>`;
 }
+
+/**
+ * What the radio is actually tuned to, read back from the driver rather than
+ * printed from the build flags.
+ *
+ * This is the first thing to check on a node that hears nobody. Two nodes on
+ * different spreading factors, bandwidths or coding rates cannot demodulate
+ * each other at all, and every counter on both of them looks perfectly healthy
+ * while it happens - they are simply not on the same air interface. Flashing
+ * the wrong band target is easy to do and impossible to see any other way.
+ */
+export const ModulationLine = ({ m }) => html`
+  <div class="mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <div class="flex justify-between items-baseline">
+      <span class="text-xs uppercase tracking-wide text-gray-400">On air<//>
+      <span class="font-mono text-sm text-slate-800 dark:text-slate-100">${mhz(m.frequency_hz)}<//>
+    <//>
+    <div class="mt-1 font-mono text-xs text-slate-500 dark:text-slate-400"
+      title="Bandwidth, spreading factor, coding rate and transmit power, read back from the radio. Every node in a group has to agree on the first three.">
+      BW ${num(m.bandwidth_khz, 1)} kHz · SF${num(m.spreading_factor)} · CR 4/${num(m.coding_rate)} · ${num(m.power_dbm, 0, ' dBm')}
+    <//>
+  <//>`;
 
 /**
  * WiFi, which lives next to the radios because the channel is really an
@@ -771,5 +808,367 @@ export function RadarScope({ peers, radios, location, lockedUid }) {
       ${outOfRange > 0 && html`<span>${outOfRange} beyond ${range >= 1000 ? (range / 1000) + 'km' : range + 'm'}<//>`}
     <//>
   `}
+<//>`;
+}
+
+// ---- Power -------------------------------------------------------------------
+
+/** Bytes, in whatever unit keeps it under four digits. */
+export function bytes(v) {
+  if (!present(v)) return DASH;
+  if (v < 1024) return v + ' B';
+  if (v < 1024 * 1024) return (v / 1024).toFixed(1) + ' KB';
+  return (v / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+// A single 18650 cell. 4.2 V is full, 3.0 V is empty and the AXP192 cuts its
+// rails shortly after, so these are the numbers the colour bands are drawn
+// from rather than a percentage the fuel gauge guessed at.
+const CELL_FULL_V = 4.20;
+const CELL_LOW_V = 3.50;
+const CELL_CRIT_V = 3.30;
+
+/** Volts from the cell as a rough state of charge, for the bar only. */
+export const cellPct = v => (present(v) && v > 2.5
+  ? Math.max(0, Math.min(100, ((v - 3.30) / (CELL_FULL_V - 3.30)) * 100)) : null);
+
+const Metric = ({ label, value, tone, tip }) => html`
+  <div class="flex flex-col" title=${tip}>
+    <span class="text-xs uppercase tracking-wide text-gray-400">${label}<//>
+    <span class="font-mono text-sm ${tone || 'text-slate-800 dark:text-slate-100'}">${value}<//>
+  <//>`;
+
+/**
+ * The T-Beam's AXP192.
+ *
+ * Worth a card of its own rather than a line on the dashboard, because on this
+ * board the PMIC is not a battery gauge - it is the thing that powers the GPS
+ * and the LoRa radio. A node whose AXP192 did not answer has no GPS and no
+ * radio, and every symptom of that looks like something else entirely, so the
+ * absence of this card is itself the diagnostic.
+ *
+ * Charge and discharge are reported separately by the chip. A node on USB with
+ * a cell attached shows a supply voltage and a charge current at the same time,
+ * which is the state people most often misread as "the battery is draining".
+ */
+export function PowerCard({ power }) {
+  const p = power || {};
+  const pct = present(p.battery_pct) ? p.battery_pct : cellPct(p.battery_v);
+  const v = p.battery_v;
+  const crit = p.battery_present && present(v) && v > 0 && v < CELL_CRIT_V;
+  const low = p.battery_present && present(v) && v > 0 && v < CELL_LOW_V;
+
+  const chip = !p.battery_present
+    ? ['USB only', tipColors.gray, 'No cell detected. The node runs off USB and stops the instant it is unplugged.']
+    : p.charging ? ['charging', tipColors.green, 'The PMIC is pushing current into the cell.']
+      : crit ? ['critical', tipColors.red, 'Below 3.3 V. The PMIC cuts out shortly, and the GPS and radio go with it.']
+        : low ? ['low', tipColors.yellow, 'Below 3.5 V. Usable, but not for much longer.']
+          : ['on battery', tipColors.blue, 'Running off the cell, not charging.'];
+
+  const barColor = crit ? 'bg-red-500' : low ? 'bg-yellow-500' : 'bg-green-500';
+  const vTone = crit ? 'text-red-600' : low ? 'text-yellow-600' : 'text-slate-800 dark:text-slate-100';
+
+  return html`
+<${Card} title="Power" icon=${Icons.battery}
+  right=${html`<${Colored} text=${chip[0]} colors=${chip[1]} title=${chip[2]} />`}>
+  ${p.battery_present && present(pct) && html`
+  <div class="mb-4">
+    <div class="flex justify-between items-baseline text-xs mb-1">
+      <span class="text-slate-500 dark:text-slate-400">
+        ${present(p.battery_pct) ? 'Fuel gauge' : 'Estimated from cell voltage'}
+      <//>
+      <span class="font-mono text-slate-700 dark:text-slate-200">${pct.toFixed(0)}%<//>
+    <//>
+    <div class="w-full h-2 rounded bg-gray-200 dark:bg-slate-700 overflow-hidden">
+      <div class="h-full ${barColor}" style="width:${pct.toFixed(0)}%"><//>
+    <//>
+  <//>`}
+
+  <div class="grid grid-cols-2 gap-3">
+    <${Metric} label="Battery" value=${p.battery_present ? num(v, 2, ' V') : DASH} tone=${vTone}
+      tip="Cell voltage straight off the PMIC. 4.2 V full, 3.5 V getting low, 3.0 V empty. This is the honest number; the percentage above is a guess built on it." />
+    <${Metric} label="Supply" value=${p.usb_present ? num(p.supply_v, 2, ' V') : 'unplugged'}
+      tip="Voltage on the USB rail. A supply well under 5 V means a cable or a port that cannot hold it up, which shows first as a radio that browns out on transmit." />
+  <//>
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="Charge" value=${num(p.charge_ma, 0, ' mA')}
+      tone=${p.charge_ma > 0 ? 'text-green-600' : ''}
+      tip="Current going into the cell. Zero while running on battery, and zero once the cell is full even with USB attached." />
+    <${Metric} label="Discharge" value=${num(p.discharge_ma, 0, ' mA')}
+      tone=${p.discharge_ma > 0 ? 'text-blue-600' : ''}
+      tip="Current coming out of the cell. This is the node's real draw, transmit bursts included. On USB it should sit at zero." />
+  <//>
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="PMIC temp" value=${num(p.pmic_temp_c, 1, ' °C')}
+      tone=${p.pmic_temp_c > 60 ? 'text-yellow-600' : ''}
+      tip="The AXP192's own die temperature, not the ambient. It climbs while charging at full current, which is normal." />
+    <${Metric} label="USB" value=${p.usb_present ? 'present' : 'absent'}
+      tip="Whether the PMIC sees a supply on VBUS." />
+  <//>
+
+  ${crit && html`
+  <div class="mt-4 flex items-start gap-2 text-sm text-red-900 dark:text-red-200 bg-red-100 dark:bg-red-900 rounded px-3 py-2">
+    <${Icons.warn} class="w-5 h-5 shrink-0" />
+    <span>
+      <span class="font-semibold">Cell at ${num(v, 2, ' V')}.<//>
+      ${' '}The PMIC cuts its rails below about 3.0 V, and the GPS and the LoRa radio are both on those rails. Land it.
+    <//>
+  <//>`}
+<//>`;
+}
+
+/** Shown in place of PowerCard on a board whose PMIC never answered. */
+export function NoPowerCard({ expected }) {
+  return html`
+<${Card} title="Power" icon=${Icons.battery}
+  right=${html`<${Colored} text=${expected ? 'not found' : 'none fitted'}
+    colors=${expected ? tipColors.red : tipColors.gray} />`}>
+  ${expected ? html`
+  <p class="text-sm text-red-900 dark:text-red-200">
+    This board has an AXP192 and it did not answer on I2C. That is not a missing readout: the PMIC is what
+    powers the GPS and the LoRa radio, so both of them are dark. Check the I2C wiring before chasing anything
+    that looks like a radio or a GPS fault.
+  <//>` : html`
+  <p class="text-sm text-slate-500 dark:text-slate-400">
+    No power management chip on this board. The ESP is fed directly, so there is nothing to measure and
+    nothing to switch.
+  <//>`}
+<//>`;
+}
+
+// ---- System ------------------------------------------------------------------
+
+/**
+ * Heap, flash and why the node last restarted.
+ *
+ * The reset reason is the one that earns its place. A node that quietly
+ * rebooted under load comes back with every counter at zero and looks like a
+ * node that was only just switched on, and those are very different problems.
+ */
+export function SystemCard({ system, node }) {
+  const s = system || {};
+  const frag = s.heap_fragmentation_pct;
+  // A watchdog or exception reset is the interesting case. Power-on and an
+  // external reset are what you get from plugging it in and from the reboot
+  // button, and neither is worth a red chip.
+  const reason = String(s.reset_reason || '');
+  const bad = reason !== ''
+    && /watchdog|wdt|exception|panic|brownout|hang|unknown/i.test(reason);
+
+  return html`
+<${Card} title="System" icon=${Icons.cpu}
+  right=${html`<${Colored} text=${reason || 'unknown'} colors=${bad ? tipColors.red : tipColors.gray}
+    title=${bad
+      ? 'This node did not restart cleanly. Every counter on this page is from after that restart.'
+      : 'Why the node last restarted.'} />`}>
+  <div class="grid grid-cols-2 gap-3">
+    <${Metric} label="Free heap" value=${bytes(present(s.free_heap) ? s.free_heap : (node || {}).free_heap)}
+      tip="RAM available right now. Watch the trend, not the number: a figure that only ever falls is a leak, and the node reboots when it runs out." />
+    <${Metric} label="Largest block" value=${bytes(s.largest_free_block)}
+      tone=${present(s.free_heap) && present(s.largest_free_block) && s.largest_free_block < s.free_heap / 2 ? 'text-yellow-600' : ''}
+      tip="The biggest single allocation that can still succeed. A web request needs one contiguous buffer, so this failing while plenty of heap is 'free' is exactly how a fragmented node stops serving this page." />
+  <//>
+  <div class="grid grid-cols-3 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    ${present(frag) && html`
+    <${Metric} label="Fragmentation" value=${num(frag, 0, '%')}
+      tone=${frag > 50 ? 'text-red-600' : frag > 25 ? 'text-yellow-600' : ''}
+      tip="How broken up the heap is. Past about 50% the largest usable block is small enough that allocations start failing regardless of how much is free." />`}
+    ${present(s.min_free_heap) && html`
+    <${Metric} label="Heap low water" value=${bytes(s.min_free_heap)}
+      tip="The least free heap there has been since boot. This is the number that says whether the node came close to running out while you were not looking." />`}
+    <${Metric} label="CPU" value=${num(s.cpu_mhz, 0, ' MHz')} tip="Core clock." />
+    <${Metric} label="Uptime" value=${uptime((node || {}).uptime_ms)}
+      tip="Time since the last restart. Compare it against how long you think the node has been powered." />
+  <//>
+  <div class="grid grid-cols-3 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="Firmware" value=${bytes(s.sketch_size)}
+      tip="How much flash this build occupies." />
+    <${Metric} label="Free for OTA" value=${bytes(s.free_sketch_space)}
+      tone=${present(s.free_sketch_space) && present(s.sketch_size) && s.free_sketch_space < s.sketch_size ? 'text-red-600' : ''}
+      tip="Room for the next over-the-air image. It has to be at least as large as the image you upload, or the update is refused part way through - after the radios have already been parked." />
+    <${Metric} label="Flash" value=${bytes(s.flash_size)} tip="Total flash fitted to this module." />
+  <//>
+<//>`;
+}
+
+// ---- Main loop ---------------------------------------------------------------
+
+export const microseconds = v => (present(v)
+  ? (v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + ' ms' : v + ' µs') : DASH);
+
+/**
+ * How long the main loop takes to go round.
+ *
+ * ALOHA gets its collision behavior from transmitting close to when it meant
+ * to. A loop that stalls for longer than the beacon interval does not merely
+ * transmit late, it misses the transmission entirely, and the mean hides that
+ * completely - which is why the worst case and the overrun count are the two
+ * numbers given the most room here.
+ */
+export function LoopCard({ loop, onReset }) {
+  const l = loop || {};
+  const over = l.overruns || 0;
+  const threshold = l.overrun_threshold_us;
+  const nearMiss = present(l.max_us) && present(threshold) && threshold > 0
+    && l.max_us >= threshold / 2;
+  return html`
+<${Card} title="Main loop" icon=${Icons.clock}
+  right=${html`
+    <div class="flex items-center gap-3">
+      <${Colored} text=${over ? over + ' overrun' + (over === 1 ? '' : 's') : 'clean'}
+        colors=${over ? tipColors.red : tipColors.green}
+        title=${present(threshold) && threshold > 0
+          ? 'Loop iterations that took at least ' + microseconds(threshold) + ', the fastest beacon interval this node uses. Each one could have missed a transmission outright.'
+          : 'Overrun counting is off on this build.'} />
+      ${onReset && html`<button type="button" onclick=${onReset}
+        class="px-2 py-0.5 text-xs font-medium rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+        title="Clear the min, max and mean window. The overrun count deliberately survives: 'it has stalled since boot' does not stop being true because someone pressed a button.">reset<//>`}
+    <//>`}>
+  <div class="grid grid-cols-3 gap-3">
+    <${Metric} label="Rate" value=${num(l.rate_hz, 0, ' Hz')}
+      tone=${present(l.rate_hz) && l.rate_hz > 0 && l.rate_hz < 50 ? 'text-yellow-600' : ''}
+      tip="Loop iterations per second, derived from the mean. Healthy is hundreds; under about 50 Hz means something in the loop is blocking." />
+    <${Metric} label="Mean" value=${microseconds(l.mean_us)} tip="Average time round the loop since the window was last reset." />
+    <${Metric} label="Last" value=${microseconds(l.last_us)} tip="The most recent iteration." />
+  <//>
+  <div class="grid grid-cols-3 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="Min" value=${microseconds(l.min_us)} tip="The fastest iteration in the window - the loop with nothing to do." />
+    <${Metric} label="Max" value=${microseconds(l.max_us)}
+      tone=${over ? 'text-red-600' : nearMiss ? 'text-yellow-600' : ''}
+      tip="The worst iteration in the window. This is the number that matters: one enormous stall behind a healthy mean is exactly what this exists to surface." />
+    <${Metric} label="Samples" value=${num(l.samples)} tip="Iterations measured since the window was last reset." />
+  <//>
+  ${over > 0 && html`
+  <div class="mt-4 flex items-start gap-2 text-sm text-red-900 dark:text-red-200 bg-red-100 dark:bg-red-900 rounded px-3 py-2">
+    <${Icons.warn} class="w-5 h-5 shrink-0" />
+    <span>
+      <span class="font-semibold">${over} iteration${over === 1 ? '' : 's'} ran past ${microseconds(threshold)}.<//>
+      ${' '}Worst was ${microseconds(l.max_us)}. A stall that long can swallow a beacon whole, and nothing on
+      the air records a transmission that never happened.
+    <//>
+  <//>`}
+<//>`;
+}
+
+// ---- Device log --------------------------------------------------------------
+
+const LOG_LEVELS = {
+  debug: ['DEBUG', 'text-slate-400'],
+  info: ['INFO', 'text-slate-600 dark:text-slate-300'],
+  warn: ['WARN', 'text-yellow-600'],
+  error: ['ERROR', 'text-red-600'],
+};
+
+export const LOG_FILTERS = [['all', 'all'], ['warn', 'warn+'], ['error', 'errors']];
+
+/**
+ * The node's own log, over HTTP.
+ *
+ * It is served over HTTP rather than printed to a console because on an ESP8266
+ * target the console UART *is* the MSP UART. Printing a diagnostic there
+ * injects bytes into the flight controller's serial link, so what cannot be
+ * printed has to be readable some other way.
+ */
+export function LogView({ entries, total, capacity, warnings, errors, error, filter }) {
+  if (error) {
+    return html`<p class="p-3 text-sm text-red-600">Could not read the log: ${error}<//>`;
+  }
+  const all = entries || [];
+  const rows = all.filter(e => !filter || filter === 'all'
+    || (filter === 'warn' && (e.level === 'warn' || e.level === 'error'))
+    || e.level === filter);
+  const newest = all.length ? all[0].ms : null;
+  return html`
+<div>
+  ${rows.length ? html`
+  <div class="overflow-x-auto max-h-96 overflow-y-auto">
+    <table class="min-w-full text-sm">
+      <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+        ${rows.map((e, i) => {
+          const lv = LOG_LEVELS[e.level] || LOG_LEVELS.info;
+          return html`
+          <tr key=${e.ms + ':' + i} class="align-top">
+            <${Td} cls="font-mono text-xs text-slate-400 whitespace-nowrap"
+              title=${'At ' + e.ms + ' ms since boot'}
+              text=${present(newest) && newest !== e.ms ? '-' + age(newest - e.ms) : uptime(e.ms)} />
+            <${Td} cls=${'font-mono text-xs whitespace-nowrap ' + lv[1]} text=${lv[0]} />
+            <${Td} cls="font-mono text-xs text-slate-700 dark:text-slate-200 break-all" text=${e.text} />
+          <//>`;
+        })}
+      <//>
+    <//>
+  <//>` : html`
+  <p class="p-3 text-sm text-slate-400">
+    ${all.length ? 'Nothing at this level.' : 'Nothing logged yet.'}
+  <//>`}
+  <div class="px-3 py-2 text-xs text-slate-400 border-t border-gray-200 dark:border-slate-700 flex gap-3 flex-wrap">
+    <span>${rows.length} shown<//>
+    <span>${num(total)} logged since boot<//>
+    ${present(capacity) && html`<span>ring holds ${capacity}<//>`}
+    <span class=${warnings ? 'text-yellow-600' : ''}>${num(warnings)} warn<//>
+    <span class=${errors ? 'text-red-600' : ''}>${num(errors)} error<//>
+  <//>
+<//>`;
+}
+
+// ---- GNSS --------------------------------------------------------------------
+
+// UBX numbering, which is what the API publishes: the MSP path converts to it
+// in the firmware so there is only one scheme to read here.
+const FIX_TYPES = {
+  0: ['no fix', tipColors.red, 'No position. Nothing is beaconed and Follow cannot run.'],
+  1: ['dead reckoning', tipColors.yellow, 'The receiver is extrapolating from its last real fix. Position drifts and keeps calling itself a fix.'],
+  2: ['2D', tipColors.yellow, 'Latitude and longitude only. Altitude is not trustworthy, so vertical offsets are guesswork.'],
+  3: ['3D', tipColors.green, 'Full three-dimensional fix.'],
+  4: ['3D + DR', tipColors.green, 'A 3D fix blended with dead reckoning.'],
+  5: ['time only', tipColors.red, 'The receiver has time but no usable position.'],
+};
+
+/**
+ * Fix quality, separately from position.
+ *
+ * Satellite count and HDOP are what tell you a fix is about to be lost, several
+ * seconds before `valid` goes false and everything downstream stops. Five
+ * satellites at an HDOP of 4 is a fix on paper, and is not one you would want
+ * to hold formation on.
+ */
+export function GnssCard({ location }) {
+  const l = location || {};
+  const fix = FIX_TYPES[l.fix_type] || (l.valid ? FIX_TYPES[3] : FIX_TYPES[0]);
+  const sats = l.sats;
+  const thin = present(sats) && sats > 0 && sats < 7;
+  const hdop = l.hdop;
+  return html`
+<${Card} title="GNSS" icon=${Icons.satellite}
+  right=${html`<${Colored} text=${fix[0]} colors=${fix[1]} title=${fix[2]} />`}>
+  <div class="grid grid-cols-3 gap-3">
+    <${Metric} label="Satellites" value=${present(sats) ? sats : DASH}
+      tone=${!present(sats) ? '' : sats < 5 ? 'text-red-600' : thin ? 'text-yellow-600' : 'text-green-600'}
+      tip="Satellites used in the solution. Under 5 the fix is barely holding; 7 or more is where the position stops wandering." />
+    <${Metric} label="HDOP" value=${present(hdop) ? num(hdop, 2) : DASH}
+      tone=${present(hdop) && hdop > 3 ? 'text-yellow-600' : ''}
+      tip="Horizontal dilution of precision - how favorably the satellites in use are spread across the sky. Under 2 is good; over 4 means the fix can wander by tens of metres while still calling itself valid." />
+    <${Metric} label="Source" value=${l.source === 'gnss' ? 'direct GPS' : 'flight controller'}
+      tip=${l.source === 'gnss'
+        ? 'A GPS module wired to this node directly.'
+        : 'Position comes from the flight controller over MSP, so it stops when the FC link does.'} />
+  <//>
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="Position" value=${l.valid ? latLon(l.lat, l.lon) : 'no fix'}
+      tone=${l.valid ? '' : 'text-yellow-600'} tip="Where this node thinks it is." />
+    <${Metric} label="Altitude" value=${l.valid ? num(l.alt_m, 0, ' m') : DASH}
+      tip="Altitude as reported by the position source. A 2D fix does not have a usable one." />
+  <//>
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="Ground speed" value=${l.valid ? speedMs(l.speed_cms) : DASH} tip="Speed over the ground." />
+    <${Metric} label="Course" value=${l.valid ? courseDeg(l.course_ddeg) + ' ' + compass(l.course_ddeg / 10) : DASH}
+      tip="Direction of travel over the ground, which is not the same as heading in any wind." />
+  <//>
+  ${thin && html`
+  <div class="mt-4 flex items-start gap-2 text-sm text-yellow-900 dark:text-yellow-100 bg-yellow-100 dark:bg-yellow-800 rounded px-3 py-2">
+    <${Icons.warn} class="w-5 h-5 shrink-0" />
+    <span>Only ${sats} satellites. The fix is valid but thin, and it is the first thing to give out under a
+      canopy or in a banking turn.<//>
+  <//>`}
 <//>`;
 }

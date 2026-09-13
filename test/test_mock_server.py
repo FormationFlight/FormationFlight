@@ -43,9 +43,15 @@ from mock_server import (  # noqa: E402
     FRAME_LOG_CAPACITY,
     FRAME_RESULTS,
     HEADING_MODE_NAMES,
+    LOG_CAPACITY,
+    LOG_LEVELS,
+    LOG_TEXT_LEN,
+    LORA_MODULATION,
     MAX_NAME_LEN,
     MAX_PASSPHRASE_LEN,
     REDACTED_SECRET,
+    RESET_REASON_POWERON,
+    RESET_REASON_SOFTWARE,
     MockNode,
     build_server,
     default_config,
@@ -443,7 +449,8 @@ class StatusShapeTest(ApiTestCase):
     def test_status_top_level_shape(self):
         doc = self.get_json("/api/status")
         for key in ("node", "location", "radios", "peers", "crypto", "stats", "fc",
-                    "follow", "sim", "wifi", "reboot_required", "config_corrupt"):
+                    "follow", "sim", "wifi", "system", "loop", "log",
+                    "reboot_required", "config_corrupt"):
             self.assertIn(key, doc)
         self.assertIsInstance(doc["reboot_required"], bool)
         self.assertIsInstance(doc["config_corrupt"], bool)
@@ -467,6 +474,33 @@ class StatusShapeTest(ApiTestCase):
         self.assertGreater(abs(loc["lat"]), 1000000)  # 1e7 degrees, not plain degrees
         self.assertLessEqual(loc["course_ddeg"], 3599)
 
+    def test_location_reports_fix_quality(self):
+        """A fix is not a fix: "no fix" and "four satellites wandering by 30 m"
+        look identical without these."""
+        loc = self.get_json("/api/status")["location"]
+        self.assertIsInstance(loc["sats"], int)
+        self.assertGreaterEqual(loc["sats"], 0)
+        # UBX NAV-PVT numbering, the one scheme every source reports: 0 none,
+        # 1 dead reckoning, 2 2D, 3 3D, 4 3D + dead reckoning, 5 time only.
+        # The MSP path converts its own 0/1/2 on the way in, so a healthy mock
+        # fix is 3.
+        self.assertIn(loc["fix_type"], (0, 1, 2, 3, 4, 5))
+        self.assertEqual(loc["fix_type"], 3)
+        # A float, because the firmware divides the x100 wire value.
+        self.assertIsInstance(loc["hdop"], float)
+        self.assertGreater(loc["hdop"], 0.0)
+
+    def test_hdop_is_absent_rather_than_zero(self):
+        """0.00 is a flawless fix, so it cannot double as "this source does not
+        report HDOP". The firmware omits the field instead."""
+        try:
+            with self.node.lock:
+                self.node.hdop_x100 = 0
+            self.assertNotIn("hdop", self.get_json("/api/status")["location"])
+        finally:
+            with self.node.lock:
+                self.node.hdop_x100 = 131
+
     def test_radio_blocks(self):
         radios = self.get_json("/api/status")["radios"]
         self.assertGreaterEqual(len(radios), 1)
@@ -485,6 +519,119 @@ class StatusShapeTest(ApiTestCase):
             self.assertIsInstance(radio["tx_dropped"], int)
             self.assertGreaterEqual(radio["rx_dropped"], 0)
             self.assertGreaterEqual(radio["tx_dropped"], 0)
+            # False only for a receive-only driver, which the simulated radio is.
+            self.assertIsInstance(radio["transmits"], bool)
+
+    def test_modulation_is_present_on_lora_and_absent_everywhere_else(self):
+        """Read back from the driver, so only a driver with a frequency has one.
+        ESP-NOW's Info is all zeros and the virtual radio never keyed an
+        antenna, so neither sends the object -- absent, not zero-filled."""
+        radios = {r["name"]: r for r in self.get_json("/api/status")["radios"]}
+        self.assertIn("LORA", radios)
+        mod = radios["LORA"]["modulation"]
+        self.assertEqual(set(mod), {"frequency_hz", "bandwidth_khz", "spreading_factor",
+                                    "coding_rate", "power_dbm"})
+        # The 915 band this project ships (platformio.ini's env_common_915).
+        self.assertEqual(mod["frequency_hz"], 920000000)
+        self.assertEqual(mod["bandwidth_khz"], 500.0)
+        self.assertEqual(mod["spreading_factor"], 8)
+        self.assertEqual(mod["coding_rate"], 7)   # a denominator: 4/7
+        self.assertEqual(mod, LORA_MODULATION)
+        # power_dbm is the driver's own setting (the LORA_POWER build flag), not
+        # radios.lora_power_dbm, and may legitimately differ from the config.
+        self.assertIsInstance(mod["power_dbm"], int)
+
+        self.assertNotIn("modulation", radios["ESPNOW"])
+        # SNR is a LoRa-only reading, so ESP-NOW never carries one either. 0 dB
+        # is an ordinary SNR, so it could not have doubled as "no reading".
+        self.assertNotIn("last_snr_db", radios["ESPNOW"])
+        if "last_snr_db" in radios["LORA"]:
+            self.assertIsInstance(radios["LORA"]["last_snr_db"], float)
+
+    def test_system_block(self):
+        sys_doc = self.get_json("/api/status")["system"]
+        for key in ("cpu_mhz", "free_heap", "sketch_size", "free_sketch_space",
+                    "reset_reason", "largest_free_block", "flash_size"):
+            self.assertIn(key, sys_doc)
+        # Why the node last restarted: the most useful field here, and invisible
+        # everywhere else in the API.
+        self.assertEqual(sys_doc["reset_reason"], RESET_REASON_POWERON)
+        self.assertIsInstance(sys_doc["reset_reason"], str)
+        # One contiguous block is never more than the heap it sits in, which is
+        # the whole point of publishing it next to free_heap.
+        self.assertLessEqual(sys_doc["largest_free_block"], sys_doc["free_heap"])
+        self.assertLessEqual(sys_doc["min_free_heap"], sys_doc["free_heap"])
+        self.assertTrue(0 <= sys_doc["heap_fragmentation_pct"] <= 100)
+        self.assertGreater(sys_doc["flash_size"], sys_doc["sketch_size"])
+        # fillSystem() and the node block are the same ESP.getFreeHeap() call.
+        self.assertEqual(sys_doc["free_heap"], self.get_json("/api/status")["node"]["free_heap"])
+
+    def test_loop_block(self):
+        loop = self.get_json("/api/status")["loop"]
+        self.assertEqual(set(loop), {"last_us", "min_us", "max_us", "mean_us", "rate_hz",
+                                     "samples", "overruns", "overrun_threshold_us"})
+        for key, value in loop.items():
+            self.assertIsInstance(value, int, key)
+            self.assertGreaterEqual(value, 0, key)
+        self.assertLessEqual(loop["min_us"], loop["mean_us"])
+        self.assertLessEqual(loop["mean_us"], loop["max_us"])
+        # rateHz() is derived from the mean, not measured separately.
+        self.assertEqual(loop["rate_hz"], 1000000 // loop["mean_us"])
+        # Set at boot from the shortest beacon interval (rate.min_interval_ms).
+        self.assertEqual(loop["overrun_threshold_us"], 100 * 1000)
+
+    def test_log_counters_block(self):
+        """The status document carries the counters only; the lines themselves
+        are GET /api/log."""
+        log = self.get_json("/api/status")["log"]
+        self.assertEqual(set(log), {"total", "warnings", "errors"})
+        for key, value in log.items():
+            self.assertIsInstance(value, int, key)
+        self.assertGreater(log["total"], 0)   # the boot lines, at least
+        self.assertGreaterEqual(log["total"], log["warnings"] + log["errors"])
+
+    def test_power_block_is_self_consistent(self):
+        """A PMIC that answered. Charge and discharge are separate readings, so
+        a node on USB with a battery shows a supply voltage and a charge
+        current at once -- the state people most often misread."""
+        power = self.get_json("/api/status")["power"]
+        for key in ("battery_v", "supply_v", "charge_ma", "discharge_ma", "pmic_temp_c",
+                    "battery_present", "charging", "usb_present"):
+            self.assertIn(key, power)
+        for key in ("battery_present", "charging", "usb_present"):
+            self.assertIsInstance(power[key], bool)
+        self.assertTrue(power["usb_present"])
+        self.assertGreater(power["supply_v"], 4.0)
+        self.assertTrue(power["charging"])
+        self.assertGreater(power["charge_ma"], 0.0)
+        self.assertEqual(power["discharge_ma"], 0.0)
+        self.assertTrue(0 <= power["battery_pct"] <= 100)
+        self.assertIsInstance(power["battery_pct"], int)
+
+    def test_battery_pct_is_absent_when_the_pmic_will_not_estimate_one(self):
+        """0% and "no estimate" are very different things to show a pilot."""
+        try:
+            with self.node.lock:
+                self.node.power_estimates_pct = False
+            power = self.get_json("/api/status")["power"]
+            self.assertNotIn("battery_pct", power)
+            # The rest of the object still comes through.
+            self.assertIn("battery_v", power)
+        finally:
+            with self.node.lock:
+                self.node.power_estimates_pct = True
+
+    def test_power_is_absent_entirely_without_a_pmic(self):
+        """Absence is the diagnostic: on a T-Beam the same chip powers the GPS
+        and LoRa rails, so no `power` object means no GPS either. The UI must
+        never read it as zero volts."""
+        try:
+            with self.node.lock:
+                self.node.power_present = False
+            self.assertNotIn("power", self.get_json("/api/status"))
+        finally:
+            with self.node.lock:
+                self.node.power_present = True
 
     def test_peer_blocks(self):
         peers = self.get_json("/api/status")["peers"]
@@ -629,6 +776,115 @@ class FramesShapeTest(ApiTestCase):
         status, body, _ = self.request("GET", "/api/frames?since=soon")
         self.assertEqual(status, 400)
         self.assertIn("since", body)
+
+
+class LogApiTest(ApiTestCase):
+    """GET and DELETE /api/log.
+
+    The trickle is parked and the ring seeded by hand, because every assertion
+    here is about the contract -- newest first, `since`, and what a clear does
+    and does not reset -- and none of them should be racing the wall clock.
+    """
+
+    def setUp(self):
+        with self.node.lock:
+            self.node.next_log_ms = self.node.uptime_ms() + 3600000
+            self.node.clear_log()
+            for i in range(5):
+                self.node.log_add("info", f"seeded line {i}", 1000 + i)
+
+    def test_log_shape(self):
+        doc = self.get_json("/api/log")
+        self.assertEqual(set(doc), {"total", "capacity", "warnings", "errors", "entries"})
+        self.assertEqual(doc["capacity"], LOG_CAPACITY)
+        self.assertLessEqual(len(doc["entries"]), LOG_CAPACITY)
+        self.assertGreaterEqual(len(doc["entries"]), 1)
+        for entry in doc["entries"]:
+            self.assertEqual(set(entry), {"ms", "level", "text"})
+            self.assertIn(entry["level"], LOG_LEVELS)
+            self.assertIsInstance(entry["ms"], int)
+            # Truncation is deliberate: a line long enough to be cut is one that
+            # should have been shorter.
+            self.assertLessEqual(len(entry["text"]), LOG_TEXT_LEN)
+
+    def test_entries_are_newest_first(self):
+        entries = self.get_json("/api/log")["entries"]
+        stamps = [e["ms"] for e in entries]
+        self.assertEqual(stamps, sorted(stamps, reverse=True))
+        self.assertEqual(entries[0]["text"], "seeded line 4")
+
+    def test_since_returns_only_what_the_client_missed(self):
+        """Entry `i` has sequence `total - 1 - i`, so a client that polls with
+        the `total` it last saw gets exactly what arrived after it."""
+        before = self.get_json("/api/log")
+        with self.node.lock:
+            for i in range(3):
+                self.node.log_add("info", f"after the cursor {i}", 2000 + i)
+        doc = self.get_json(f"/api/log?since={before['total']}")
+        self.assertEqual(doc["total"], before["total"] + 3)
+        self.assertEqual(len(doc["entries"]), 3)
+        self.assertEqual([e["text"] for e in doc["entries"]],
+                         ["after the cursor 2", "after the cursor 1", "after the cursor 0"])
+        # Asking again with nothing new in between returns nothing at all.
+        self.assertEqual(self.get_json(f"/api/log?since={doc['total']}")["entries"], [])
+
+    def test_since_zero_is_the_whole_ring(self):
+        self.assertEqual(self.get_json("/api/log?since=0")["entries"],
+                         self.get_json("/api/log")["entries"])
+
+    def test_since_must_be_an_integer(self):
+        status, body, _ = self.request("GET", "/api/log?since=soon")
+        self.assertEqual(status, 400)
+        self.assertIn("since", body)
+
+    def test_the_ring_rolls_and_total_outruns_capacity(self):
+        with self.node.lock:
+            for i in range(LOG_CAPACITY + 10):
+                self.node.log_add("info", f"rolling {i}", 3000 + i)
+        doc = self.get_json("/api/log")
+        self.assertEqual(len(doc["entries"]), LOG_CAPACITY)
+        self.assertGreater(doc["total"], doc["capacity"])
+        # The oldest lines are gone, the newest are not.
+        self.assertEqual(doc["entries"][0]["text"], f"rolling {LOG_CAPACITY + 9}")
+
+    def test_delete_empties_the_ring_but_never_the_counters(self):
+        """A clear that reset `total` would send every outstanding client cursor
+        backwards, asking for entries that no longer exist. And "this node has
+        hit an error since it booted" does not stop being true because somebody
+        pressed a button in a web page."""
+        with self.node.lock:
+            self.node.log_add("warn", "something to count", 4000)
+            self.node.log_add("error", "something worse to count", 4001)
+        before = self.get_json("/api/log")
+        self.assertGreater(before["warnings"], 0)
+        self.assertGreater(before["errors"], 0)
+
+        status, body, headers = self.request("DELETE", "/api/log")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body, "cleared")
+        self.assertTrue(headers["Content-Type"].startswith("text/plain"))
+
+        after = self.get_json("/api/log")
+        self.assertEqual(after["entries"], [])
+        self.assertEqual(after["total"], before["total"])
+        self.assertEqual(after["warnings"], before["warnings"])
+        self.assertEqual(after["errors"], before["errors"])
+        # And the status document's counters agree with the log's own.
+        status_log = self.get_json("/api/status")["log"]
+        self.assertEqual(status_log["total"], after["total"])
+        self.assertEqual(status_log["warnings"], after["warnings"])
+        self.assertEqual(status_log["errors"], after["errors"])
+
+    def test_a_cursor_survives_a_clear(self):
+        """The sequence arithmetic is the reason `total` has to survive: a
+        client that polls across a clear must never be handed entries it has
+        already seen."""
+        before = self.get_json("/api/log")
+        self.request("DELETE", "/api/log")
+        with self.node.lock:
+            self.node.log_add("info", "after the clear", 5000)
+        doc = self.get_json(f"/api/log?since={before['total']}")
+        self.assertEqual([e["text"] for e in doc["entries"]], ["after the clear"])
 
 
 class ConfigApiTest(ApiTestCase):
@@ -1122,6 +1378,147 @@ class LiveModelTest(unittest.TestCase):
         lat, lon, _alt, _spd, _crs = peer.state(now)
         self.assertAlmostEqual(lat, 37.0, places=9)
         self.assertAlmostEqual(lon, -122.0, places=9)
+
+    def test_the_log_trickles_and_exercises_every_level(self):
+        """The log view needs something to show, and its per-level styling needs
+        all four levels to appear -- warnings often enough to be visible within
+        a minute, errors rarely enough to still read as an event."""
+        node = self.aged_node(seconds=45.0)
+        first = node.log_json()
+        self.assertGreater(len(first["entries"]), 3)
+        self.assertTrue(all(e["level"] in LOG_LEVELS for e in first["entries"]))
+
+        seen = set()
+        total = first["total"]
+        for _ in range(6):
+            doc = node.log_json()
+            seen.update(e["level"] for e in doc["entries"])
+            self.assertGreaterEqual(doc["total"], total)   # never backwards
+            total = doc["total"]
+            node._t0 -= 45.0
+            node.advance()
+        self.assertEqual(seen, set(LOG_LEVELS), seen)
+        self.assertGreater(node.log_warnings, 0)
+        self.assertGreater(node.log_errors, 0)
+
+    def test_the_log_ring_rolls_and_total_keeps_climbing(self):
+        node = self.aged_node(seconds=300.0)
+        doc = node.log_json()
+        self.assertEqual(len(doc["entries"]), LOG_CAPACITY)
+        self.assertGreater(doc["total"], doc["capacity"])
+        # A clear empties the ring and touches nothing else.
+        node.clear_log()
+        after = node.log_json()
+        self.assertEqual(after["entries"], [])
+        self.assertEqual(after["total"], doc["total"])
+        self.assertEqual(after["warnings"], doc["warnings"])
+        self.assertEqual(after["errors"], doc["errors"])
+
+    def test_loop_stats_move_and_overruns_stay_rare(self):
+        """A loop of a few hundred microseconds with the occasional long one.
+        The mean hides the spikes completely, which is why max and overruns are
+        published at all."""
+        node = self.aged_node(seconds=90.0)
+        first = node.loop_json()
+        self.assertGreater(first["samples"], 0)
+        self.assertTrue(100 <= first["mean_us"] <= 2000, first["mean_us"])
+        self.assertLessEqual(first["min_us"], first["mean_us"])
+        self.assertLessEqual(first["mean_us"], first["max_us"])
+        self.assertEqual(first["rate_hz"], 1000000 // first["mean_us"])
+        # Long enough to have collected an overrun, and the spike that caused it
+        # has to be above the threshold or the counter is lying.
+        self.assertGreater(first["overruns"], 0)
+        self.assertGreater(first["max_us"], first["overrun_threshold_us"])
+        # Rare: an overrun on every other loop would be a different bug report.
+        self.assertLess(first["overruns"], first["samples"] / 1000.0)
+
+        node._t0 -= 10.0
+        node.advance()
+        second = node.loop_json()
+        self.assertGreater(second["samples"], first["samples"])
+        self.assertGreaterEqual(second["max_us"], first["max_us"])
+        self.assertGreaterEqual(second["overruns"], first["overruns"])
+
+    def test_the_overrun_threshold_is_the_shortest_beacon_interval(self):
+        """main.cpp snapshots it from rate.min_interval_ms at boot: a loop
+        longer than that can miss a transmission outright."""
+        node = self.aged_node(config_patch={"rate": {"min_interval_ms": 250}})
+        self.assertEqual(node.loop_json()["overrun_threshold_us"], 100 * 1000)
+        node.saved_config = copy.deepcopy(node.config)
+        node.reboot()
+        node.advance()
+        self.assertEqual(node.loop_json()["overrun_threshold_us"], 250 * 1000)
+
+    def test_a_reboot_shows_up_as_a_software_restart(self):
+        """Why the node last restarted is the single most useful thing to know
+        about a board that has been misbehaving."""
+        node = self.aged_node()
+        self.assertEqual(node.system_json(node.uptime_ms())["reset_reason"],
+                         RESET_REASON_POWERON)
+        node.reboot()
+        node.advance()
+        self.assertEqual(node.system_json(node.uptime_ms())["reset_reason"],
+                         RESET_REASON_SOFTWARE)
+        # A power cycle does clear the log, counters included -- unlike a clear.
+        self.assertLess(node.log_total, 10)
+
+    def test_min_free_heap_is_a_low_water_mark(self):
+        node = self.aged_node(seconds=60.0)
+        doc = node.status_json(node.uptime_ms())
+        self.assertLessEqual(doc["system"]["min_free_heap"], doc["system"]["free_heap"])
+        floor = doc["system"]["min_free_heap"]
+        for _ in range(5):
+            node._t0 -= 7.0
+            node.advance()
+            now = node.status_json(node.uptime_ms())["system"]["min_free_heap"]
+            self.assertLessEqual(now, floor)   # only ever downwards
+            floor = now
+
+    def test_lora_reports_snr_once_it_has_received_something(self):
+        """has_snr goes true on the first frame the driver receives, so a LoRa
+        radio that has not heard anything yet omits the field."""
+        node = self.aged_node(seconds=30.0)
+        radios = {r["name"]: r for r in node.status_json(node.uptime_ms())["radios"]}
+        self.assertIsInstance(radios["LORA"]["last_snr_db"], float)
+        self.assertNotIn("last_snr_db", radios["ESPNOW"])
+        self.assertNotIn("modulation", radios["ESPNOW"])
+
+    def test_the_simulated_radio_has_no_modulation_and_does_not_transmit(self):
+        node = self.aged_node(config_patch={"sim": {"enabled": True}})
+        radios = {r["name"]: r for r in node.status_json(node.uptime_ms())["radios"]}
+        self.assertIn("SIM", radios)
+        # It injects frames through the real receive path and never keys an
+        # antenna, so it has neither a frequency to describe nor an SNR.
+        self.assertNotIn("modulation", radios["SIM"])
+        self.assertNotIn("last_snr_db", radios["SIM"])
+        self.assertFalse(radios["SIM"]["transmits"])
+        self.assertTrue(radios["LORA"]["transmits"])
+
+    def test_power_on_battery_is_self_consistent(self):
+        """Nothing charges at zero volts of supply. The two cases have to stay
+        internally consistent or the UI cannot be developed against either."""
+        node = self.aged_node()
+        node.power_usb = False
+        power = node.status_json(node.uptime_ms())["power"]
+        self.assertFalse(power["usb_present"])
+        self.assertFalse(power["charging"])
+        self.assertEqual(power["supply_v"], 0.0)
+        self.assertEqual(power["charge_ma"], 0.0)
+        self.assertGreater(power["discharge_ma"], 0.0)
+        self.assertGreater(power["battery_v"], 3.0)
+        self.assertTrue(0 <= power["battery_pct"] <= 100)
+
+    def test_power_with_no_battery_attached(self):
+        node = self.aged_node()
+        node.power_battery_present = False
+        power = node.status_json(node.uptime_ms())["power"]
+        self.assertFalse(power["battery_present"])
+        self.assertFalse(power["charging"])
+        self.assertEqual(power["battery_v"], 0.0)
+        self.assertEqual(power["charge_ma"], 0.0)
+        self.assertEqual(power["discharge_ma"], 0.0)
+        # No battery, no estimate to make.
+        self.assertNotIn("battery_pct", power)
 
     def test_listen_only_and_sim_flags_reach_the_status_document(self):
         node = self.aged_node(config_patch={"node": {"listen_only": True},

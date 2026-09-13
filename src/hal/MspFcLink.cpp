@@ -17,6 +17,19 @@ constexpr uint32_t kFixStaleMs = 2000;
 constexpr uint32_t kStatusStaleMs = 1000;
 
 constexpr size_t kTxBuf = kMspV2Overhead + kMspSetWpPayloadSize;
+
+// MSP_RAW_GPS numbers its fix 0 none, 1 2D, 2 3D. NodeLocation::fix_type is
+// UBX's 0 none, 2 2D, 3 3D, which is what the web API publishes. Converting
+// here keeps exactly one scheme above the driver layer; anything unexpected is
+// passed through untouched rather than silently reported as a 3D fix.
+uint8_t mspFixToCanonical(uint8_t msp_fix) {
+    switch (msp_fix) {
+        case kMspGpsNoFix: return 0;
+        case 1:            return 2;  // 2D
+        case 2:            return 3;  // 3D
+        default:           return msp_fix;
+    }
+}
 }  // namespace
 
 void MspFcLink::begin(Stream& serial) {
@@ -106,6 +119,9 @@ void MspFcLink::handleFrame(uint32_t now_ms) {
                 loc_.alt_m = gps.alt_m;
                 loc_.speed_cms = static_cast<uint16_t>(gps.speed_cms);
                 loc_.course_ddeg = static_cast<uint16_t>(gps.course_ddeg);
+                loc_.sats = gps.num_sat;
+                loc_.fix_type = mspFixToCanonical(gps.fix_type);
+                loc_.hdop = gps.hdop;
                 lastFixMs_ = now_ms;
                 everFixed_ = true;
                 break;

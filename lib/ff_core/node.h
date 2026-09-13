@@ -41,6 +41,16 @@ struct NodeLocation {
     int16_t alt_m = 0;          // metres MSL
     uint16_t speed_cms = 0;     // cm/s
     uint16_t course_ddeg = 0;   // decidegrees 0..3599
+    // Fix quality. Both the MSP and UBX paths decode these already; they are
+    // kept because "no fix" and "a 4-satellite fix wandering by 30 m" are very
+    // different problems and look identical without them.
+    uint8_t sats = 0;
+    // 0 none, 2 2D, 3 3D. This is UBX's numbering, and it is the canonical one
+    // on this struct: MSP_RAW_GPS uses 0/1/2 for the same three states, so the
+    // MSP path converts on the way in rather than leaving two schemes loose in
+    // the codebase for a reader of the web API to guess between.
+    uint8_t fix_type = 0;
+    uint16_t hdop = 0;          // x100; 0 when the source does not report it
 };
 
 // kMaxRadios is defined in peer_table.h (included above), shared by the peer

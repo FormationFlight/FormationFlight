@@ -19,6 +19,12 @@ drift. Each carries a comment naming what it mirrors:
   - merge_config() mirrors ff::configMergeJson(), including the redaction
     placeholder rule and "a rejected merge changes nothing".
   - MovingPeer mirrors ff::SimPeerConfig and ff::simPeerAt() in sim_traffic.cpp.
+  - The log ring (log_add()/log_json()/clear_log()) mirrors ff::LogRing in
+    lib/ff_core/log.cpp, including the two rules that matter to a polling
+    client: `total` counts everything ever logged and a clear does not reset it.
+  - loop_json() mirrors ff::LoopStats (loop_stats.h), down to minUs() reading 0
+    before the first sample and rateHz() being derived from the mean.
+  - system_json() mirrors fillSystem() in WebServer.cpp.
   - The handlers' status codes and response bodies mirror src/hal/WebServer.cpp,
     which is the other implementation of this same contract. Where that file is
     more specific than the doc, it wins: it is what the UI will actually meet.
@@ -107,10 +113,15 @@ CRYPTO_DISABLED_PASSPHRASE = "none"  # ff::kCryptoDisabledPassphrase
 MSP_MAX_RC_CHANNELS = 16            # ff::kMspMaxRcChannels (msp_fc.h)
 GVAR_INDEX_MAX = 7
 FRAME_LOG_CAPACITY = 32             # ff::kFrameLogCapacity (frame_log.h)
+LOG_CAPACITY = 48                   # ff::kLogCapacity (log.h)
+LOG_TEXT_LEN = 72                   # ff::kLogTextLen (log.h)
 STACKED_HORIZONTAL_EPSILON_M = 0.5  # ff::kFollowStackedHorizontalEpsilonM (follow.h)
 
 # ff::FrameResult (frame_log.h), in enum order; the API spells them lower-snake.
 FRAME_RESULTS = ("tx", "ok", "self", "crypto_fail", "replay_fail", "decode_fail", "oversize")
+
+# ff::LogLevel (log.h), in enum order; logLevelName() spells them like this.
+LOG_LEVELS = ("debug", "info", "warn", "error")
 
 # ff::FollowLockState (follow.h) -> followLockStateName()
 FOLLOW_STATE_NAMES = ("IDLE", "ACQUIRING", "LOCKED", "LOCKED_HOLDING")
@@ -753,6 +764,56 @@ RADIO_ESPNOW, RADIO_LORA, RADIO_SIM = 0, 1, 2
 RADIO_NAMES = {RADIO_ESPNOW: "ESPNOW", RADIO_LORA: "LORA", RADIO_SIM: "SIM"}
 RADIO_AIRTIME_MS = {RADIO_ESPNOW: 0.4, RADIO_LORA: 61.2, RADIO_SIM: 0.0}
 
+# ff::RadioDriver::Info (radio_hub.h), as RadioSX127x::info() fills it in: read
+# back from the driver, not from the config, which is why `power_dbm` is the
+# LORA_POWER build flag rather than radios.lora_power_dbm. A node can therefore
+# report a transmit power the config never mentions, and that is the point --
+# confirming the radio really is where the target intended is the first thing
+# worth checking on a node that is not hearing anyone.
+#
+# These are the 915 numbers this project ships (platformio.ini, env_common_915):
+# SF8 and 4/7 rather than SF7 and 4/5, because 902-928 is full of
+# frequency-hopping traffic and there is no duty-cycle ceiling to pay for it.
+LORA_MODULATION = {
+    "frequency_hz": 920000000,   # LORA_FREQUENCY
+    "bandwidth_khz": 500.0,      # LORA_BW_KHZ
+    "spreading_factor": 8,       # LORA_SF
+    "coding_rate": 7,            # LORA_CR, a denominator: 7 means 4/7
+    "power_dbm": 10,             # LORA_POWER
+}
+# Only the LoRa drivers report SNR (Info::has_snr), and only once they have
+# actually received a frame. ESP-NOW and the simulated radio never do.
+LORA_SNR_DB = 9.5
+
+# The `system` block (fillSystem()). This mock's node is an ESP32 -- it reports
+# min_free_heap, which only the ESP32 branch sends -- but it also sends
+# heap_fragmentation_pct, which only the ESP8266 branch sends, so the UI's
+# fragmentation row is reachable without an 8285 on the bench. Real firmware
+# sends one or the other, never both.
+SYSTEM_CPU_MHZ = 240
+SYSTEM_FLASH_SIZE = 4 * 1024 * 1024
+SYSTEM_SKETCH_SIZE = 962192
+SYSTEM_FREE_SKETCH_SPACE = 1310720
+# esp_reset_reason() through resetReasonName() (WebServer.cpp). A mock that has
+# not rebooted yet was powered on; one that has was restarted in software,
+# which is exactly what /api/system/reboot and a finished OTA do.
+RESET_REASON_POWERON = "power on"
+RESET_REASON_SOFTWARE = "software restart"
+
+# Main-loop timing (ff::LoopStats). A few hundred microseconds an iteration,
+# with the occasional long one: the mean hides exactly the spikes that matter,
+# so the mock has to produce spikes for max and overruns to mean anything.
+LOOP_MEAN_US = 320
+LOOP_MIN_US = 96
+LOOP_SPIKE_EVERY_MS = 4500      # a few-millisecond loop, well under the threshold
+LOOP_OVERRUN_EVERY_MS = 23000   # a loop long enough to miss a transmission
+LOOP_EVENT_BUDGET = 64          # cap on spikes replayed in one catch-up pass
+
+# One log line every LOG_INTERVAL_MS of node time: slow enough to read, fast
+# enough that the 48-entry ring has rolled by the time anyone looks twice.
+LOG_INTERVAL_MS = 1700
+LOG_CATCHUP_BUDGET = 100
+
 
 def _new_radio_stats():
     return {"tx": 0, "rx_ok": 0, "rx_crypto_fail": 0, "rx_replay": 0,
@@ -771,8 +832,9 @@ class MockNode:
     """Everything the API reads from. One lock, one `advance()` that brings the
     world up to the current wall clock, called at the top of every handler."""
 
-    def __init__(self, config=None, seed=1337):
+    def __init__(self, config=None, seed=1337, power_present=True, power_usb=True):
         self.lock = threading.RLock()
+        self.seed = seed
         self.rng = random.Random(seed)
         self.config = config if config is not None else default_config()
         self.saved_config = copy.deepcopy(self.config)
@@ -780,6 +842,25 @@ class MockNode:
         # The mock's config store always parses; kept so the status document has
         # the field the UI's "stored config is corrupt" banner reads.
         self.config_corrupt = False
+
+        # Board power. The default is the bench case: a T-Beam whose AXP192
+        # answered, on USB, with a battery attached and charging. Flip
+        # power_present to False to get the board the firmware omits the whole
+        # `power` object for -- which the UI has to read as "no PMIC", not as
+        # "zero volts".
+        self.power_present = bool(power_present)
+        self.power_usb = bool(power_usb)
+        self.power_battery_present = True
+        # False mirrors a PMIC that will not estimate a charge percentage, in
+        # which case `battery_pct` is omitted rather than sent as 0.
+        self.power_estimates_pct = True
+
+        # GNSS fix quality. hdop is x100, as ff::NodeLocation carries it, and 0
+        # means "this source does not report it" -- the firmware then omits the
+        # field entirely rather than publishing a perfect 0.00.
+        self.sats = 12
+        self.hdop_x100 = 131
+
         self._boot()
 
     # -- lifecycle ----------------------------------------------------------
@@ -805,6 +886,122 @@ class MockNode:
         self.reboot_required = False
         self.ever_saved = False
         self.last_save_ms = 0
+
+        # -- in-RAM log (ff::LogRing) ---------------------------------------
+        # A power cycle clears all of it, counters included; a *clear* does not.
+        self.log = deque(maxlen=LOG_CAPACITY)
+        self.log_total = 0
+        self.log_warnings = 0
+        self.log_errors = 0
+        self.log_seq = 0
+        self.next_log_ms = 0
+        # The firmware's default is Info, so a stock build never records a debug
+        # line; a build that wants them calls setMinLevel(Debug). The mock runs
+        # at Debug so the log view's per-level styling is reachable here.
+        self.log_min_level = "debug"
+
+        # -- main loop (ff::LoopStats) --------------------------------------
+        # Its own RNG: the RSSI stream is seeded and several tests read it, and
+        # loop jitter has no business perturbing it.
+        self.loop_rng = random.Random(self.seed ^ 0xA5)
+        # -1 rather than 0 so the very first advance() records a sample even if
+        # it lands on uptime 0; a status document with no loop samples in it at
+        # all would be a state real firmware never shows.
+        self.loop_last_ms = -1
+        self.loop_samples = 0
+        self.loop_total_us = 0
+        self.loop_last_us = 0
+        self.loop_min_us = 0
+        self.loop_max_us = 0
+        self.loop_overruns = 0
+        # main.cpp: the threshold is the shortest beacon interval, snapshotted
+        # at boot. A loop longer than that can miss a transmission outright.
+        self.loop_overrun_us = int(self.config["rate"].get("min_interval_ms", 100)) * 1000
+        self.loop_next_spike_ms = LOOP_SPIKE_EVERY_MS
+        self.loop_next_overrun_ms = LOOP_OVERRUN_EVERY_MS
+
+        # -- system ----------------------------------------------------------
+        self.min_free_heap = self.free_heap(0)
+
+        # main.cpp's first line, and BoardPower's. A node that has just come up
+        # should have something in the log before anything else happens.
+        self.log_add("info", f"FormationFlight {NODE_VERSION} booting, uid {uid_str(NODE_UID)}", 0)
+        if self.power_present:
+            self.log_add("info", "AXP192 up: GPS, LoRa and peripheral rails on", 0)
+        else:
+            self.log_add("error", "AXP192 not found: GPS and LoRa rails are unpowered", 0)
+
+    # -- the in-RAM log -----------------------------------------------------
+
+    def log_add(self, level, text, ms=None):
+        """ff::LogRing::vadd(): below the minimum level nothing happens at all,
+        not even to the counters; above it the text truncates rather than
+        overflowing, and `total` counts everything ever recorded."""
+        if LOG_LEVELS.index(level) < LOG_LEVELS.index(self.log_min_level):
+            return
+        if ms is None:
+            ms = self.uptime_ms()
+        self.log.append({"ms": int(ms), "level": level, "text": text[:LOG_TEXT_LEN]})
+        self.log_total += 1
+        if level == "warn":
+            self.log_warnings += 1
+        elif level == "error":
+            self.log_errors += 1
+
+    def clear_log(self):
+        """LogRing::clear(): the ring empties, the counters do not. `total`,
+        `warnings` and `errors` are since-boot counts, and a client's cursor
+        must never walk backwards -- a clear that reset `total` would make every
+        outstanding `since` ask for entries that no longer exist."""
+        self.log.clear()
+
+    def log_json(self, since=None):
+        """GET /api/log. Newest first, like the frame log, and `since` is
+        compared against the sequence number entry `i` implies."""
+        entries = []
+        for i, entry in enumerate(reversed(self.log)):
+            seq = self.log_total - 1 - i
+            # A `since` of 0, like an absent one, is the whole ring.
+            if since and seq < since:
+                break
+            entries.append(dict(entry))
+        return {
+            "total": self.log_total,
+            "capacity": LOG_CAPACITY,
+            "warnings": self.log_warnings,
+            "errors": self.log_errors,
+            "entries": entries,
+        }
+
+    def _emit_log(self, ms):
+        """One line of the trickle. Mostly routine, with a warning often enough
+        that the log view's level styling shows up within a minute and an error
+        rarely enough that it still reads as an event rather than as wallpaper.
+        The content mirrors things this mock is actually doing."""
+        seq = self.log_seq
+        self.log_seq += 1
+        peers = self._peer_list()
+        peer = peers[seq % len(peers)] if peers else None
+        name = peer.name if peer is not None else "?"
+        uid = uid_str(peer.uid) if peer is not None else uid_str(0)
+
+        if seq % 29 == 28:
+            self.log_add("error", "AXP192 read failed, rails may be unpowered", ms)
+        elif seq % 11 == 7:
+            self.log_add("warn", f"crypto: bad tag from {uid}, frame dropped", ms)
+        elif seq % 11 == 3:
+            self.log_add("warn", "LoRa tx dropped: radio still busy", ms)
+        elif seq % 5 == 1:
+            self.log_add("info", f"peer {uid} {name} seen on "
+                                 f"{RADIO_NAMES[peer.radios[0]] if peer else 'ESPNOW'}", ms)
+        elif seq % 5 == 2:
+            self.log_add("debug", f"rate: {len(peers)} peers, beacon every "
+                                  f"{self._beacon_interval_ms(len(peers), RADIO_LORA)} ms", ms)
+        elif seq % 5 == 3:
+            self.log_add("debug", f"msp: radar out for {len(peers)} peers", ms)
+        else:
+            self.log_add("info", "wifi: 1 client on the AP, channel "
+                                 f"{self.wifi_json()['channel']}", ms)
 
     def save_allowed(self, now_ms):
         """WebServer::saveAllowed(): flash has a finite number of erase cycles
@@ -837,6 +1034,13 @@ class MockNode:
     def uptime_ms(self):
         return int((time.monotonic() - self._t0) * 1000.0)
 
+    def free_heap(self, now_ms):
+        """ESP.getFreeHeap(). Wobbles like a real heap under fragmentation, so a
+        UI graphing it has something with texture. `node.free_heap` and
+        `system.free_heap` are the same call on the firmware, so they are the
+        same number here."""
+        return 24160 + (now_ms // 997) % 512 - 256
+
     # -- world tick ---------------------------------------------------------
 
     def advance(self):
@@ -853,8 +1057,64 @@ class MockNode:
                 # Server was idle for a long time; skip the backlog rather than
                 # replay it.
                 self.next_frame_ms = now
+
+            budget = LOG_CATCHUP_BUDGET
+            while self.next_log_ms <= now and budget > 0:
+                self._emit_log(self.next_log_ms)
+                self.next_log_ms += LOG_INTERVAL_MS
+                budget -= 1
+            if self.next_log_ms < now:
+                self.next_log_ms = now
+
+            self._advance_loop(now)
+            self.min_free_heap = min(self.min_free_heap, self.free_heap(now))
             self._update_follow(now)
             return now
+
+    def _advance_loop(self, now_ms):
+        """Feed ff::LoopStats from a loop that really is running.
+
+        The spikes are scheduled against node time rather than against how often
+        a handler called this, so the numbers do not change shape when the UI
+        polls harder -- and a node left alone for a minute comes back with the
+        overruns it would have collected while nobody was looking.
+        """
+        if now_ms <= self.loop_last_ms:
+            return
+        elapsed_us = (now_ms - self.loop_last_ms) * 1000
+        self.loop_last_ms = now_ms
+
+        mean_us = self.loop_rng.uniform(LOOP_MEAN_US * 0.85, LOOP_MEAN_US * 1.15)
+        iterations = max(1, int(elapsed_us / mean_us))
+        self.loop_samples += iterations
+        self.loop_total_us += int(iterations * mean_us)
+
+        self.loop_last_us = int(self.loop_rng.uniform(LOOP_MIN_US * 1.4, LOOP_MEAN_US * 1.6))
+        low = int(self.loop_rng.uniform(LOOP_MIN_US, LOOP_MIN_US * 1.3))
+        self.loop_min_us = low if self.loop_min_us == 0 else min(self.loop_min_us, low)
+        # The worst iteration in a batch is always somewhat above that batch's
+        # mean, so max_us can never end up under mean_us.
+        self.loop_max_us = max(self.loop_max_us, self.loop_last_us, int(mean_us * 1.25))
+
+        budget = LOOP_EVENT_BUDGET
+        while self.loop_next_spike_ms <= now_ms and budget > 0:
+            # Long, but not long enough to miss a beacon: this is the number the
+            # mean hides, which is the whole reason max_us is published.
+            self.loop_max_us = max(self.loop_max_us,
+                                   int(self.loop_rng.uniform(2000, 16000)))
+            self.loop_next_spike_ms += LOOP_SPIKE_EVERY_MS
+            budget -= 1
+        if self.loop_next_spike_ms < now_ms:
+            self.loop_next_spike_ms = now_ms + LOOP_SPIKE_EVERY_MS
+
+        while self.loop_next_overrun_ms <= now_ms and budget > 0:
+            over = int(self.loop_overrun_us * self.loop_rng.uniform(1.05, 2.4))
+            self.loop_max_us = max(self.loop_max_us, over)
+            self.loop_overruns += 1
+            self.loop_next_overrun_ms += LOOP_OVERRUN_EVERY_MS
+            budget -= 1
+        if self.loop_next_overrun_ms < now_ms:
+            self.loop_next_overrun_ms = now_ms + LOOP_OVERRUN_EVERY_MS
 
     def active_peers(self):
         """Peers that show up in the peer table: the built-in RF ones always,
@@ -1150,6 +1410,98 @@ class MockNode:
             wifi["sta_rssi"] = -57
         return wifi
 
+    def system_json(self, now_ms):
+        """fillSystem(). Why the node last restarted is the single most useful
+        thing to know about a board that has been misbehaving, and it is
+        invisible everywhere else."""
+        free = self.free_heap(now_ms)
+        # A heap that is never quite contiguous: a web request can fail for want
+        # of one large block while plenty of heap is nominally "free", which is
+        # the failure heap_fragmentation_pct exists to explain.
+        largest = int(free * (0.80 + 0.05 * math.sin(now_ms / 11000.0)))
+        return {
+            "cpu_mhz": SYSTEM_CPU_MHZ,
+            "free_heap": free,
+            "sketch_size": SYSTEM_SKETCH_SIZE,
+            "free_sketch_space": SYSTEM_FREE_SKETCH_SPACE,
+            "reset_reason": RESET_REASON_POWERON if self.reboots == 0
+                            else RESET_REASON_SOFTWARE,
+            "largest_free_block": largest,
+            "flash_size": SYSTEM_FLASH_SIZE,
+            # ESP8266-only on real firmware; see LORA_MODULATION's neighbours
+            # above for why this mock sends both halves.
+            "heap_fragmentation_pct": max(0, int(round(100.0 * (1.0 - largest / free)))),
+            # ESP32-only on real firmware.
+            "min_free_heap": self.min_free_heap,
+        }
+
+    def loop_json(self):
+        """ff::LoopStats, as fillStatus() serialises it. minUs() and rateHz()
+        read 0 before the first sample, so a node that has not looped yet says
+        so rather than claiming a 0 us loop."""
+        mean = int(self.loop_total_us // self.loop_samples) if self.loop_samples else 0
+        return {
+            "last_us": self.loop_last_us,
+            "min_us": self.loop_min_us if self.loop_samples else 0,
+            "max_us": self.loop_max_us,
+            "mean_us": mean,
+            "rate_hz": (1000000 // mean) if mean else 0,
+            "samples": self.loop_samples,
+            "overruns": self.loop_overruns,
+            "overrun_threshold_us": self.loop_overrun_us,
+        }
+
+    def power_json(self, now_ms):
+        """The `power` block, or None on a board the firmware omits it for.
+
+        Charge and discharge are separate readings on the PMIC, so a node on USB
+        with a battery attached shows a supply voltage *and* a charge current --
+        the state people most often misread. The mock keeps the two cases
+        internally consistent rather than emitting a plausible-looking
+        impossibility like charging at 0 V of supply.
+        """
+        if not self.power_present:
+            return None
+        wobble = math.sin(now_ms / 30000.0)
+        battery = self.power_battery_present
+        if self.power_usb:
+            battery_v = round(4.06 + 0.02 * wobble, 3) if battery else 0.0
+            doc = {
+                "battery_v": battery_v,
+                "supply_v": round(5.05 + 0.03 * wobble, 3),
+                # Tapering, the way a PMIC's constant-voltage phase does.
+                "charge_ma": round(240.0 + 30.0 * wobble, 1) if battery else 0.0,
+                "discharge_ma": 0.0,
+                "pmic_temp_c": round(31.5 + 1.5 * wobble, 1),
+                "battery_present": battery,
+                "charging": battery,
+                "usb_present": True,
+            }
+        else:
+            battery_v = round(3.92 + 0.03 * wobble, 3) if battery else 0.0
+            doc = {
+                "battery_v": battery_v,
+                "supply_v": 0.0,
+                "charge_ma": 0.0,
+                "discharge_ma": round(310.0 + 40.0 * wobble, 1) if battery else 0.0,
+                "pmic_temp_c": round(28.0 + 1.5 * wobble, 1),
+                "battery_present": battery,
+                "charging": False,
+                "usb_present": False,
+            }
+        # Omitted, not zeroed, when the PMIC will not estimate one: 0% and "no
+        # estimate" are very different things to show a pilot.
+        if battery and self.power_estimates_pct:
+            doc["battery_pct"] = self._battery_pct(battery_v)
+        return doc
+
+    @staticmethod
+    def _battery_pct(battery_v):
+        """A single-cell lithium curve flattened to a line. Crude on purpose:
+        the AXP192's own estimate is not much better."""
+        pct = (battery_v - 3.30) / (4.15 - 3.30) * 100.0
+        return int(max(0, min(100, round(pct))))
+
     def status_json(self, now_ms):
         lat, lon, alt = self.self_location(now_ms)
         peers = self._peer_list()
@@ -1159,7 +1511,7 @@ class MockNode:
         for index in self._radio_indices():
             rs = self.radio_stats[index]
             on_radio = [p for p in peers if index in p.radios]
-            radios.append({
+            radio = {
                 "index": index,
                 "name": RADIO_NAMES[index],
                 "enabled": self._radio_enabled(index),
@@ -1179,7 +1531,21 @@ class MockNode:
                 # on-air counter anywhere shows them.
                 "rx_dropped": rs["rx_dropped"],
                 "tx_dropped": rs["tx_dropped"],
-            })
+                # False for a receive-only driver; SimRadio is the one here.
+                "transmits": index != RADIO_SIM,
+            }
+            # Only a driver that reports a frequency has a modulation to
+            # describe. ESP-NOW's Info is all zeros and the simulated radio
+            # never touched an antenna, so neither sends the object at all.
+            if index == RADIO_LORA:
+                radio["modulation"] = dict(LORA_MODULATION)
+                # has_snr goes true on the first frame the driver receives, so
+                # a LoRa radio that has not heard anything yet omits it.
+                if rs["last_rx_ms"]:
+                    radio["last_snr_db"] = round(
+                        LORA_SNR_DB + 2.5 * math.sin(now_ms / 9000.0)
+                        + (rs["last_rssi"] + 70) / 40.0, 2)
+            radios.append(radio)
 
         peer_docs = []
         for peer in peers:
@@ -1217,27 +1583,40 @@ class MockNode:
                 "tx_counter": self.tx_counter,
             }
 
-        return {
+        location = {
+            "valid": True,
+            "source": "msp",
+            "lat": to_1e7(lat),
+            "lon": to_1e7(lon),
+            "alt_m": int(alt),
+            "speed_cms": 1500,
+            "course_ddeg": 900,
+            "armed": False,
+            # "no fix" and "a four-satellite fix wandering by 30 m" are very
+            # different problems and look identical without these.
+            "sats": self.sats,
+            # UBX NAV-PVT numbering, the one scheme the API publishes on every
+            # source: 0 none, 1 dead reckoning, 2 2D, 3 3D, 4 3D + dead
+            # reckoning, 5 time only. The MSP path converts its own 0/1/2 on
+            # the way in (mspFixToCanonical, MspFcLink.cpp), so a healthy fix
+            # is 3 here even though `source` is "msp".
+            "fix_type": 3,
+        }
+        # Omitted entirely when the source does not report it, rather than sent
+        # as a flawless 0.00.
+        if self.hdop_x100:
+            location["hdop"] = self.hdop_x100 / 100.0
+
+        doc = {
             "node": {
                 "uid": uid_str(NODE_UID),
                 "name": self.node_name(),
                 "version": NODE_VERSION,
                 "uptime_ms": now_ms,
-                # Wobbles like a real heap under fragmentation, so a UI graphing
-                # it has something with texture.
-                "free_heap": 24160 + (now_ms // 997) % 512 - 256,
+                "free_heap": self.free_heap(now_ms),
                 "listen_only": bool(cfg["node"].get("listen_only")),
             },
-            "location": {
-                "valid": True,
-                "source": "msp",
-                "lat": to_1e7(lat),
-                "lon": to_1e7(lon),
-                "alt_m": int(alt),
-                "speed_cms": 1500,
-                "course_ddeg": 900,
-                "armed": False,
-            },
+            "location": location,
             "radios": radios,
             "peers": peer_docs,
             "crypto": crypto,
@@ -1256,14 +1635,33 @@ class MockNode:
                 "enabled": bool(cfg["sim"]["enabled"]),
                 "peers": len(self.sim_peers),
             },
-            "wifi": self.wifi_json(),
-            # Not in docs/v2-web-api.md's example, but WebServer.cpp sends both:
-            # a setting that only takes effect at boot has been changed, and the
-            # stored config could not be parsed at boot (defaults in force, the
-            # file left alone for recovery).
-            "reboot_required": self.reboot_required,
-            "config_corrupt": self.config_corrupt,
         }
+        # Keys from here down are added in fillStatus()'s own order.
+        #
+        # A board with no PMIC, or one whose PMIC did not answer, sends no
+        # `power` object at all -- and on a T-Beam the absence is itself the
+        # diagnostic, because the same chip powers the GPS and LoRa rails.
+        power = self.power_json(now_ms)
+        if power is not None:
+            doc["power"] = power
+        doc["wifi"] = self.wifi_json()
+        doc["system"] = self.system_json(now_ms)
+        # Absent on a build with no LoopStats wired to the web server; this mock
+        # always has one, the way main.cpp always does.
+        doc["loop"] = self.loop_json()
+        # The counters only; the entries themselves are GET /api/log.
+        doc["log"] = {
+            "total": self.log_total,
+            "warnings": self.log_warnings,
+            "errors": self.log_errors,
+        }
+        # Not in docs/v2-web-api.md's example, but WebServer.cpp sends both:
+        # a setting that only takes effect at boot has been changed, and the
+        # stored config could not be parsed at boot (defaults in force, the
+        # file left alone for recovery).
+        doc["reboot_required"] = self.reboot_required
+        doc["config_corrupt"] = self.config_corrupt
+        return doc
 
     def _beacon_interval_ms(self, active_peers, radio_index):
         """RateController::baseIntervalMs(): (N_total * airtime) / G_target,
@@ -1457,6 +1855,20 @@ def make_handler(node, config_path=None, quiet=True):
                             return
                     self._json(node.frames_json(since))
                     return
+                if path == "/api/log":
+                    # The in-RAM log. On an ESP8266 target this is the only safe
+                    # log there is: the console UART is the MSP UART, so
+                    # printing a diagnostic injects bytes into the flight
+                    # controller's serial link.
+                    since = None
+                    if "since" in query:
+                        try:
+                            since = int(query["since"][0])
+                        except ValueError:
+                            self._text("since must be an integer", 400)
+                            return
+                    self._json(node.log_json(since))
+                    return
                 if path == "/api/sim":
                     self._json(node.sim_json(now))
                     return
@@ -1564,6 +1976,14 @@ def make_handler(node, config_path=None, quiet=True):
             parsed = urlparse(self.path)
             path, query = parsed.path, parse_qs(parsed.query)
             node.advance()
+            if path == "/api/log":
+                # Empties the ring. `total`, `warnings` and `errors` survive on
+                # purpose: they are since-boot counts, and a client's cursor
+                # must never walk backwards.
+                with node.lock:
+                    node.clear_log()
+                self._text("cleared")
+                return
             if path == "/api/sim/peer":
                 if "uid" not in query:
                     self._text("uid required", 400)
@@ -1646,12 +2066,19 @@ def main():
                         help="start with sim.enabled, so /api/sim/* works immediately")
     parser.add_argument("--seed", type=int, default=1337,
                         help="RNG seed for RSSI jitter (deterministic by default)")
+    parser.add_argument("--no-pmic", action="store_true",
+                        help="board with no power-management IC: status sends no "
+                             "`power` object at all, which the UI must read as "
+                             "'no PMIC' rather than as zero volts")
+    parser.add_argument("--on-battery", action="store_true",
+                        help="running off the battery instead of USB")
     parser.add_argument("--config-file", default=None,
                         help="also write /api/config/save results to this file")
     parser.add_argument("--verbose", action="store_true", help="log every request")
     args = parser.parse_args()
 
-    node = MockNode(seed=args.seed)
+    node = MockNode(seed=args.seed, power_present=not args.no_pmic,
+                    power_usb=not args.on_battery)
     if args.sim:
         node.config["sim"]["enabled"] = True
         node.saved_config["sim"]["enabled"] = True

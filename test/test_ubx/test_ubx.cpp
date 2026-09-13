@@ -93,6 +93,7 @@ void test_decode_nav_pvt() {
     UbxFix fix{};
     TEST_ASSERT_TRUE(decodeNavPvt(p.data(), static_cast<uint16_t>(p.size()), fix));
     TEST_ASSERT_TRUE(fix.valid);
+    TEST_ASSERT_EQUAL_UINT8(3, fix.fix_type);
     TEST_ASSERT_EQUAL_UINT8(9, fix.num_sat);
     TEST_ASSERT_EQUAL_INT32(451715460, fix.lat);
     TEST_ASSERT_EQUAL_INT32(57223870, fix.lon);
@@ -108,6 +109,29 @@ void test_decode_nav_pvt_no_fix() {
     UbxFix fix{};
     TEST_ASSERT_TRUE(decodeNavPvt(p.data(), static_cast<uint16_t>(p.size()), fix));
     TEST_ASSERT_FALSE(fix.valid);
+    TEST_ASSERT_EQUAL_UINT8(0, fix.fix_type);
+}
+
+void test_decode_nav_pvt_keeps_a_two_d_fix_distinct_from_a_three_d_one() {
+    auto p = navPvtPayload();
+    p[20] = 2;     // fixType 2D
+    UbxFix fix{};
+    TEST_ASSERT_TRUE(decodeNavPvt(p.data(), static_cast<uint16_t>(p.size()), fix));
+    TEST_ASSERT_TRUE(fix.valid);
+    TEST_ASSERT_EQUAL_UINT8(2, fix.fix_type);
+}
+
+// A receiver can report a 3D solution while telling us not to trust it. That is
+// worse than no fix at all if it is passed on as a 3D one, because everything
+// downstream treats it as the best quality there is.
+void test_a_three_d_solution_the_receiver_distrusts_is_reported_as_no_fix() {
+    auto p = navPvtPayload();
+    p[20] = 3;     // fixType 3D
+    p[21] = 0x00;  // gnssFixOK clear
+    UbxFix fix{};
+    TEST_ASSERT_TRUE(decodeNavPvt(p.data(), static_cast<uint16_t>(p.size()), fix));
+    TEST_ASSERT_FALSE(fix.valid);
+    TEST_ASSERT_EQUAL_UINT8(0, fix.fix_type);
 }
 
 void test_decode_nav_pvt_too_short() {
@@ -166,6 +190,8 @@ int main(int, char**) {
     RUN_TEST(test_buffer_too_small_returns_zero);
     RUN_TEST(test_decode_nav_pvt);
     RUN_TEST(test_decode_nav_pvt_no_fix);
+    RUN_TEST(test_decode_nav_pvt_keeps_a_two_d_fix_distinct_from_a_three_d_one);
+    RUN_TEST(test_a_three_d_solution_the_receiver_distrusts_is_reported_as_no_fix);
     RUN_TEST(test_decode_nav_pvt_too_short);
     RUN_TEST(test_parser_reads_nav_pvt_frame);
     RUN_TEST(test_parser_rejects_bad_checksum);

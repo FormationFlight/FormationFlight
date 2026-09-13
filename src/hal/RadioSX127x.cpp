@@ -158,12 +158,26 @@ void RadioSX127x::serviceRx() {
         if (state == RADIOLIB_ERR_NONE) {
             frame.timestamp_ms = millis();
             frame.rssi = static_cast<int16_t>(radio_->getRSSI());
+            last_snr_db_ = radio_->getSNR();
+            have_snr_ = true;
             frame.len = static_cast<uint8_t>(len);
             rx_.push(frame);
         }
     }
 
     radio_->startReceive();
+}
+
+RadioSX127x::Info RadioSX127x::info() const {
+    Info i;
+    i.frequency_hz = static_cast<uint32_t>(LORA_FREQUENCY);
+    i.bandwidth_khz = kBandwidthKHz;
+    i.spreading_factor = kSpreadingFactor;
+    i.coding_rate = kCodingRate;
+    i.power_dbm = static_cast<int8_t>(LORA_POWER);
+    i.has_snr = have_snr_;
+    i.last_snr_db = last_snr_db_;
+    return i;
 }
 
 double RadioSX127x::airtimeMs(size_t payload_len) const {
