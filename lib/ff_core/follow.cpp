@@ -295,11 +295,28 @@ const Peer* FollowController::resolveLock(uint32_t now_ms) {
                 candidate = p;
             }
         } else {
+            // Nearest followable peer, not merely the first in the table: slot
+            // order is allocation order with LRU eviction, so "first" is
+            // arbitrary. With several aircraft up, the closest one is the one
+            // the pilot means. Needs our own fix to measure from; without one,
+            // fall back to table order (any lock is better than none, and the
+            // waypoint path is suppressed until we have a fix anyway).
+            const NodeLocation self = self_->getLocation();
+            double bestDistM = 0.0;
             for (size_t i = 0; i < peers_->capacity(); i++) {
                 const Peer* p = peers_->at(i);
-                if (!followPeerStale(p, now_ms, config_.peerTimeoutMs)) {
+                if (followPeerStale(p, now_ms, config_.peerTimeoutMs)) {
+                    continue;
+                }
+                if (!self.valid) {
                     candidate = p;
                     break;
+                }
+                const double distM = geo::distanceM(deg1e7(self.lat), deg1e7(self.lon),
+                                                    deg1e7(p->lat), deg1e7(p->lon));
+                if (candidate == nullptr || distM < bestDistM) {
+                    candidate = p;
+                    bestDistM = distM;
                 }
             }
         }

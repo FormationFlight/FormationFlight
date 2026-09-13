@@ -76,7 +76,7 @@ enum FollowHeadingMode {
 #ifndef FOLLOW_TRIGGER_MODE
 #define FOLLOW_TRIGGER_MODE FOLLOW_TRIGGER_GCSNAV
 #endif
-// 0 = FIRST_ACTIVE (lock onto the first non-stale peer at acquire time);
+// 0 = NEAREST (lock onto the closest followable peer at acquire time);
 // nonzero = pin acquisition to that specific peer UID.
 #ifndef FOLLOW_TARGET_UID
 #define FOLLOW_TARGET_UID 0
@@ -205,7 +205,7 @@ struct FollowConfig {
     double ofsLatM = FOLLOW_OFS_LAT_M;
     double ofsVertM = FOLLOW_OFS_VERT_M;
 
-    uint32_t targetUid = FOLLOW_TARGET_UID;  // 0 = FIRST_ACTIVE
+    uint32_t targetUid = FOLLOW_TARGET_UID;  // 0 = nearest followable peer
     uint16_t emitHz = FOLLOW_EMIT_HZ;
     uint32_t peerTimeoutMs = FOLLOW_PEER_TIMEOUT_MS;
 

@@ -45,7 +45,7 @@ struct FakeDriver : RadioDriver {
 
 struct NullCrypto : ICrypto {
     size_t encrypt(uint8_t*, size_t len, size_t) override { return len; }
-    bool decrypt(uint8_t*, size_t len, size_t& out_len) override {
+    bool decrypt(uint8_t*, size_t len, size_t& out_len, uint32_t) override {
         out_len = len;
         return true;
     }

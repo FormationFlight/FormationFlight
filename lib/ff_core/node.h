@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "frame_log.h"
 #include "peer_table.h"
 #include "protocol.h"
 #include "rate_control.h"
@@ -77,7 +78,12 @@ public:
     // Returns the ciphertext length, or 0 on failure (e.g. capacity too small).
     virtual size_t encrypt(uint8_t* buf, size_t len, size_t cap) = 0;
     // Returns true on success and writes the plaintext length to out_len.
-    virtual bool decrypt(uint8_t* buf, size_t len, size_t& out_len) = 0;
+    // now_ms is passed in because replay rejection has to know how long it has
+    // been since the sender was last heard (see crypto.h's kReplayResyncMs).
+    virtual bool decrypt(uint8_t* buf, size_t len, size_t& out_len, uint32_t now_ms) = 0;
+    // Whether a rejected frame was a replay rather than a bad tag, for the
+    // frame log. Only meaningful immediately after decrypt() returned false.
+    virtual bool lastRejectWasReplay() const { return false; }
 };
 
 // Uniform random in [0,1), injected so jitter is deterministic under test.
@@ -135,6 +141,24 @@ struct NodeStats {
     uint32_t last_tx_ms = 0;
 };
 
+// Per-radio counters for the status and debug views. Aggregate numbers hide the
+// case that matters most on a multi-radio node: one medium working while the
+// other is deaf.
+struct RadioStats {
+    uint32_t tx = 0;
+    uint32_t rx_ok = 0;
+    uint32_t rx_crypto_fail = 0;
+    uint32_t rx_replay = 0;
+    uint32_t rx_decode_fail = 0;
+    uint32_t rx_self = 0;
+    uint32_t last_rx_ms = 0;
+    int16_t last_rssi = 0;
+    // The interval this radio's beacon timer was last re-armed with, so the UI
+    // can show ALOHA backing off as the fleet grows.
+    uint32_t beacon_interval_ms = 0;
+    double airtime_ms = 0.0;
+};
+
 class Node {
 public:
     Node(const NodeConfig& cfg, const NodeDeps& deps);
@@ -154,6 +178,11 @@ public:
 
     const PeerTable& peers() const { return peers_; }
     const NodeStats& stats() const { return stats_; }
+    const RadioStats& radioStats(size_t index) const {
+        return radio_stats_[index < kMaxRadios ? index : 0];
+    }
+    size_t radioCount() const { return radio_count_; }
+    const FrameLog& frameLog() const { return frames_; }
     uint32_t activePeerCount(uint32_t now_ms) const { return peers_.countActive(now_ms); }
     uint32_t activePeerCountOn(size_t radio_index, uint32_t now_ms) const {
         return peers_.countActiveOn(radio_index, now_ms);
@@ -176,6 +205,8 @@ private:
     void sendAnnounce();
     void onMspRadarTick();
     uint32_t nextBeaconDelayMs(size_t index);
+    void logFrame(size_t radio_index, uint32_t uid, size_t len, int16_t rssi, uint8_t type,
+                  FrameResult result);
 
     NodeConfig cfg_;
     NodeDeps deps_;
@@ -183,6 +214,8 @@ private:
     PeerTable peers_;
     RateController rate_;  // shared config/clamps; airtime supplied per radio
     NodeStats stats_;
+    RadioStats radio_stats_[kMaxRadios];
+    FrameLog frames_;
 
     size_t radio_count_ = 0;
     double airtime_[kMaxRadios] = {0};

@@ -55,6 +55,15 @@ constexpr size_t kMaxNameLen = 15;
 // Variable length; kAnnounceMaxSize bounds the buffer.
 constexpr size_t kAnnounceMaxSize = kHeaderSize + 1 + kMaxNameLen + 4;  // 26
 
+// Bytes the frame cipher adds to a packet: a 4-byte counter in the clear header
+// plus the authentication tag (see crypto.h). Declared here so airtime and rate
+// sizing can account for what actually goes on the air without pulling the
+// cipher into every translation unit; crypto.h static_asserts that the two
+// definitions agree.
+constexpr size_t kFrameCryptoOverhead = 10;
+constexpr size_t kPositionFrameSize = kPositionPacketSize + kFrameCryptoOverhead;  // 31
+constexpr size_t kAnnounceFrameSize = kAnnounceMaxSize + kFrameCryptoOverhead;     // 36
+
 enum Capabilities : uint32_t {
     CAP_HAS_GPS = 1 << 0,
     CAP_HAS_MSP_FC = 1 << 1,

@@ -48,7 +48,7 @@ struct FakeLocation : ILocationSource {
 
 struct NullCrypto : ICrypto {
     size_t encrypt(uint8_t*, size_t len, size_t) override { return len; }
-    bool decrypt(uint8_t*, size_t len, size_t& out_len) override {
+    bool decrypt(uint8_t*, size_t len, size_t& out_len, uint32_t) override {
         out_len = len;
         return true;
     }
@@ -56,7 +56,7 @@ struct NullCrypto : ICrypto {
 
 struct RejectCrypto : ICrypto {
     size_t encrypt(uint8_t*, size_t len, size_t) override { return len; }
-    bool decrypt(uint8_t*, size_t, size_t&) override { return false; }
+    bool decrypt(uint8_t*, size_t, size_t&, uint32_t) override { return false; }
 };
 
 struct FakeMspRadarSink : IMspRadarSink {

@@ -3,8 +3,9 @@
 namespace ff {
 
 namespace {
-// Upper bound for a single frame including any AEAD expansion headroom.
+// Upper bound for a single frame, plaintext packet plus AEAD expansion.
 constexpr size_t kMaxRxFrame = 64;
+static_assert(kMaxRxFrame >= kAnnounceFrameSize, "RX buffer too small for an announce frame");
 }  // namespace
 
 Node::Node(const NodeConfig& cfg, const NodeDeps& deps)
@@ -28,7 +29,11 @@ void Node::begin(uint32_t now_ms) {
     // Each radio beacons on its own schedule, paced by its own airtime, so a slow
     // medium (LoRa) backing off does not throttle a fast one (ESP-NOW).
     for (size_t i = 0; i < radio_count_; i++) {
-        airtime_[i] = deps_.radios->airtimeMs(i, kPositionPacketSize);
+        // Size the rate from the frame that actually goes on the air, crypto
+        // overhead included -- the pre-crypto packet size would under-estimate
+        // channel occupancy by a third.
+        airtime_[i] = deps_.radios->airtimeMs(i, kPositionFrameSize);
+        radio_stats_[i].airtime_ms = airtime_[i];
         beacon_slots_[i].node = this;
         beacon_slots_[i].index = static_cast<uint8_t>(i);
         // A listen-only node (e.g. a ground station) tracks peers but never emits.
@@ -71,7 +76,9 @@ void Node::onBeaconTick(size_t index) {
     sendBeacon(index);
     // Re-arm this radio's beacon with fresh jitter and a peer-count-adjusted
     // interval sized from this radio's airtime.
-    sched_.rearm(beacon_timer_[index], nextBeaconDelayMs(index));
+    const uint32_t delay = nextBeaconDelayMs(index);
+    radio_stats_[index].beacon_interval_ms = delay;
+    sched_.rearm(beacon_timer_[index], delay);
 }
 
 void Node::announceTrampoline(void* ctx) {
@@ -146,6 +153,9 @@ void Node::sendBeacon(size_t index) {
     deps_.radios->transmit(index, buf, len);
     stats_.beacons_sent++;
     stats_.last_tx_ms = sched_.now();
+    radio_stats_[index].tx++;
+    logFrame(index, cfg_.uid, len, 0, static_cast<uint8_t>(PacketType::Position),
+             FrameResult::Tx);
 }
 
 void Node::sendAnnounce() {
@@ -174,16 +184,38 @@ void Node::sendAnnounce() {
     for (size_t i = 0; i < radio_count_; i++) {
         if (deps_.radios->radioEnabled(i)) {
             deps_.radios->transmit(i, buf, len);
+            radio_stats_[i].tx++;
+            logFrame(i, cfg_.uid, len, 0, static_cast<uint8_t>(PacketType::Announce),
+                     FrameResult::Tx);
         }
     }
     stats_.announces_sent++;
     stats_.last_tx_ms = sched_.now();
 }
 
+void Node::logFrame(size_t radio_index, uint32_t uid, size_t len, int16_t rssi, uint8_t type,
+                    FrameResult result) {
+    FrameLogEntry e;
+    e.ms = sched_.now();
+    e.uid = uid;
+    e.len = static_cast<uint16_t>(len);
+    e.rssi = rssi;
+    e.radio = static_cast<uint8_t>(radio_index);
+    e.type = type;
+    e.result = result;
+    frames_.add(e);
+}
+
 void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t rssi,
                      size_t radio_index) {
+    RadioStats& rs = radio_stats_[radio_index < kMaxRadios ? radio_index : 0];
+    rs.last_rx_ms = now_ms;
+    rs.last_rssi = rssi;
+
     if (len == 0 || len > kMaxRxFrame) {
         stats_.rx_rejected++;
+        rs.rx_decode_fail++;
+        logFrame(radio_index, 0, len, rssi, 0, FrameResult::Oversize);
         return;
     }
     uint8_t buf[kMaxRxFrame];
@@ -193,8 +225,16 @@ void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t r
 
     size_t plain_len = len;
     if (deps_.crypto != nullptr) {
-        if (!deps_.crypto->decrypt(buf, len, plain_len)) {
+        if (!deps_.crypto->decrypt(buf, len, plain_len, now_ms)) {
             stats_.rx_rejected++;
+            const bool replay = deps_.crypto->lastRejectWasReplay();
+            if (replay) {
+                rs.rx_replay++;
+            } else {
+                rs.rx_crypto_fail++;
+            }
+            logFrame(radio_index, 0, len, rssi, 0,
+                     replay ? FrameResult::ReplayFail : FrameResult::CryptoFail);
             return;
         }
     }
@@ -202,6 +242,8 @@ void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t r
     Header hdr;
     if (peekHeader(buf, plain_len, hdr) != DecodeResult::Ok) {
         stats_.rx_rejected++;
+        rs.rx_decode_fail++;
+        logFrame(radio_index, 0, len, rssi, 0, FrameResult::DecodeFail);
         return;
     }
 
@@ -209,6 +251,9 @@ void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t r
     // slots; with UID identity there is nothing to do.)
     if (hdr.uid == cfg_.uid) {
         stats_.rx_self++;
+        rs.rx_self++;
+        logFrame(radio_index, hdr.uid, len, rssi, static_cast<uint8_t>(hdr.type),
+                 FrameResult::Self);
         return;
     }
 
@@ -217,24 +262,38 @@ void Node::onReceive(const uint8_t* data, size_t len, uint32_t now_ms, int16_t r
             PositionPacket pkt;
             if (decodePosition(buf, plain_len, pkt) != DecodeResult::Ok) {
                 stats_.rx_rejected++;
+                rs.rx_decode_fail++;
+                logFrame(radio_index, hdr.uid, len, rssi, static_cast<uint8_t>(hdr.type),
+                         FrameResult::DecodeFail);
                 return;
             }
             peers_.updatePosition(pkt, now_ms, rssi, radio_index);
             stats_.rx_ok++;
+            rs.rx_ok++;
+            logFrame(radio_index, hdr.uid, len, rssi, static_cast<uint8_t>(hdr.type),
+                     FrameResult::Ok);
             break;
         }
         case PacketType::Announce: {
             AnnouncePacket pkt;
             if (decodeAnnounce(buf, plain_len, pkt) != DecodeResult::Ok) {
                 stats_.rx_rejected++;
+                rs.rx_decode_fail++;
+                logFrame(radio_index, hdr.uid, len, rssi, static_cast<uint8_t>(hdr.type),
+                         FrameResult::DecodeFail);
                 return;
             }
             peers_.updateAnnounce(pkt, now_ms, radio_index);
             stats_.rx_ok++;
+            rs.rx_ok++;
+            logFrame(radio_index, hdr.uid, len, rssi, static_cast<uint8_t>(hdr.type),
+                     FrameResult::Ok);
             break;
         }
         default:
             stats_.rx_rejected++;
+            rs.rx_decode_fail++;
+            logFrame(radio_index, hdr.uid, len, rssi, 0, FrameResult::DecodeFail);
             return;
     }
 }
