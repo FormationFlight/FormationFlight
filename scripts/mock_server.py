@@ -746,7 +746,6 @@ class MockNode:
         self.tx_counter = 0
         self.rf_peers = self._default_rf_peers()
         self.sim_peers = {}
-        self.sim_uid_seq = 0
         self.follow_state = 0
         self.have_last_target = False
         self.locked_uid = 0
@@ -1333,7 +1332,8 @@ def make_handler(node, config_path=None, quiet=True):
         # -- verbs ----------------------------------------------------------
 
         def do_OPTIONS(self):
-            self.send_response(204)
+            # CORS preflight, for UI development off-device.
+            self.send_response(200)
             self.send_header("Content-Length", "0")
             self._cors()
             self.end_headers()
@@ -1363,7 +1363,7 @@ def make_handler(node, config_path=None, quiet=True):
                     self._json(node.sim_json(now))
                     return
             if path.startswith("/api/"):
-                self._text(f"no such endpoint: {path}", 404)
+                self._text("Not found", 404)
                 return
             self._serve_static(path)
 
@@ -1396,6 +1396,9 @@ def make_handler(node, config_path=None, quiet=True):
             if path == "/api/config/save":
                 self._read_body()
                 with node.lock:
+                    if not node.save_allowed(now):
+                        self._text("saved too recently, try again shortly", 429)
+                        return
                     node.saved_config = copy.deepcopy(node.config)
                     if config_path is not None:
                         try:
@@ -1404,6 +1407,7 @@ def make_handler(node, config_path=None, quiet=True):
                         except OSError as exc:
                             self._text(f"config write failed: {exc}", 500)
                             return
+                    node.mark_saved(now)
                 self._text("saved")
                 return
 
@@ -1419,7 +1423,10 @@ def make_handler(node, config_path=None, quiet=True):
                         except OSError as exc:
                             self._text(f"config write failed: {exc}", 500)
                             return
-                    self._json(redact_config(node.config))
+                    # Radio and WiFi settings only take effect at boot, and a
+                    # factory reset almost certainly changed some.
+                    node.reboot_required = True
+                self._text("reset")
                 return
 
             if path == "/api/sim/peer":
@@ -1429,23 +1436,20 @@ def make_handler(node, config_path=None, quiet=True):
                     return
                 with node.lock:
                     if not node.config["sim"]["enabled"]:
-                        self._text("simulation is disabled (set sim.enabled)", 409)
+                        self._text("set sim.enabled before adding peers", 409)
                         return
-                    peer, perr = node.upsert_sim_peer(body, now)
+                    _peer, perr, code = node.upsert_sim_peer(body, now)
                     if perr:
-                        self._text(perr, 400)
+                        self._text(perr, code)
                         return
-                    self._json(peer.sim_json(now / 1000.0))
+                self._text("ok")
                 return
 
             if path == "/api/sim/clear":
                 self._read_body()
                 with node.lock:
-                    if not node.config["sim"]["enabled"]:
-                        self._text("simulation is disabled (set sim.enabled)", 409)
-                        return
-                    n = node.clear_sim_peers()
-                self._text(f"cleared {n} simulated peers")
+                    node.clear_sim_peers()
+                self._text("cleared")
                 return
 
             if path == "/api/system/reboot":
@@ -1453,10 +1457,10 @@ def make_handler(node, config_path=None, quiet=True):
                 # Answer first; reboot after a short delay so the response makes
                 # it out, exactly like the firmware.
                 self._text("rebooting")
-                threading.Timer(0.3, node.reboot).start()
+                threading.Timer(REBOOT_DELAY_MS / 1000.0, node.reboot).start()
                 return
 
-            self._text(f"no such endpoint: {path}", 404)
+            self._text("Not found", 404)
 
         def do_DELETE(self):
             parsed = urlparse(self.path)
@@ -1464,37 +1468,33 @@ def make_handler(node, config_path=None, quiet=True):
             node.advance()
             if path == "/api/sim/peer":
                 if "uid" not in query:
-                    self._text("uid query parameter is required", 400)
+                    self._text("uid required", 400)
                     return
-                uid = parse_uid(query["uid"][0])
-                if uid is None:
-                    self._text("uid must be an 8-character lower-case hex string", 400)
-                    return
+                uid = parse_uid(query["uid"][0]) or 0
                 with node.lock:
-                    if not node.config["sim"]["enabled"]:
-                        self._text("simulation is disabled (set sim.enabled)", 409)
-                        return
-                    if not node.delete_sim_peer(uid):
-                        self._text(f"no simulated peer {query['uid'][0]}", 404)
-                        return
-                self._text("removed")
+                    removed = node.delete_sim_peer(uid)
+                self._text("removed" if removed else "no such peer",
+                           200 if removed else 404)
                 return
-            self._text(f"no such endpoint: {path}", 404)
+            self._text("Not found", 404)
 
         # -- firmware upload ------------------------------------------------
 
         def _handle_update(self):
+            """Mirrors handleFileUploadData()/handleFileUploadResponse(): the
+            upload is accepted only for a .bin (or, on ESP8266, .bin.gz), and
+            the response body is the result string the UI shows."""
             raw = self._read_body()
             if not raw:
-                self._text("no firmware image in request", 400)
+                self._text("upload failed", 500)
                 return
-            # Rough multipart strip: enough to report a believable payload size.
-            size = len(raw)
-            ctype = self.headers.get("Content-Type", "")
-            if "multipart/form-data" in ctype and b"\r\n\r\n" in raw:
-                size = len(raw.split(b"\r\n\r\n", 1)[1])
-            self._text(f"Update Success: {size} bytes\nRebooting...")
-            threading.Timer(0.3, node.reboot).start()
+            match = re.search(rb'filename="([^"]*)"', raw[:4096])
+            filename = match.group(1).decode("utf-8", "replace") if match else ""
+            if not (filename.endswith(".bin") or filename.endswith(".bin.gz")):
+                self._text("must upload .bin or .bin.gz", 400)
+                return
+            self._text("update complete, rebooting")
+            threading.Timer(REBOOT_DELAY_MS / 1000.0, node.reboot).start()
 
         # -- static ---------------------------------------------------------
 
@@ -1507,12 +1507,12 @@ def make_handler(node, config_path=None, quiet=True):
             # contains ../. This only ever runs against trusted local content,
             # but there is no reason to skip the check.
             if fs_path != root and not fs_path.is_relative_to(root):
-                self._text("not found", 404)
+                self._text("Not found", 404)
                 return
             try:
                 data = fs_path.read_bytes()
             except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
-                self._text("not found", 404)
+                self._text("Not found", 404)
                 return
 
             ctype = CONTENT_TYPES.get(fs_path.suffix.lower(), "application/octet-stream")
@@ -1558,9 +1558,9 @@ def main():
         node.config["sim"]["enabled"] = True
         node.saved_config["sim"]["enabled"] = True
         # Something to look at straight away.
-        node.upsert_sim_peer({"name": "SIM1", "mode": "hex", "lat": HOME_LAT,
-                              "lon": HOME_LON, "alt_m": 120, "speed_ms": 15,
-                              "course_deg": 90, "radius_m": 150}, 0)
+        node.upsert_sim_peer({"uid": "5eed0001", "name": "SIM1", "mode": "hex",
+                              "lat": HOME_LAT, "lon": HOME_LON, "alt_m": 120,
+                              "speed_ms": 15, "course_deg": 90, "radius_m": 150}, 0)
 
     server = build_server(args.port, args.host, node, args.config_file, not args.verbose)
     url = f"http://{args.host}:{server.server_address[1]}/"

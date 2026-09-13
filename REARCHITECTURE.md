@@ -185,7 +185,39 @@ Done and committed on `v2`:
   still returns in Phase 3. The v1 `src/lib/Follow` copy stays as unbuilt
   reference for that port (its REST handlers).
 
-Test status: 200+ host unit tests green (v2 core + the ported Follow suite +
+- **Phase 2** — protocol crypto. AES-128-CCM replaces v1's XTS-AES, which
+  authenticated nothing and forced a fixed 16-byte packet. The frame carries
+  version, type, UID and a counter in the clear as associated data, then the
+  ciphertext, then a 6-byte tag: 10 bytes over the plaintext packet, and the
+  rate controller now sizes airtime from the frame that actually flies. The UID
+  stays readable because the receiver needs it to derive the nonce; everything
+  else is encrypted. Replay is rejected by a per-sender monotonic counter with a
+  resync window so a rebooted aircraft rejoins, and the residual exposure that
+  window leaves is documented in `crypto.h` rather than hidden. AES and SHA-256
+  are written out in `ff_core` instead of pulled from a platform library, so the
+  cipher and the passphrase-to-key derivation are bit-identical on ESP32,
+  ESP8266 and the host, and testable against FIPS-197, the NIST SHA examples and
+  RFC 3610 (all cross-checked against OpenSSL before being committed).
+
+- **Phase 3** — configuration, web API and a bench simulator.
+  - **Config** is one JSON document in LittleFS (`ff_core/config.h` +
+    `hal/ConfigStore`), replacing every EEPROM struct including Follow's own
+    record. Partial updates merge rather than replace, an unparseable file is
+    preserved rather than overwritten, and secrets are redacted on the way out.
+  - **Web API** (`hal/WebServer`, contract in `docs/v2-web-api.md`): status,
+    config, the frame log, the simulator, reboot and firmware upload. RAM-first
+    config changes with an explicit save, so a bad setting is a power cycle away
+    from recovery. No websocket, deliberately: heap on the 8285 is the binding
+    constraint and the UI polls.
+  - **Observability**: per-radio counters and a 32-entry frame log on the Node,
+    which is what makes "one medium deaf while the other works" visible instead
+    of being buried in an aggregate.
+  - **Simulator** (`ff_core/sim_traffic` + `hal/SimRadio`): peer motion in
+    closed form, encoded into real packets, encrypted with the real group key,
+    and pushed through `Node::onReceive`. The HITL path exercises the receive
+    path rather than bypassing it.
+
+Test status: 266 host unit tests green (v2 core + the ported Follow suite +
 geodesy + MSP protocol). `ff_core` proven on xtensa-lx106 and xtensa-esp32 via
 real firmware links.
 
@@ -195,16 +227,15 @@ Remaining / deferred:
   that rail (v1's TBeamPower) is not yet ported, so the direct-GPS driver runs but
   the T-Beam module stays unpowered until that follow-up lands. Any externally
   powered GPS UART works today.
-- **Web / OTA** — the v1 WiFi/web/OTA stack is excluded from the v2 build for now;
-  it returns in Phase 3 reading Node snapshots.
 - **On-device validation** — builds are compile-verified only; no hardware bring-up
   has been done yet.
 - **Legacy code** — the v1 managers remain in `src/lib` (unbuilt) as reference for
   porting; they get deleted once each family is ported. `src/lib/Follow` is
-  already ported (Phase 1h) but is kept until Phase 3 lifts its REST handlers.
-- **Follow config editing** — `FollowConfigStore` loads a saved config at boot,
-  but nothing can save one until the Phase 3 web/CLI path exists; until then
-  the compile-time `FOLLOW_*` defaults (overridable per target) are what runs.
+  already ported (Phase 1h), and its REST handlers have been superseded by the
+  v2 web API, so it can be deleted outright.
+- **Display** — the v1 OLED stack is still excluded from the v2 build. It is
+  the last subsystem that has not been ported onto Node snapshots.
 
-Next phases: **2** — protocol v2 crypto (AES-CCM AEAD replacing the passthrough)
-and finalizing the wire format; **3** — config persistence, web UI, display.
+Next: the OLED display is the last v1 subsystem still unported, and no part of
+v2 has been validated on hardware yet -- everything above is compile- and
+host-verified only.

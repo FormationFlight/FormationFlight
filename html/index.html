@@ -1,15 +1,35 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-white">
+<!-- No background on <html>: tailwind's dark: utilities compile to
+     :is(.dark *), a descendant selector, so <html> can never match its own
+     dark class. It goes on <body> instead - the canvas background propagates
+     up from body when html has none, so overscroll follows the theme too. -->
+<html lang="en" class="h-full">
   <head>
     <title>FormationFlight</title>
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="images/logo.svg" />
+    <!-- Seed the theme before the stylesheets paint, otherwise a dark-mode user
+         gets a white flash on every load. An explicit choice in localStorage
+         wins; otherwise follow the OS preference. Kept inline and tiny for that
+         reason - see the toggle in the header. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          var dark = t ? t === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) { /* private mode / no storage - fall back to light */ }
+      })();
+    </script>
     <link href="formationflight.css" rel="stylesheet" />
     <link href="tailwind.css" rel="stylesheet" />
+    <!-- Loaded last: it supplies the dark: variants and the handful of ordinary
+         utilities the vendored tailwind.css build was purged of. -->
+    <link href="theme.css" rel="stylesheet" />
   </head>
-  <body class="h-full"></body>
+  <body class="h-full bg-white dark:bg-slate-900"></body>
   <script src="history.min.js"></script>
   <script type="module" src="main.js"></script>
 </html>

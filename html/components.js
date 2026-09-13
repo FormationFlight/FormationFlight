@@ -585,7 +585,7 @@ export function PeerTable({ peers, radios, selfLocation, lockedUid }) {
           <${Td} cls="font-mono" text=${speedMs(p.speed_cms)} />
           <${Td} cls="font-mono" text=${present(p.rssi) && p.rssi !== 0 ? p.rssi + ' dBm' : DASH} />
           <${Td} cls="font-mono ${p.age_ms > 5000 ? 'text-yellow-600' : ''}" text=${age(p.age_ms)} />
-          <${Td} cls=${partial ? 'partial-radio' : ''}><${RadioChips} radios=${radios} heardOn=${p.radios} /><//>
+          <${Td} title=${partial ? 'Not heard on every enabled radio.' : ''}><${RadioChips} radios=${radios} heardOn=${p.radios} /><//>
           <${Td}>
             <span class="inline-flex gap-1">
               ${!(p.flags & PEER_FLAG_HAS_FIX) && html`<${Colored} text="no fix" colors=${tipColors.yellow} title="Beaconing, but without a GPS fix - Follow will not chase it." />`}
