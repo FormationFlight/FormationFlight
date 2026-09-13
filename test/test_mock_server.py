@@ -419,8 +419,10 @@ class StatusShapeTest(ApiTestCase):
     def test_status_top_level_shape(self):
         doc = self.get_json("/api/status")
         for key in ("node", "location", "radios", "peers", "crypto", "stats", "fc",
-                    "follow", "sim"):
+                    "follow", "sim", "reboot_required", "config_corrupt"):
             self.assertIn(key, doc)
+        self.assertIsInstance(doc["reboot_required"], bool)
+        self.assertIsInstance(doc["config_corrupt"], bool)
 
     def test_node_block(self):
         node = self.get_json("/api/status")["node"]
@@ -483,17 +485,22 @@ class StatusShapeTest(ApiTestCase):
 
     def test_follow_block_and_its_absent_when_unknown_fields(self):
         follow = self.get_json("/api/status")["follow"]
-        for key in ("state", "gate_active", "platform", "autothrottle_armed",
-                    "autothrottle_engaged", "target_speed_cms", "rc_slot_frozen",
-                    "prearm_failed"):
+        for key in ("state", "gate_active", "locked_uid", "locked_name", "platform",
+                    "autothrottle_armed", "rc_slot_frozen", "prearm_failed"):
             self.assertIn(key, follow)
         self.assertIn(follow["state"], ("IDLE", "ACQUIRING", "LOCKED", "LOCKED_HOLDING"))
+        self.assertRegex(follow["locked_uid"], UID_RE)
         # GVAR slots are disabled by default, so those keys are absent rather
         # than present and zero (zero is a legitimate GVAR value).
         self.assertNotIn("status_gvar", follow)
         self.assertNotIn("condition_gvar", follow)
         # No RC axis assigned by default, so no pre-arm candidate offset either.
         self.assertNotIn("prearm_offset", follow)
+        # No target yet at this uptime, so nothing that is only meaningful
+        # alongside one is present either.
+        if "target" not in follow:
+            for key in ("live_offset", "autothrottle_engaged", "target_speed_cms"):
+                self.assertNotIn(key, follow)
 
     def test_status_moves(self):
         """The whole point of the mock: the numbers change on their own."""
@@ -548,6 +555,10 @@ class FramesShapeTest(ApiTestCase):
 class ConfigApiTest(ApiTestCase):
     def setUp(self):
         self.request("POST", "/api/config/reset")
+        # /api/config/save is rate limited on the firmware (flash wears out);
+        # clear that history so tests are independent of each other's timing.
+        with self.node.lock:
+            self.node.ever_saved = False
 
     def test_get_config_matches_the_defaults(self):
         self.assertEqual(self.get_json("/api/config"), default_config())
@@ -597,12 +608,26 @@ class ConfigApiTest(ApiTestCase):
         self.assertEqual(status, 200)
         status, body, _ = self.request("POST", "/api/config/save")
         self.assertEqual(status, 200, body)
+        self.assertEqual(body, "saved")
         with self.node.lock:
             self.assertEqual(self.node.saved_config["node"]["name"], "SAVED")
         status, body, _ = self.request("POST", "/api/config/reset")
         self.assertEqual(status, 200, body)
-        self.assertEqual(json.loads(body), default_config())
+        self.assertEqual(body, "reset")
         self.assertEqual(self.get_json("/api/config"), default_config())
+
+    def test_save_is_rate_limited(self):
+        """Flash has a finite number of erase cycles; a Save button does not."""
+        self.assertEqual(self.request("POST", "/api/config/save")[0], 200)
+        status, body, _ = self.request("POST", "/api/config/save")
+        self.assertEqual(status, 429)
+        self.assertIn("recently", body)
+
+    def test_reset_sets_reboot_required(self):
+        """Radio and WiFi settings only take effect at boot, and a factory reset
+        almost certainly changed some."""
+        self.assertEqual(self.request("POST", "/api/config/reset")[0], 200)
+        self.assertTrue(self.get_json("/api/status")["reboot_required"])
 
     def test_post_is_ram_only_until_save(self):
         """A setting that makes the node unreachable is recoverable with a power
@@ -633,29 +658,45 @@ class SimApiTest(ApiTestCase):
             "lon": -122.0, "alt_m": 120, "speed_ms": 15, "course_deg": 90,
             "radius_m": 150})
         self.assertEqual(status, 200, body)
-        peer = json.loads(body)
-        self.assertEqual(set(peer), {"uid", "name", "mode", "lat", "lon", "alt_m",
-                                     "speed_ms", "course_deg", "radius_m", "running"})
-        self.assertEqual(peer["uid"], "5eed0001")
-        # GET /api/sim reports lat/lon as 1e7 integers (the POST takes degrees).
-        self.assertIsInstance(peer["lat"], int)
-        self.assertGreater(abs(peer["lat"]), 1000000)
+        self.assertEqual(body, "ok")
 
         listed = self.get_json("/api/sim")["peers"]
-        self.assertEqual([p["uid"] for p in listed], ["5eed0001"])
+        self.assertEqual(len(listed), 1)
+        peer = listed[0]
+        self.assertEqual(set(peer), {"uid", "name", "mode", "lat", "lon", "alt_m",
+                                     "speed_ms", "course_deg", "radius_m",
+                                     "elapsed_ms", "running"})
+        self.assertEqual(peer["uid"], "5eed0001")
+        self.assertEqual(peer["name"], "SIM1")
+        self.assertEqual(peer["mode"], "hex")
+        # Decimal degrees here, the same units the POST body takes.
+        self.assertAlmostEqual(peer["lat"], 37.0)
+        self.assertAlmostEqual(peer["lon"], -122.0)
+        self.assertTrue(peer["running"])
+        self.assertGreaterEqual(peer["elapsed_ms"], 0)
 
         status, body, _ = self.request("DELETE", "/api/sim/peer?uid=5eed0001")
         self.assertEqual(status, 200, body)
+        self.assertEqual(body, "removed")
         self.assertEqual(self.get_json("/api/sim")["peers"], [])
 
     def test_uid_is_generated_when_absent(self):
         status, body, _ = self.request("POST", "/api/sim/peer",
                                        {"name": "AUTO", "mode": "circle"})
         self.assertEqual(status, 200, body)
-        self.assertRegex(json.loads(body)["uid"], UID_RE)
+        peers = self.get_json("/api/sim")["peers"]
+        self.assertEqual(len(peers), 1)
+        self.assertRegex(peers[0]["uid"], UID_RE)
+        # Generated UIDs are marked so a simulated peer is recognisable as one
+        # even in a raw packet capture.
+        self.assertTrue(peers[0]["uid"].startswith("5eed"))
 
-    def test_a_second_post_updates_rather_than_duplicates(self):
-        self.request("POST", "/api/sim/peer", {"uid": "5eed0002", "mode": "line"})
+    def test_a_second_post_replaces_rather_than_duplicates(self):
+        """A sim POST is a replace, not a merge: the firmware builds a fresh
+        SimPeerConfig, so a key the body omits takes the struct default."""
+        self.request("POST", "/api/sim/peer",
+                     {"uid": "5eed0002", "mode": "line", "name": "FIRST",
+                      "speed_ms": 30, "radius_m": 500})
         status, body, _ = self.request("POST", "/api/sim/peer",
                                        {"uid": "5eed0002", "mode": "circle",
                                         "radius_m": 200})
@@ -664,21 +705,39 @@ class SimApiTest(ApiTestCase):
         self.assertEqual(len(peers), 1)
         self.assertEqual(peers[0]["mode"], "circle")
         self.assertEqual(peers[0]["radius_m"], 200)
+        self.assertEqual(peers[0]["name"], "SIM")    # the default, not "FIRST"
+        self.assertEqual(peers[0]["speed_ms"], 0.0)  # the default, not 30
 
-    def test_bad_mode_and_bad_uid_are_400(self):
+    def test_bad_field_values_are_400(self):
         status, body, _ = self.request("POST", "/api/sim/peer", {"mode": "spiral"})
         self.assertEqual(status, 400)
-        self.assertIn("mode", body)
-        status, body, _ = self.request("POST", "/api/sim/peer", {"uid": "zz", "mode": "hex"})
+        self.assertEqual(body, "mode must be static, line, circle or hex")
+        status, body, _ = self.request("POST", "/api/sim/peer",
+                                       {"mode": "line", "speed_ms": 500})
         self.assertEqual(status, 400)
-        self.assertIn("uid", body)
+        self.assertEqual(body, "speed_ms must be 0-200")
+        status, body, _ = self.request("POST", "/api/sim/peer",
+                                       {"mode": "circle", "radius_m": 0})
+        self.assertEqual(status, 400)
+        self.assertEqual(body, "radius_m must be > 0 for circle and hex")
+
+    def test_the_peer_table_has_a_ceiling(self):
+        for i in range(4):
+            status, body, _ = self.request("POST", "/api/sim/peer",
+                                           {"uid": "5eed001%d" % i, "mode": "static"})
+            self.assertEqual(status, 200, body)
+        status, body, _ = self.request("POST", "/api/sim/peer",
+                                       {"uid": "5eed00ff", "mode": "static"})
+        self.assertEqual(status, 409)
+        self.assertEqual(body, "simulated peer table full")
 
     def test_delete_needs_a_uid_and_404s_on_an_unknown_one(self):
         status, body, _ = self.request("DELETE", "/api/sim/peer")
         self.assertEqual(status, 400)
-        self.assertIn("uid", body)
+        self.assertEqual(body, "uid required")
         status, body, _ = self.request("DELETE", "/api/sim/peer?uid=deadbeef")
         self.assertEqual(status, 404)
+        self.assertEqual(body, "no such peer")
 
     def test_clear_removes_all_of_them(self):
         self.request("POST", "/api/sim/peer", {"uid": "5eed0003", "mode": "hex"})
@@ -686,6 +745,7 @@ class SimApiTest(ApiTestCase):
         self.assertEqual(len(self.get_json("/api/sim")["peers"]), 2)
         status, body, _ = self.request("POST", "/api/sim/clear")
         self.assertEqual(status, 200, body)
+        self.assertEqual(body, "cleared")
         self.assertEqual(self.get_json("/api/sim")["peers"], [])
 
     def test_mutations_are_refused_while_sim_is_disabled(self):
@@ -694,7 +754,7 @@ class SimApiTest(ApiTestCase):
         self.assertEqual(status, 200, body)
         status, body, _ = self.request("POST", "/api/sim/peer", {"mode": "hex"})
         self.assertEqual(status, 409)
-        self.assertIn("sim.enabled", body)
+        self.assertEqual(body, "set sim.enabled before adding peers")
         # Reading still works, so a UI can render the panel and say why.
         self.assertFalse(self.get_json("/api/sim")["enabled"])
 

@@ -438,6 +438,117 @@ void test_peer_expires() {
     TEST_ASSERT_NULL(node.peers().find(0x33));
 }
 
+// ---- Per-radio accounting and the frame log ---------------------------------
+//
+// These feed the web UI's debug view, whose whole job is answering "is anything
+// arriving on this radio, and why is it being thrown away". Aggregate counters
+// cannot answer that on a node with two media.
+
+void test_receive_counts_against_the_radio_it_arrived_on() {
+    FakeRadioSet radio;
+    radio.n_radios = 2;
+    FakeLocation location;
+    NullCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    Node node(baseConfig(), deps);
+    node.begin(0);
+
+    injectPeer(node, 0xAAAA, 10, 0);
+    injectPeer(node, 0xBBBB, 20, 1);
+    injectPeer(node, 0xCCCC, 30, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, node.radioStats(0).rx_ok);
+    TEST_ASSERT_EQUAL_UINT32(2, node.radioStats(1).rx_ok);
+    TEST_ASSERT_EQUAL_INT16(-50, node.radioStats(1).last_rssi);
+    TEST_ASSERT_EQUAL_UINT32(30, node.radioStats(1).last_rx_ms);
+}
+
+void test_crypto_rejection_is_attributed_and_logged() {
+    FakeRadioSet radio;
+    radio.n_radios = 2;
+    FakeLocation location;
+    RejectCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    Node node(baseConfig(), deps);
+    node.begin(0);
+
+    injectPeer(node, 0xAAAA, 10, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, node.radioStats(1).rx_crypto_fail);
+    TEST_ASSERT_EQUAL_UINT32(0, node.radioStats(1).rx_ok);
+    TEST_ASSERT_EQUAL_UINT32(0, node.radioStats(0).rx_crypto_fail);
+
+    const FrameLogEntry& e = node.frameLog().at(0);
+    TEST_ASSERT_EQUAL(static_cast<int>(FrameResult::CryptoFail), static_cast<int>(e.result));
+    TEST_ASSERT_EQUAL_UINT8(1, e.radio);
+    // The sender is unknowable when the frame never authenticated, and the log
+    // must say so rather than inventing one.
+    TEST_ASSERT_EQUAL_UINT32(0, e.uid);
+}
+
+void test_own_frame_heard_back_is_logged_as_self_not_as_an_error() {
+    FakeRadioSet radio;
+    FakeLocation location;
+    NullCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    Node node(baseConfig(0x99), deps);
+    node.begin(0);
+
+    injectPeer(node, 0x99, 10, 0);  // our own UID, as ESP-NOW broadcast returns
+
+    TEST_ASSERT_EQUAL_UINT32(1, node.radioStats(0).rx_self);
+    TEST_ASSERT_EQUAL_UINT32(0, node.radioStats(0).rx_decode_fail);
+    TEST_ASSERT_EQUAL_UINT32(0, node.radioStats(0).rx_crypto_fail);
+    TEST_ASSERT_EQUAL(static_cast<int>(FrameResult::Self),
+                      static_cast<int>(node.frameLog().at(0).result));
+    TEST_ASSERT_EQUAL_UINT32(0, node.peers().countActive(10));
+}
+
+void test_undecodable_frame_is_counted_as_a_decode_failure() {
+    FakeRadioSet radio;
+    FakeLocation location;
+    NullCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    Node node(baseConfig(), deps);
+    node.begin(0);
+
+    uint8_t junk[8] = {0xFF, 0xFF, 1, 2, 3, 4, 5, 6};
+    node.onReceive(junk, sizeof(junk), 10, -80, 0);
+
+    TEST_ASSERT_EQUAL_UINT32(1, node.radioStats(0).rx_decode_fail);
+    TEST_ASSERT_EQUAL(static_cast<int>(FrameResult::DecodeFail),
+                      static_cast<int>(node.frameLog().at(0).result));
+}
+
+void test_transmissions_are_counted_and_logged_per_radio() {
+    FakeRadioSet radio;
+    radio.n_radios = 2;
+    FakeLocation location;
+    location.loc.valid = true;
+    NullCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    Node node(baseConfig(), deps);
+    node.begin(0);
+    for (uint32_t t = 0; t <= 1000; t += 50) {
+        node.poll(t);
+    }
+
+    TEST_ASSERT_TRUE(node.radioStats(0).tx > 0);
+    TEST_ASSERT_TRUE(node.radioStats(1).tx > 0);
+    TEST_ASSERT_TRUE(node.radioStats(0).beacon_interval_ms > 0);
+    // Airtime is recorded from the frame that actually flies, crypto included.
+    TEST_ASSERT_EQUAL_DOUBLE(14.0, node.radioStats(0).airtime_ms);
+
+    bool saw_tx = false;
+    for (size_t i = 0; i < node.frameLog().size(); i++) {
+        if (node.frameLog().at(i).result == FrameResult::Tx) {
+            saw_tx = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(saw_tx);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_beacons_at_min_rate_when_alone);
@@ -455,5 +566,10 @@ int main(int, char**) {
     RUN_TEST(test_msp_radar_round_robins_across_peers);
     RUN_TEST(test_msp_radar_active_node_also_gets_output);
     RUN_TEST(test_peer_expires);
+    RUN_TEST(test_receive_counts_against_the_radio_it_arrived_on);
+    RUN_TEST(test_crypto_rejection_is_attributed_and_logged);
+    RUN_TEST(test_own_frame_heard_back_is_logged_as_self_not_as_an_error);
+    RUN_TEST(test_undecodable_frame_is_counted_as_a_decode_failure);
+    RUN_TEST(test_transmissions_are_counted_and_logged_per_radio);
     return UNITY_END();
 }
