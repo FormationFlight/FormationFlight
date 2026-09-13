@@ -193,7 +193,7 @@ altitude-floor case, to mention all three non-zero codes (or at least stop imply
 
 ### 5. No changes needed
 
-- `.claude/skills/web-ui-preview/mock_server.py` — `conditionFlagsGvarValue` is a hardcoded status readout, not
+- `scripts/mock_server.py` — `conditionFlagsGvarValue` is a hardcoded status readout, not
   derived from config; no new config field is added by this plan, so `DEFAULT_CONFIG`/`validate_config()` stay in
   sync without edits.
 - `configJson()`/`applyConfig()`/EEPROM record — `maxTargetDistM` already exists as a persisted, validated field;

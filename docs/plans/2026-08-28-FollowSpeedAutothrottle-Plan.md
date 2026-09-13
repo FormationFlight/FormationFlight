@@ -404,9 +404,9 @@ Depends on: **D** (needs `platformType`/`targetSpeedCmS`/`autothrottleEngaged` i
 
 ## F. `mock_server.py` parity
 
-Depends on: **B** (new config fields) + **D** (new status fields `platformType`/`targetSpeedCmS`/`autothrottleEngaged`). Required by the project's own convention (`CLAUDE.md`: the mock's `validate_config()`/`DEFAULT_CONFIG` are hand-maintained mirrors of `applyConfig()`/`configJson()` and must stay in sync).
+Depends on: **B** (new config fields) + **D** (new status fields `platformType`/`targetSpeedCmS`/`autothrottleEngaged`). Required by the project's own convention (the mock's `validate_config()`/`DEFAULT_CONFIG` are hand-maintained mirrors of `applyConfig()`/`configJson()` and must stay in sync).
 
-**`.claude/skills/web-ui-preview/mock_server.py`**
+**`scripts/mock_server.py`**
 - `DEFAULT_CONFIG` (`mock_server.py:50-63`): add the eight new keys with the same compile-time defaults as **B** (`autothrottleEnableMinThresholdUs=1700`, `autothrottleEnableMaxThresholdUs=2100`).
 - `validate_config()` (`mock_server.py:250-267`): mirror **B**'s new `applyConfig()` checks (GVAR range, RC channel range, speed-clamp ordering) — but, matching `applyConfig()` exactly (B's design note), do **not** add a min-vs-max ordering check for `autothrottleEnableMinThresholdUs`/`autothrottleEnableMaxThresholdUs`. That check only exists in `follow.js`'s `validateConfig()` (E); keeping the mock's `validate_config()` a faithful mirror of the real `applyConfig()` means it has to accept an inverted pair the same way the firmware does, so the browser test in E can prove the UI catches what the server intentionally doesn't.
 - `followmanager_status()` (`mock_server.py:218-240`): add `platformType`/`targetSpeedCmS`/`autothrottleEngaged` to the returned status dict — since there's no real MSP connection in the mock, make `platformType` itself settable via a query param or a small in-file constant an implementer can flip locally (e.g. `MOCK_PLATFORM_TYPE = 1`), specifically so **E**'s grey-out UI path is exercisable without a real FC.
@@ -500,7 +500,7 @@ Requires: an INAV SITL instance or bench FC, configured first as **airplane**, w
 | `src/lib/Follow/FollowManager.{h,cpp}` | Config/EEPROM fields, `applyConfig()`/`configJson()` (B); along-track/setpoint control-law helpers (C); `autothrottleArmed()`, `updateAutothrottleGvars()`, `loop()` integration, `statusJson()` (D) | B, C, D |
 | `src/lib/WiFi/WiFiManager.cpp` | Eight new POST params on `/followmanager/config` | B |
 | `html/follow.js` | New panel (8 fields), collision guard extension, min<max threshold validation, platform-based grey-out | E |
-| `.claude/skills/web-ui-preview/mock_server.py` | Config/status parity, mock platform-type toggle | F |
+| `scripts/mock_server.py` | Config/status parity, mock platform-type toggle | F |
 | *(none — INAV Configurator CLI only)* | New/rewired Logic Conditions, PID3 setpoint/measurement, OSD elements (spec §6) | H |
 
 No changes to `src/main.cpp`, `src/lib/ConfigHandler.cpp`, or `targets/*.ini`.

@@ -400,4 +400,4 @@ Design notes not in the original plan:
 - **Nose-heading control (`FOLLOW_HEADING_MODE`, spec §7.7) is planned but not yet implemented** — see "Phase 3D" above. Spec §13's open question on whether `NAV_COURSE_HOLD_MODE` can coincide with `GCS NAV` follow on a fixed-wing FC (which would make the FW controller actually consume the commanded `p1` instead of ignoring it) is unverified on real hardware; worth a bench check if/when a fixed-wing follower is ever tested, though fixed-wing followers remain out of scope (§1.3) otherwise.
 
 ## Run the test Server to help test the UI
-`python3 .claude/skills/web-ui-preview/mock_server.py`
+`python3 scripts/mock_server.py`

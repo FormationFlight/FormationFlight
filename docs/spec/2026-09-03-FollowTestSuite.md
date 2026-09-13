@@ -36,7 +36,7 @@ A test suite that:
 
 - `src/lib/Follow/FollowManager.{h,cpp}`, `FollowConfig.h` — the full public interface (`loop()`, `applyConfig()`, `statusJson()`, `configJson()`, `loadFromEEPROM()`/`saveToEEPROM()`) and the private decision logic behind it.
 - `html/follow.js`'s pure logic: `slotFromOffset()`/`offsetFromSlot()` (friendly-grid ⇄ raw offset conversion) and `validateConfig()` (client-side config validation).
-- The three-way config-validation relationship between `FollowManager::applyConfig()` (C++, authoritative), `.claude/skills/web-ui-preview/mock_server.py`'s `validate_config()` (Python, a deliberate mirror of the C++ rules only), and `html/follow.js`'s `validateConfig()` (JS, a strict superset — see §2.3).
+- The three-way config-validation relationship between `FollowManager::applyConfig()` (C++, authoritative), `scripts/mock_server.py`'s `validate_config()` (Python, a deliberate mirror of the C++ rules only), and `html/follow.js`'s `validateConfig()` (JS, a strict superset — see §2.3).
 - The minimal dependency-injection seams needed inside `FollowManager` to make the above testable off-hardware (§3.2) — this is enabling groundwork for the test suite, not the cleanup refactor itself, and should land as its own reviewed change before the cleanup starts.
 
 ### 1.4 Out of scope (this iteration)
@@ -50,7 +50,7 @@ A test suite that:
 
 - **Seams over hardware-in-the-loop.** Testability groundwork (interfaces + fakes for `MSPManager`/`GNSSManager`/`PeerManager`, §3.2) is worth doing now, so the suite can run headless in CI on every commit rather than needing real/emulated hardware.
 - **Spec is truth, but code is never silently changed to match it.** Where a test built from `docs/spec/*.md` or the user guide reveals current code disagrees with the documented behavior, the test is written to assert the *spec's* behavior, marked as **currently failing**, and reported as a finding — the fix is a separate, reviewed change, not something this test-writing effort does on its own. (§7 tracks findings surfaced while drafting this spec.)
-- **Cross-mirror consistency is a first-class test target**, not an afterthought — `applyConfig()`/`validate_config()`/`validateConfig()` and `configJson()`/mock server `DEFAULT_CONFIG` are three independent, hand-maintained surfaces already flagged in this repo's `CLAUDE.md` as a drift risk.
+- **Cross-mirror consistency is a first-class test target**, not an afterthought — `applyConfig()`/`validate_config()`/`validateConfig()` and `configJson()`/mock server `DEFAULT_CONFIG` are three independent, hand-maintained surfaces already flagged in this repo's contributor notes as a drift risk.
 - **`follow.js` is in scope**, tested independently in a lightweight Node harness (§3.5) — not full browser/DOM testing, just its extracted pure functions.
 
 ---
@@ -59,7 +59,7 @@ A test suite that:
 
 ### 2.1 No existing test infrastructure
 
-There is no `test/` directory, no PlatformIO `native` environment in `platformio.ini` or `targets/*.ini` (every `[env:...]` there targets `esp32`/`esp32s2`/`esp8266`), and no mocking pattern for any manager anywhere in the codebase. The closest things to a test harness today are the web-UI mock server (`.claude/skills/web-ui-preview/mock_server.py`) and the runtime `/peermanager/spoof` bench-testing endpoint — both manual/integration aids, not automated tests.
+There is no `test/` directory, no PlatformIO `native` environment in `platformio.ini` or `targets/*.ini` (every `[env:...]` there targets `esp32`/`esp32s2`/`esp8266`), and no mocking pattern for any manager anywhere in the codebase. The closest things to a test harness today are the web-UI mock server (`scripts/mock_server.py`) and the runtime `/peermanager/spoof` bench-testing endpoint — both manual/integration aids, not automated tests.
 
 ### 2.2 `FollowManager` reaches directly into three hardware singletons
 
@@ -156,7 +156,7 @@ Recommend option 1: it's a small, mechanical, low-risk move (pure functions into
 A single data file — e.g. `docs/spec/fixtures/follow-config-cases.json` — of `{name, config, expectValid, expectedErrorSubstring?}` entries, covering every rule in §2.3's table (the shared C++/Python rules) plus a separately-marked set covering the JS-only superset rules. Three thin test files consume the same fixture:
 
 - C++ native test: constructs a `FollowRuntimeConfig` from each case, calls `applyConfig()`, asserts pass/fail matches `expectValid` (shared cases only).
-- Python test (new, e.g. `.claude/skills/web-ui-preview/test_mock_server.py`, or wherever the project prefers Python tests to live): calls `validate_config()` per case, same assertion (shared cases only).
+- Python test (new, e.g. `test/test_mock_server.py`, or wherever the project prefers Python tests to live): calls `validate_config()` per case, same assertion (shared cases only).
 - JS/Node test: calls `validateConfig()` per case, asserting the shared cases *and* the JS-only superset cases.
 
 This makes the §2.3 divergence explicit and enforced rather than incidental: the fixture format itself documents which rules are "must match across all three" vs. "JS-only, by design," so a future change to one validator without updating the fixture (and thus the others) fails a test instead of silently drifting further.
@@ -303,7 +303,7 @@ Discovered while building the §3.6 cross-mirror fixture (`docs/spec/fixtures/fo
 - **`mock_server.py`'s `validate_config()` is missing two rules both C++ and JS have**: it never checks `targetPeer` against `NODES_MAX`, and — more significantly — it has **no `offsetGeometrySane()` equivalent at all**. A config with a geometrically-insane static offset (e.g. `ofsLongM=-2` against the default `minSepM=8`) passes Python validation outright. This isn't the documented "UI-only, deliberately not duplicated" case (§7.1) — geometry sanity is meant to be enforced everywhere; this looks like an oversight, not a choice.
 - **`follow.js`'s `validateConfig()` is missing six rules C++ and Python both have**: no `targetPeer` range check, no GVAR-index range check (`-1` or `0-7`) for any of the four GVAR fields (it only checks *uniqueness* among them, not individual validity), no RC-channel range check (`-1` or `1-16`) for any of the four channel fields (same gap — uniqueness only), no `maxTargetSpeedMps > minTargetSpeedMps >= 0` check, and no `speedCorrectionAccelCmS2 >= 0` check. So JS is neither a strict superset nor subset of C++ — it adds four rules (§2.3's original finding) while lacking six others.
 
-Net effect: of the ~17 distinct validation rules across the three implementations, only 5 (`emitHz`, `peerTimeoutMs`, the `minSepM`/`minVSepM`/`minAltM` non-negativity check, `maxTargetDistM`, `minCourseSpeed`) are actually enforced identically by all three. The fixture and its three test consumers (C++: `test/test_follow_native/test_cross_mirror_fixture.cpp`; Python: `.claude/skills/web-ui-preview/test_mock_server.py`; JS: `test/follow-logic.test.js`) encode each validator's *actual* current behavior per-case (`cppValid`/`pythonValid`/`jsValid`, independently) rather than a single shared `expectValid`, specifically so this divergence stays visible and tested instead of being silently assumed away. Worth a decision: is `mock_server.py`'s missing geometry check a bug to fix (mirror-of-a-mirror drift), or is loose client-tooling validation acceptable given it's dev-only?
+Net effect: of the ~17 distinct validation rules across the three implementations, only 5 (`emitHz`, `peerTimeoutMs`, the `minSepM`/`minVSepM`/`minAltM` non-negativity check, `maxTargetDistM`, `minCourseSpeed`) are actually enforced identically by all three. The fixture and its three test consumers (C++: `test/test_follow_native/test_cross_mirror_fixture.cpp`; Python: `test/test_mock_server.py`; JS: `test/follow-logic.test.js`) encode each validator's *actual* current behavior per-case (`cppValid`/`pythonValid`/`jsValid`, independently) rather than a single shared `expectValid`, specifically so this divergence stays visible and tested instead of being silently assumed away. Worth a decision: is `mock_server.py`'s missing geometry check a bug to fix (mirror-of-a-mirror drift), or is loose client-tooling validation acceptable given it's dev-only?
 
 ### 7.3 Resolved (2026-09-03): all three validators now enforce the same rule set
 
