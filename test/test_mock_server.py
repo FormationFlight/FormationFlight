@@ -17,7 +17,7 @@ Three things are being checked, and only the first is really about Python:
      key; a rejected POST changes nothing; the redaction placeholder means
      "leave this secret alone").
 
-  3. The wire shape of /api/status and /api/frames against what
+  3. The wire shape of /api/status, /api/frames and /api/gnss against what
      docs/v2-web-api.md documents, over a real HTTP server on a real socket.
 
 Stdlib unittest only (the project has no Python test infrastructure to build
@@ -42,6 +42,11 @@ from mock_server import (  # noqa: E402
     config_to_json,
     FRAME_LOG_CAPACITY,
     FRAME_RESULTS,
+    GNSS_BAUD,
+    GNSS_LEGACY_IDS,
+    GNSS_NAV_RATE_MS,
+    GNSS_SEEN_TYPES,
+    GNSS_SNIFF_BYTES,
     HEADING_MODE_NAMES,
     LOG_CAPACITY,
     LOG_LEVELS,
@@ -53,6 +58,10 @@ from mock_server import (  # noqa: E402
     REDACTED_SECRET,
     RESET_REASON_POWERON,
     RESET_REASON_SOFTWARE,
+    UBX_CLASS_ACK,
+    UBX_CLASS_NAV,
+    UBX_ID_ACK_NAK,
+    UBX_ID_NAV_PVT,
     MockNode,
     build_server,
     default_config,
@@ -68,6 +77,39 @@ FIXTURE_PATH = os.path.join(
 )
 
 UID_RE = re.compile(r"^[0-9a-f]{8}$")
+# A UBX class and id, as /api/gnss publishes them: two lower-case hex bytes.
+GNSS_MSG_RE = re.compile(r"^[0-9a-f]{2}:[0-9a-f]{2}$")
+LOWER_HEX_RE = re.compile(r"^[0-9a-f]*$")
+
+
+def ubx_frames_in(raw):
+    """Every complete, checksum-valid UBX frame in a raw window, as
+    [(class, id, payload)].
+
+    Resynchronises on the 0xB5 0x62 sync pair the way the firmware's parser
+    walks the byte stream: the tap is a ring, so the window starts part-way
+    through a frame and the leading bytes are expected to be a partial one.
+    """
+    frames = []
+    i = 0
+    while i + 8 <= len(raw):
+        if raw[i] != 0xB5 or raw[i + 1] != 0x62:
+            i += 1
+            continue
+        length = int.from_bytes(raw[i + 4:i + 6], "little")
+        end = i + 6 + length + 2
+        if end > len(raw):
+            break
+        ck_a = ck_b = 0
+        for b in raw[i + 2:i + 6 + length]:
+            ck_a = (ck_a + b) & 0xFF
+            ck_b = (ck_b + ck_a) & 0xFF
+        if (ck_a, ck_b) != (raw[end - 2], raw[end - 1]):
+            i += 1
+            continue
+        frames.append((raw[i + 2], raw[i + 3], raw[i + 6:i + 6 + length]))
+        i = end
+    return frames
 
 
 def follow_from_fixture(baseline, overrides):
@@ -904,6 +946,112 @@ class LogApiTest(ApiTestCase):
         self.assertEqual([e["text"] for e in doc["entries"]], ["after the clear"])
 
 
+class GnssApiTest(ApiTestCase):
+    """GET /api/gnss -- what the GPS module is saying, as opposed to whether the
+    node understood it. A receiver holding a fix and a receiver that is not
+    wired up are the same document in /api/status, so this endpoint is the only
+    thing that tells them apart."""
+
+    FIELDS = {"present", "bytes", "ubx_frames", "nav_pvt", "nmea", "sweeps",
+              "baud", "configured", "last_byte_age_ms", "last_pvt_age_ms",
+              "seen", "raw_hex"}
+
+    def test_gnss_shape(self):
+        doc = self.get_json("/api/gnss")
+        self.assertEqual(set(doc), self.FIELDS)
+        self.assertTrue(doc["present"])
+        self.assertIsInstance(doc["configured"], bool)
+        for key in ("bytes", "ubx_frames", "nav_pvt", "nmea", "sweeps", "baud",
+                    "last_byte_age_ms", "last_pvt_age_ms"):
+            self.assertIsInstance(doc[key], int, key)
+            self.assertGreaterEqual(doc[key], 0, key)
+        self.assertEqual(doc["baud"], GNSS_BAUD)
+        # The sweep found this module first time. A climbing count here is a
+        # driver that has never held a conversation for four seconds together.
+        self.assertEqual(doc["sweeps"], 0)
+        # Bytes arrive whether or not anything parses, so this is non-zero from
+        # the first configuration answer onwards -- and it is the field that
+        # separates "no fix" from "not wired up".
+        self.assertGreater(doc["bytes"], 0)
+        self.assertGreaterEqual(doc["ubx_frames"], doc["nav_pvt"])
+
+    def test_seen_is_message_types_and_counts(self):
+        seen = self.get_json("/api/gnss")["seen"]
+        self.assertGreater(len(seen), 0)
+        # kGnssSeenTypes: the table is small on purpose.
+        self.assertLessEqual(len(seen), GNSS_SEEN_TYPES)
+        for entry in seen:
+            self.assertEqual(set(entry), {"msg", "count"})
+            # Class and id as two lower-case hex bytes: "01:07" is NAV-PVT.
+            self.assertRegex(entry["msg"], GNSS_MSG_RE)
+            self.assertIsInstance(entry["count"], int)
+            # A slot the driver never filled is omitted, not sent at zero.
+            self.assertGreater(entry["count"], 0)
+
+    def test_raw_hex_is_lower_case_hex_of_even_length(self):
+        raw_hex = self.get_json("/api/gnss")["raw_hex"]
+        self.assertIsInstance(raw_hex, str)
+        self.assertRegex(raw_hex, LOWER_HEX_RE)
+        self.assertEqual(len(raw_hex) % 2, 0)
+        # Up to the last 192 bytes off the wire (kSniffBytes), and no more.
+        self.assertLessEqual(len(raw_hex), GNSS_SNIFF_BYTES * 2)
+        self.assertGreater(len(raw_hex), 0)
+
+    def test_raw_hex_decodes_to_a_checksum_valid_ubx_frame(self):
+        """The raw tap is the field that settles arguments, and it is only worth
+        anything if what comes out of it really parses. The window is a ring, so
+        it starts part-way through a frame and a reader has to resynchronise on
+        the sync pair -- which is exactly what the firmware's parser does."""
+        raw = bytes.fromhex(self.get_json("/api/gnss")["raw_hex"])
+        frames = ubx_frames_in(raw)
+        self.assertGreater(len(frames), 0, "no complete frame in the raw window")
+        cls, msg_id, payload = frames[0]
+        self.assertEqual((cls, msg_id), (UBX_CLASS_NAV, UBX_ID_NAV_PVT))
+        # NAV-PVT is 92 bytes; decodeNavPvt() rejects anything shorter.
+        self.assertEqual(len(payload), 92)
+        # And the fix in it agrees with the node rather than contradicting it.
+        self.assertEqual(payload[20], 3)                      # fixType: 3D
+        self.assertEqual(payload[21] & 0x01, 0x01)            # gnssFixOK
+        self.assertEqual(payload[23], 12)                     # numSV
+
+    def test_present_false_is_the_entire_document(self):
+        """A build that takes its position from the flight controller over MSP
+        has no link to report on, so it reports nothing else at all -- not even
+        zeros, which would read as a receiver that is wired up and silent."""
+        try:
+            with self.node.lock:
+                self.node.gnss_present = False
+            self.assertEqual(self.get_json("/api/gnss"), {"present": False})
+        finally:
+            with self.node.lock:
+                self.node.gnss_present = True
+
+    def test_a_legacy_module_reports_the_older_message_set(self):
+        """A NEO-6M NAKs the request for NAV-PVT and sends the legacy nav set
+        instead, so nav_pvt stays 0 while the frames climb."""
+        try:
+            with self.node.lock:
+                self.node.gnss_legacy = True
+                # Far enough in that the module has sent some navigation
+                # messages: at uptime 0 the only frames are the configuration
+                # answers, and a message type with a zero count is omitted.
+                self.node._t0 -= 10.0
+            doc = self.get_json("/api/gnss")
+            self.assertEqual(doc["nav_pvt"], 0)
+            seen = {e["msg"]: e["count"] for e in doc["seen"]}
+            for msg_id in GNSS_LEGACY_IDS:
+                self.assertIn(f"{UBX_CLASS_NAV:02x}:{msg_id:02x}", seen)
+            # One ACK-NAK at startup, which is expected on such a module and is
+            # not an error: it is the only thing that distinguishes it from a
+            # receiver that was never plugged in.
+            self.assertEqual(seen[f"{UBX_CLASS_ACK:02x}:{UBX_ID_ACK_NAK:02x}"], 1)
+            self.assertNotIn(f"{UBX_CLASS_NAV:02x}:{UBX_ID_NAV_PVT:02x}", seen)
+        finally:
+            with self.node.lock:
+                self.node.gnss_legacy = False
+                self.node._t0 += 10.0
+
+
 class ConfigApiTest(ApiTestCase):
     def setUp(self):
         self.request("POST", "/api/config/reset")
@@ -1565,6 +1713,86 @@ class LiveModelTest(unittest.TestCase):
         # an antenna, but the fields are still there at zero.
         self.assertEqual(radios["SIM"]["tx_deferred"], 0)
         self.assertEqual(radios["SIM"]["tx_timeouts"], 0)
+
+    def test_gnss_counters_climb_with_node_time(self):
+        """Paced by the module's 5 Hz solution rather than by how often anything
+        polls, so the numbers have the shape the hardware produces."""
+        node = self.aged_node(seconds=10.0)
+        first = node.gnss_json(node.uptime_ms())
+        self.assertGreater(first["nav_pvt"], 0)
+
+        node._t0 -= 30.0
+        node.advance()
+        later = node.gnss_json(node.uptime_ms())
+        for key in ("bytes", "ubx_frames", "nav_pvt"):
+            self.assertGreater(later[key], first[key], key)
+        # One NAV-PVT per navigation epoch. Generous bounds: what matters is the
+        # order of magnitude, not the exact arithmetic.
+        gained = later["nav_pvt"] - first["nav_pvt"]
+        expected = 30000 // GNSS_NAV_RATE_MS
+        self.assertGreaterEqual(gained, expected - 1)
+        self.assertLessEqual(gained, expected + 1)
+        # The NMEA that arrived before the port configuration took effect, and
+        # nothing since: a climbing count here would mean it never took effect.
+        self.assertEqual(later["nmea"], first["nmea"])
+        self.assertEqual(later["sweeps"], 0)
+
+    def test_gnss_counters_never_go_backwards(self):
+        """Since-boot totals. A UI that diffs two polls to get a rate reads a
+        negative one if they ever step back."""
+        node = self.aged_node(seconds=5.0)
+        seen = {}
+        for _ in range(6):
+            doc = node.gnss_json(node.uptime_ms())
+            for key in ("bytes", "ubx_frames", "nav_pvt", "nmea", "sweeps"):
+                self.assertGreaterEqual(doc[key], seen.get(key, 0), key)
+                seen[key] = doc[key]
+            node._t0 -= 7.0
+            node.advance()
+        # And the run actually went somewhere, or the check above proves nothing.
+        self.assertGreater(seen["nav_pvt"], 0)
+
+    def test_a_legacy_module_climbs_frames_but_never_nav_pvt(self):
+        """UBX-NAV-PVT only exists from u-blox protocol 14. An older module -- a
+        NEO-6M, as fitted to many T-Beams -- NAKs the request for it, and the
+        driver falls back to the legacy nav set. nav_pvt then stays 0 forever
+        while ubx_frames climbs, and that is healthy rather than broken."""
+        node = MockNode(gnss_legacy=True)
+        node._t0 -= 10.0
+        node.advance()
+        first = node.gnss_json(node.uptime_ms())
+
+        node._t0 -= 30.0
+        node.advance()
+        later = node.gnss_json(node.uptime_ms())
+
+        self.assertEqual(first["nav_pvt"], 0)
+        self.assertEqual(later["nav_pvt"], 0)
+        self.assertGreater(later["ubx_frames"], first["ubx_frames"])
+        self.assertGreater(later["bytes"], first["bytes"])
+        # Four messages carrying between them what the one modern message
+        # carries on its own, all climbing together.
+        before = {e["msg"]: e["count"] for e in first["seen"]}
+        after = {e["msg"]: e["count"] for e in later["seen"]}
+        for msg_id in GNSS_LEGACY_IDS:
+            key = f"{UBX_CLASS_NAV:02x}:{msg_id:02x}"
+            self.assertIn(key, after)
+            self.assertGreater(after[key], before[key], key)
+        # No NAV-PVT ever arrives, so its age reads 0 -- "never happened", not
+        # "just happened". Reading it the other way round is exactly backwards,
+        # which is why bytes and ubx_frames are the fields to check.
+        self.assertEqual(later["last_pvt_age_ms"], 0)
+
+    def test_a_legacy_modules_raw_tap_is_still_real_frames(self):
+        node = MockNode(gnss_legacy=True)
+        node._t0 -= 10.0
+        node.advance()
+        raw = bytes.fromhex(node.gnss_json(node.uptime_ms())["raw_hex"])
+        ids = {(cls, msg_id) for cls, msg_id, _ in ubx_frames_in(raw)}
+        self.assertGreater(len(ids), 0)
+        # Whatever is in there is from the legacy set, never a NAV-PVT.
+        self.assertNotIn((UBX_CLASS_NAV, UBX_ID_NAV_PVT), ids)
+        self.assertTrue(ids <= {(UBX_CLASS_NAV, i) for i in GNSS_LEGACY_IDS}, ids)
 
     def test_power_on_battery_is_self_consistent(self):
         """Nothing charges at zero volts of supply. The two cases have to stay

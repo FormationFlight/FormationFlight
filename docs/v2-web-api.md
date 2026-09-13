@@ -462,6 +462,141 @@ cursor backwards, asking for entries that no longer exist. "This node has hit an
 error since it booted" also does not stop being true because somebody pressed a
 button in a web page. Only a reboot clears them.
 
+## GET /api/gnss
+
+What the GPS module is saying, as opposed to whether the node understood it.
+
+A receiver holding a perfect fix and a receiver that is not wired up are the
+same document in `/api/status`: both report `valid: false` and `sats: 0`.
+Counting what actually arrives on the UART is the only thing that separates
+them. This is not hypothetical - it was used to diagnose a T-Beam whose module
+was working fine and rejecting the one message the driver asked for.
+
+```json
+{
+  "present": true,
+  "bytes": 184320,
+  "ubx_frames": 1824,
+  "nav_pvt": 1816,
+  "nmea": 7,
+  "sweeps": 0,
+  "baud": 115200,
+  "configured": true,
+  "last_byte_age_ms": 12,
+  "last_pvt_age_ms": 84,
+  "seen": [
+    { "msg": "01:07", "count": 1816 },
+    { "msg": "05:01", "count": 8 }
+  ],
+  "raw_hex": "b56201075c00...c4e1"
+}
+```
+
+`present` is false on a build with no directly wired GPS - a node that takes
+its position from the flight controller over MSP - and **then it is the only
+field in the document**. There is no link to report on, so nothing else is
+sent, not even zeros.
+
+It moves with `location.source` in `/api/status` and the two can never
+disagree: `present` is true exactly when the source is `"gnss"`, and false
+exactly when it is `"msp"`. A node cannot take its position from both at once,
+so a client showing a live GPS link beside an MSP position is reading something
+that is not a real node.
+
+| field | meaning |
+| --- | --- |
+| `bytes` | every byte the UART handed us, parsed or not |
+| `ubx_frames` | checksum-valid UBX frames received |
+| `nav_pvt` | how many of those were UBX-NAV-PVT specifically |
+| `nmea` | NMEA sentence starts seen |
+| `sweeps` | times the driver gave up and restarted its baud detection |
+| `baud` | the port speed currently in use |
+| `configured` | true once detection finished and the driver is parsing |
+| `last_byte_age_ms` | milliseconds since the last byte arrived |
+| `last_pvt_age_ms` | milliseconds since the last usable navigation message |
+| `seen` | up to 8 `{msg, count}` pairs, by UBX message type |
+| `raw_hex` | the most recent raw bytes off the wire, up to 192 of them |
+
+`bytes` is the one to read first, and it is the one that separates the two
+failures that look identical from above. Zero means the module is silent,
+mis-wired, unpowered, or talking at a baud the sweep never tried, and nothing
+further up this list is worth investigating until it is non-zero.
+
+`nmea` counts sentence *starts*, detected as `$` followed by `G` or `P`. The
+second byte matters: a bare `$` is 0x24, which turns up constantly inside
+binary UBX payloads, and counting those made a pure-UBX stream look like it was
+full of NMEA. A small fixed number here is normal - those are the sentences
+that arrived before the driver silenced them. A *climbing* `nmea` alongside
+zero `ubx_frames` means the port configuration never took effect and the module
+is still in its factory NMEA mode.
+
+`sweeps` climbing means the driver has never held a conversation for four
+seconds together: it asks, hears nothing usable, and starts over at the next
+candidate baud.
+
+Both age fields read `0` when the thing they measure has never happened, not
+when it just happened. `last_pvt_age_ms` is therefore `0` on a receiver that has
+never produced a navigation solution - and permanently `0` on a legacy module,
+which never produces a NAV-PVT at all (see below). Read it next to `bytes` and
+`ubx_frames` rather than on its own.
+
+`seen[].msg` is the UBX class and id as two lower-case hex bytes separated by a
+colon: `"01:07"` is NAV-PVT, `"05:01"` an ACK-ACK, `"05:00"` an ACK-NAK. At most
+8 distinct types are remembered, which is enough - a configured module sends one
+or two, and a module the driver failed to configure sends its defaults, which is
+also a short list.
+
+`raw_hex` is the field that settles arguments. A module can be talking perfectly
+and still be completely unintelligible to us - the wrong protocol generation,
+NMEA where binary was expected, a baud that decodes into plausible-looking
+garbage - and **no count of successfully parsed frames can show that, because it
+reads zero in every one of those cases.** It is a lower-case hex string, oldest
+byte first, holding up to the last 192 bytes the driver saw. The window is a
+ring, so it usually starts part-way through a frame: resynchronise on the
+`b562` sync pair rather than assuming the first byte begins a message.
+
+### Reading the counters together
+
+| `bytes` | `ubx_frames` | `nav_pvt` | what it is |
+| --- | --- | --- | --- |
+| 0 | 0 | 0 | silent. Wiring, power, TX/RX swap, or a baud never tried |
+| climbing | 0 | 0 | talking, not understood. Check `nmea` and `raw_hex` |
+| climbing | climbing | 0 | a module with no NAV-PVT. Healthy if `seen` shows the legacy set |
+| climbing | climbing | climbing | working |
+
+`sweeps` climbing with a non-zero `bytes` is the awkward middle case: the module
+is transmitting, but nothing the driver can use is coming back inside the
+four-second window, so it keeps restarting detection.
+
+### Receivers older than protocol 14
+
+UBX-NAV-PVT only exists from u-blox protocol version 14. An older module - a
+NEO-6M, which is fitted to plenty of T-Beams - rejects the request for it with a
+UBX ACK-NAK and then emits nothing at all, which from above is indistinguishable
+from a receiver that was never plugged in.
+
+The driver detects that NAK and falls back to enabling the legacy navigation
+set:
+
+| message | id | carries |
+| --- | --- | --- |
+| NAV-POSLLH | `01:02` | latitude, longitude, altitude |
+| NAV-SOL | `01:06` | fix type, satellites used |
+| NAV-VELNED | `01:12` | ground speed, heading |
+| NAV-DOP | `01:04` | dilution of precision |
+
+So on such a board `nav_pvt` stays `0` forever while `ubx_frames` climbs, and
+**that is healthy, not broken.** `location.fix_type`, `location.sats` and
+`location.hdop` are populated identically either way; the four legacy messages
+carry between them exactly what the one modern message carries on its own, and
+nothing above the driver can tell which generation it is talking to.
+
+A single ACK-NAK at startup on one of these modules is expected and is not an
+error. It shows up as `{"msg": "05:00", "count": 1}` in `seen`, and it is the
+*only* thing that distinguishes a pre-protocol-14 receiver from a receiver that
+is not wired up, which is why the driver acts on it rather than waiting for a
+message that is never going to arrive.
+
 ## Simulated traffic
 
 `GET /api/sim` always answers, so the UI can discover whether the simulator is

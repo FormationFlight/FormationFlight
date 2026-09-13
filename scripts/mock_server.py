@@ -25,6 +25,10 @@ drift. Each carries a comment naming what it mirrors:
   - loop_json() mirrors ff::LoopStats (loop_stats.h), down to minUs() reading 0
     before the first sample and rateHz() being derived from the mean.
   - system_json() mirrors fillSystem() in WebServer.cpp.
+  - gnss_json() mirrors ff::GnssLinkStats (lib/ff_core/gnss_link.h) as
+    DirectGpsLocationSource fills it in, including the two rules a reader can
+    get backwards: `present: false` is the whole document, and an age of 0
+    means the thing has never happened rather than that it just did.
   - The handlers' status codes and response bodies mirror src/hal/WebServer.cpp,
     which is the other implementation of this same contract. Where that file is
     more specific than the doc, it wins: it is what the UI will actually meet.
@@ -49,6 +53,7 @@ import json
 import math
 import random
 import re
+import struct
 import threading
 import time
 from collections import deque
@@ -840,11 +845,205 @@ LORA_RX_DROP_EVERY = 23   # receive ring overruns, in frames
 LORA_TX_DEFER_EVERY_MS = 6000
 
 
+# ---------------------------------------------------------------------------
+# The GNSS link (GET /api/gnss)
+# ---------------------------------------------------------------------------
+# ff::GnssLinkStats (lib/ff_core/gnss_link.h) as DirectGpsLocationSource fills
+# it in, plus the raw tap. The endpoint exists because a receiver holding a
+# perfect fix and a receiver that is not wired up look identical in
+# /api/status -- both report no fix and zero satellites -- and counting what
+# arrives on the UART is the only thing that separates them.
+#
+# This mock's position source is "msp", which on real firmware means no
+# directly-wired GPS and therefore `{"present": false}` and nothing else. It
+# serves a full link anyway, for the same reason system_json() sends both the
+# ESP8266 and the ESP32 heap fields: the UI's GNSS view has to be reachable
+# with no hardware on the bench. Set node.gnss_present = False for the board
+# the firmware omits everything for.
+
+# The sweep settled on the target baud, so the counters model a module that is
+# already configured and talking.
+GNSS_BAUD = 115200
+# One navigation solution every 200 ms (5 Hz), which is what buildCfgRate()
+# asks for at the default rate.
+GNSS_NAV_RATE_MS = 200
+# NMEA sentence starts seen before the port configuration took effect. The
+# driver silences GGA/GLL/GSA/GSV/RMC/VTG at startup, so this is a handful of
+# sentences at the beginning and then a fixed number forever -- which is what
+# makes a *climbing* nmea count next to zero ubx_frames diagnostic.
+GNSS_NMEA_BEFORE_CONFIG = 7
+# A sentence is about this long once the talker id and the checksum are counted.
+GNSS_NMEA_SENTENCE_BYTES = 72
+# CFG-RATE, one CFG-MSG for the navigation message and six that turn the
+# standard NMEA sentences off: eight requests, eight answers.
+GNSS_ACKS_MODERN = 8
+# The same eight, except that the NAV-PVT one comes back as a NAK, plus the
+# four legacy CFG-MSG the driver sends in response to it.
+GNSS_ACKS_LEGACY = 11
+GNSS_NAKS_LEGACY = 1
+# DirectGpsLocationSource::kSniffBytes -- how much raw wire the driver keeps.
+GNSS_SNIFF_BYTES = 192
+# ff::kGnssSeenTypes (gnss_link.h). Small on purpose: a configured module sends
+# one or two message types, and one we failed to configure sends its defaults,
+# which is also a short list.
+GNSS_SEEN_TYPES = 8
+
+UBX_CLASS_NAV, UBX_CLASS_ACK = 0x01, 0x05
+UBX_ID_NAV_PVT = 0x07
+UBX_ID_NAV_POSLLH, UBX_ID_NAV_SOL, UBX_ID_NAV_VELNED, UBX_ID_NAV_DOP = 0x02, 0x06, 0x12, 0x04
+UBX_ID_ACK_NAK, UBX_ID_ACK_ACK = 0x00, 0x01
+UBX_CLASS_CFG, UBX_ID_CFG_MSG = 0x06, 0x01
+
+# Somewhere in the middle of a GPS week. Only its presence matters.
+GNSS_ITOW_MS = 302400000
+
+
+def ubx_frame(msg_class, msg_id, payload):
+    """One UBX frame as it appears on the wire: the 0xB5 0x62 sync pair, class,
+    id, little-endian payload length, the payload, then the 8-bit Fletcher
+    checksum over everything from the class byte on -- the same arithmetic
+    ubx.cpp does when it builds a frame.
+
+    These are real frames, not filler. Whatever reads `raw_hex` (the UI, a
+    scratch script, a person with a hex editor) gets something that actually
+    parses, which is the entire point of publishing the raw bytes.
+    """
+    body = bytes((msg_class, msg_id)) + struct.pack("<H", len(payload)) + bytes(payload)
+    ck_a = ck_b = 0
+    for b in body:
+        ck_a = (ck_a + b) & 0xFF
+        ck_b = (ck_b + ck_a) & 0xFF
+    return b"\xb5\x62" + body + bytes((ck_a, ck_b))
+
+
+def _nav_pvt_payload(lat_1e7, lon_1e7, alt_mm, sats, fix_type, gspeed_mms,
+                     head_deg, pdop_x100):
+    """UBX-NAV-PVT, 92 bytes. Offsets match decodeNavPvt() in ubx.cpp, so the
+    frame in `raw_hex` is one the firmware's own parser would accept."""
+    p = bytearray(92)
+    struct.pack_into("<I", p, 0, GNSS_ITOW_MS)
+    struct.pack_into("<HBBBBB", p, 4, 2025, 9, 13, 18, 24, 30)
+    p[11] = 0x07                              # validDate | validTime | fullyResolved
+    struct.pack_into("<I", p, 12, 30)         # tAcc, ns
+    struct.pack_into("<i", p, 16, 0)          # nano
+    p[20] = fix_type
+    # gnssFixOK. The driver gates both `valid` and the fix type on this bit: a
+    # solution the receiver does not trust is reported as no fix at all.
+    p[21] = 0x01
+    p[23] = sats
+    struct.pack_into("<i", p, 24, lon_1e7)
+    struct.pack_into("<i", p, 28, lat_1e7)
+    struct.pack_into("<i", p, 32, alt_mm + 2000)   # height above the ellipsoid
+    struct.pack_into("<i", p, 36, alt_mm)          # hMSL, the one the driver reads
+    struct.pack_into("<II", p, 40, 1200, 1800)     # hAcc, vAcc
+    struct.pack_into("<iii", p, 48, 1200, 900, -30)   # velN, velE, velD, mm/s
+    struct.pack_into("<i", p, 60, gspeed_mms)      # ground speed, mm/s
+    struct.pack_into("<i", p, 64, int(head_deg * 1e5))   # headMot, 1e-5 deg
+    struct.pack_into("<II", p, 68, 200, 1500000)   # sAcc, headAcc
+    struct.pack_into("<H", p, 76, pdop_x100)
+    return bytes(p)
+
+
+def _nav_posllh_payload(lat_1e7, lon_1e7, alt_mm):
+    """UBX-NAV-POSLLH, 28 bytes. decodeNavPosllh() reads hMSL at offset 16, not
+    the ellipsoidal height at 12; the two differ by tens of metres."""
+    p = bytearray(28)
+    struct.pack_into("<I", p, 0, GNSS_ITOW_MS)
+    struct.pack_into("<i", p, 4, lon_1e7)
+    struct.pack_into("<i", p, 8, lat_1e7)
+    struct.pack_into("<i", p, 12, alt_mm + 2000)
+    struct.pack_into("<i", p, 16, alt_mm)
+    struct.pack_into("<II", p, 20, 1200, 1800)
+    return bytes(p)
+
+
+def _nav_sol_payload(sats, fix_type, pdop_x100):
+    """UBX-NAV-SOL, 52 bytes: where a pre-protocol-14 module's fix type and
+    satellite count come from. ECEF position is in centimetres."""
+    p = bytearray(52)
+    struct.pack_into("<I", p, 0, GNSS_ITOW_MS)
+    struct.pack_into("<i", p, 4, 0)             # fTOW
+    struct.pack_into("<h", p, 8, 2387)          # GPS week
+    p[10] = fix_type
+    p[11] = 0x01                                # GPSfixOK, same rule as NAV-PVT
+    struct.pack_into("<iii", p, 12, -269600000, -431400000, 383400000)
+    struct.pack_into("<I", p, 24, 900)          # pAcc
+    struct.pack_into("<iii", p, 28, 12, 9, -1)  # ECEF velocity, cm/s
+    struct.pack_into("<I", p, 40, 200)          # sAcc
+    struct.pack_into("<H", p, 44, pdop_x100)
+    p[47] = sats
+    return bytes(p)
+
+
+def _nav_velned_payload(gspeed_cms, head_deg):
+    """UBX-NAV-VELNED, 36 bytes. decodeNavVelned() reads gSpeed at offset 20 --
+    ground speed -- not the 3D speed at 16, which is larger in a climb."""
+    p = bytearray(36)
+    struct.pack_into("<I", p, 0, GNSS_ITOW_MS)
+    struct.pack_into("<iii", p, 4, 120, 90, -3)      # velN, velE, velD, cm/s
+    struct.pack_into("<I", p, 16, gspeed_cms + 1)    # 3D speed
+    struct.pack_into("<I", p, 20, gspeed_cms)        # ground speed
+    struct.pack_into("<i", p, 24, int(head_deg * 1e5))
+    struct.pack_into("<II", p, 28, 20, 1500000)      # sAcc, cAcc
+    return bytes(p)
+
+
+def _nav_dop_payload(hdop_x100):
+    """UBX-NAV-DOP, 18 bytes. hDOP sits at offset 12, already scaled x100,
+    which is exactly what NodeLocation wants."""
+    p = bytearray(18)
+    struct.pack_into("<I", p, 0, GNSS_ITOW_MS)
+    struct.pack_into("<HHHHHHH", p, 4, 190, 160, 90, 120, hdop_x100, 100, 90)
+    return bytes(p)
+
+
+# The frames the mock's module is emitting. The position matches the one the
+# rest of the mock reports, so a raw frame decoded by hand agrees with
+# /api/status rather than contradicting it.
+GNSS_FIX_SATS = 12
+GNSS_FIX_TYPE = 3
+GNSS_DOP_X100 = 131
+GNSS_SPEED_CMS = 1500
+
+GNSS_FRAME_NAV_PVT = ubx_frame(
+    UBX_CLASS_NAV, UBX_ID_NAV_PVT,
+    _nav_pvt_payload(to_1e7(HOME_LAT), to_1e7(HOME_LON), int(HOME_ALT_M * 1000),
+                     GNSS_FIX_SATS, GNSS_FIX_TYPE, GNSS_SPEED_CMS * 10, 90.0,
+                     GNSS_DOP_X100))
+# What a module that predates NAV-PVT sends instead: four messages carrying
+# between them exactly what the one modern message carries on its own.
+GNSS_LEGACY_FRAMES = (
+    ubx_frame(UBX_CLASS_NAV, UBX_ID_NAV_POSLLH,
+              _nav_posllh_payload(to_1e7(HOME_LAT), to_1e7(HOME_LON),
+                                  int(HOME_ALT_M * 1000))),
+    ubx_frame(UBX_CLASS_NAV, UBX_ID_NAV_SOL,
+              _nav_sol_payload(GNSS_FIX_SATS, GNSS_FIX_TYPE, GNSS_DOP_X100)),
+    ubx_frame(UBX_CLASS_NAV, UBX_ID_NAV_VELNED,
+              _nav_velned_payload(GNSS_SPEED_CMS, 90.0)),
+    ubx_frame(UBX_CLASS_NAV, UBX_ID_NAV_DOP, _nav_dop_payload(GNSS_DOP_X100)),
+)
+GNSS_LEGACY_EPOCH = b"".join(GNSS_LEGACY_FRAMES)
+# The ids the legacy set arrives under, in the order buildLegacyNavConfig()
+# asks for them.
+GNSS_LEGACY_IDS = (UBX_ID_NAV_POSLLH, UBX_ID_NAV_SOL, UBX_ID_NAV_VELNED, UBX_ID_NAV_DOP)
+# An ACK or a NAK is a two-byte payload naming the request it answers.
+GNSS_ACK_FRAME_BYTES = len(ubx_frame(UBX_CLASS_ACK, UBX_ID_ACK_ACK,
+                                     bytes((UBX_CLASS_CFG, UBX_ID_CFG_MSG))))
+
+# The raw tap: the *last* GNSS_SNIFF_BYTES off the wire, oldest first, which is
+# where a 192-byte window over a stream of 100-byte frames lands. It starts
+# part-way through a frame, exactly as the firmware's ring does, so anything
+# reading it has to resynchronise on the sync pair the way a parser does.
+GNSS_RAW_HEX_MODERN = (GNSS_FRAME_NAV_PVT * 3)[-GNSS_SNIFF_BYTES:].hex()
+GNSS_RAW_HEX_LEGACY = (GNSS_LEGACY_EPOCH * 3)[-GNSS_SNIFF_BYTES:].hex()
+
+
 class MockNode:
     """Everything the API reads from. One lock, one `advance()` that brings the
     world up to the current wall clock, called at the top of every handler."""
 
-    def __init__(self, config=None, seed=1337, power_present=True, power_usb=True):
+    def __init__(self, config=None, seed=1337, power_present=True, power_usb=True,
+                 gnss_legacy=False):
         self.lock = threading.RLock()
         self.seed = seed
         self.rng = random.Random(seed)
@@ -866,6 +1065,15 @@ class MockNode:
         # False mirrors a PMIC that will not estimate a charge percentage, in
         # which case `battery_pct` is omitted rather than sent as 0.
         self.power_estimates_pct = True
+
+        # The GPS link behind /api/gnss. present=False is the build with no
+        # directly wired receiver -- position over MSP from the flight
+        # controller -- for which the firmware sends `{"present": false}` and
+        # nothing else at all. gnss_legacy is the pre-protocol-14 module (a
+        # NEO-6M, as fitted to many T-Beams) that NAKs the request for NAV-PVT
+        # and gets the legacy nav set instead.
+        self.gnss_present = True
+        self.gnss_legacy = bool(gnss_legacy)
 
         # GNSS fix quality. hdop is x100, as ff::NodeLocation carries it, and 0
         # means "this source does not report it" -- the firmware then omits the
@@ -1529,6 +1737,88 @@ class MockNode:
             return 0
         return max(0, now_ms) // LORA_TX_DEFER_EVERY_MS
 
+    def gnss_json(self, now_ms):
+        """GET /api/gnss -- ff::GnssLinkStats plus the raw tap.
+
+        The counters are derived from node time rather than counted per tick,
+        the way the deferred-transmit count is: what sets the rate is the
+        module's 5 Hz solution, not how often the UI polls. Monotonic in
+        now_ms, so a client diffing two polls never reads a negative rate.
+
+        Two rules come straight from the firmware and matter more than the
+        numbers do:
+
+          - `present: false` is the entire document. A build with no directly
+            wired GPS has nothing else to say, so it says nothing else.
+          - `last_pvt_age_ms` reads 0 when no NAV-PVT has ever arrived, which
+            on a legacy module is forever. Reading it as "a message just
+            arrived" is exactly backwards, and `bytes` is the field that
+            settles it.
+        """
+        if not self.gnss_present:
+            return {"present": False}
+
+        now_ms = max(0, now_ms)
+        # Solutions since boot. One burst of frames per navigation epoch.
+        epochs = now_ms // GNSS_NAV_RATE_MS
+        nmea = GNSS_NMEA_BEFORE_CONFIG
+
+        if self.gnss_legacy:
+            # A NEO-6M, as fitted to many T-Beams: it predates NAV-PVT, NAKed
+            # the request for it, and is now sending the legacy set instead.
+            # nav_pvt is 0 and stays 0, and that is healthy.
+            nav_pvt = 0
+            acks = GNSS_ACKS_LEGACY + GNSS_NAKS_LEGACY
+            ubx_frames = len(GNSS_LEGACY_IDS) * epochs + acks
+            wire_bytes = epochs * len(GNSS_LEGACY_EPOCH)
+            seen = [(UBX_CLASS_NAV, msg_id, epochs) for msg_id in GNSS_LEGACY_IDS]
+            seen.append((UBX_CLASS_ACK, UBX_ID_ACK_ACK, GNSS_ACKS_LEGACY))
+            # The one frame that says the module predates NAV-PVT. A single NAK
+            # at startup on such a board is expected, not a fault.
+            seen.append((UBX_CLASS_ACK, UBX_ID_ACK_NAK, GNSS_NAKS_LEGACY))
+            raw_hex = GNSS_RAW_HEX_LEGACY
+        else:
+            nav_pvt = epochs
+            acks = GNSS_ACKS_MODERN
+            ubx_frames = epochs + acks
+            wire_bytes = epochs * len(GNSS_FRAME_NAV_PVT)
+            seen = [(UBX_CLASS_NAV, UBX_ID_NAV_PVT, epochs),
+                    (UBX_CLASS_ACK, UBX_ID_ACK_ACK, GNSS_ACKS_MODERN)]
+            raw_hex = GNSS_RAW_HEX_MODERN
+
+        # Every byte the UART handed us, parsed or not: the navigation stream,
+        # the configuration answers, and the NMEA that arrived before the port
+        # configuration took effect.
+        total_bytes = (wire_bytes + acks * GNSS_ACK_FRAME_BYTES
+                       + nmea * GNSS_NMEA_SENTENCE_BYTES)
+        # The module talks in bursts, so the gap since the last byte is however
+        # far into the current epoch we are.
+        since_epoch = now_ms % GNSS_NAV_RATE_MS if epochs else 0
+
+        doc = {
+            "present": True,
+            "bytes": total_bytes,
+            "ubx_frames": ubx_frames,
+            "nav_pvt": nav_pvt,
+            "nmea": nmea,
+            # The sweep found the module first time, which is the healthy case.
+            # A climbing count here is a driver that has never held a
+            # conversation for four seconds together.
+            "sweeps": 0,
+            "baud": GNSS_BAUD,
+            "configured": True,
+            "last_byte_age_ms": since_epoch,
+            # 0 when it has never happened, exactly as the firmware reports it.
+            "last_pvt_age_ms": since_epoch if nav_pvt else 0,
+        }
+        # A slot the firmware has never filled is skipped rather than sent at
+        # zero, and the table holds kGnssSeenTypes types and no more.
+        doc["seen"] = [{"msg": f"{cls:02x}:{msg_id:02x}", "count": count}
+                       for cls, msg_id, count in seen[:GNSS_SEEN_TYPES]
+                       if count != 0]
+        doc["raw_hex"] = raw_hex
+        return doc
+
     def status_json(self, now_ms):
         lat, lon, alt = self.self_location(now_ms)
         peers = self._peer_list()
@@ -1623,7 +1913,13 @@ class MockNode:
 
         location = {
             "valid": True,
-            "source": "msp",
+            # Tied to whether this board has a GPS wired straight to it, because
+            # on real firmware the two cannot disagree: "gnss" is reported
+            # exactly when /api/gnss answers present, and "msp" exactly when it
+            # does not. A mock that served a live GPS link while claiming its
+            # position came from the flight controller would have the UI showing
+            # both at once, which no real node can do.
+            "source": "gnss" if self.gnss_present else "msp",
             "lat": to_1e7(lat),
             "lon": to_1e7(lon),
             "alt_m": int(alt),
@@ -1907,6 +2203,14 @@ def make_handler(node, config_path=None, quiet=True):
                             return
                     self._json(node.log_json(since))
                     return
+                if path == "/api/gnss":
+                    # What the GPS module is saying, as opposed to whether we
+                    # understood it. A receiver holding a fix and a receiver
+                    # that is not wired up are the same document in
+                    # /api/status; counting what arrives on the UART is the
+                    # only thing that tells them apart.
+                    self._json(node.gnss_json(now))
+                    return
                 if path == "/api/sim":
                     self._json(node.sim_json(now))
                     return
@@ -2110,13 +2414,18 @@ def main():
                              "'no PMIC' rather than as zero volts")
     parser.add_argument("--on-battery", action="store_true",
                         help="running off the battery instead of USB")
+    parser.add_argument("--gnss-legacy", action="store_true",
+                        help="model a receiver older than u-blox protocol 14 (a "
+                             "NEO-6M, as fitted to many T-Beams): it NAKs the "
+                             "request for NAV-PVT, so /api/gnss reports nav_pvt 0 "
+                             "forever while ubx_frames climbs on the legacy nav set")
     parser.add_argument("--config-file", default=None,
                         help="also write /api/config/save results to this file")
     parser.add_argument("--verbose", action="store_true", help="log every request")
     args = parser.parse_args()
 
     node = MockNode(seed=args.seed, power_present=not args.no_pmic,
-                    power_usb=not args.on_battery)
+                    power_usb=not args.on_battery, gnss_legacy=args.gnss_legacy)
     if args.sim:
         node.config["sim"]["enabled"] = True
         node.saved_config["sim"]["enabled"] = True
