@@ -1,5 +1,14 @@
 # FormationFlight — In-Flight RC Control of the Follow Slot — Engineering Spec
 
+> *Historical design record.* This describes the v1-era implementation:
+> `src/lib/Follow` (unbuilt today), the `/followmanager/*` REST endpoints, EEPROM
+> persistence and 1-6 slot ids. Follow now runs as `ff::FollowController` in
+> `lib/ff_core/follow.*`, peers are 32-bit UIDs, and configuration is one JSON
+> document reached through the API in [`../v2-web-api.md`](../v2-web-api.md).
+> Current behavior is documented in
+> [`../user-guide-follow-mode.md`](../user-guide-follow-mode.md). Kept for the
+> reasoning, not as instructions to build from.
+
 **Status:** Draft — not yet planned or implemented
 **Target firmware:** FormationFlight (ESP32/ESP8266, PlatformIO/C++)
 **Depends on:**

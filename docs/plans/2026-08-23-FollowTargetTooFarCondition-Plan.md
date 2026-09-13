@@ -1,5 +1,14 @@
 # FormationFlight — `TARGET_TOO_FAR` Condition Code — Implementation Plan
 
+> *Historical design record.* This describes the v1-era implementation:
+> `src/lib/Follow` (unbuilt today), the `/followmanager/*` REST endpoints, EEPROM
+> persistence and 1-6 slot ids. Follow now runs as `ff::FollowController` in
+> `lib/ff_core/follow.*`, peers are 32-bit UIDs, and configuration is one JSON
+> document reached through the API in [`../v2-web-api.md`](../v2-web-api.md).
+> Current behavior is documented in
+> [`../user-guide-follow-mode.md`](../user-guide-follow-mode.md). Kept for the
+> reasoning, not as instructions to build from.
+
 **Extends:** [`docs/spec/2026-08-13-FollowStatusOsdGvar.md`](../spec/2026-08-13-FollowStatusOsdGvar.md) §3.2's
 `conditionFlagsGvarIndex` extension point, and the condition-code table
 [`docs/spec/2026-08-15-FollowRcAxisControl.md`](../spec/2026-08-15-FollowRcAxisControl.md) §5.3 built on top of it.

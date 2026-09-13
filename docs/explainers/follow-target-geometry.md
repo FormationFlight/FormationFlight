@@ -1,9 +1,10 @@
 # How the Follower's Target Position Is Calculated
 
-This explains the math behind `slotToLatLon()` (`src/lib/Follow/FollowManager.cpp:12-44`),
-the function that turns "leader's GPS position + a configured 3D offset" into
-"an absolute lat/lon/altitude to send the follower's flight controller."
-It runs every cycle at `FOLLOW_EMIT_HZ` (default 4 Hz, `FollowManager.cpp:246-301`).
+This explains the math behind `ff::slotToLatLon()` (`lib/ff_core/follow.cpp`),
+the function that turns "leader's GPS position plus a configured 3D offset"
+into "an absolute lat/lon/altitude to send the follower's flight controller."
+It runs once per control cycle in `FollowController::service()`, at the
+configured `emitHz` (4 Hz by default).
 
 There are four steps:
 
@@ -20,10 +21,10 @@ flowchart TD
     S2["2. Cartesian &rarr; polar<br/>&rarr; distance_m, bearing_deg"]
     S3["3. Great-circle projection from leader<br/>&rarr; target lat/lon"]
     S4["4. Sum altitude terms<br/>&rarr; alt_cm"]
-    FL["4b. Clamp to altitude floor<br/>FOLLOW_MIN_ALT_M"]
-    FA["Follower's own altitude<br/>local_altitude_cm()"]
-    RA["peer-&gt;relalt<br/>(raw-GPS delta)"]
-    TS{{"targetSane()<br/>safety checks"}}
+    FL["4b. Clamp to altitude floor<br/>minAltM"]
+    FA["Follower's own altitude<br/>localAltitudeCm()"]
+    RA["peer.alt_m &minus; self.alt_m<br/>(raw-GPS delta)"]
+    TS{{"offsetGeometrySane() + targetTooFar()<br/>safety checks"}}
     WP["sendFollowWaypoint()<br/>MSP_SET_WP #255"]
 
     L --> S1
@@ -44,11 +45,11 @@ flowchart TD
 ## 1. The offset starts out relative to the leader's heading, not to compass directions
 
 The pilot configures the follower's slot as three signed meter values
-(`FollowOffset`, `FollowManager.h:18-22`):
+(`ff::FollowOffset`, `lib/ff_core/follow.h`):
 
-- `longitudinal_m` — positive = ahead of the leader, negative = behind
-- `lateral_m` — positive = right of the leader, negative = left
-- `vertical_m` — positive = above, negative = below
+- `longitudinal_m` - positive = ahead of the leader, negative = behind
+- `lateral_m` - positive = right of the leader, negative = left
+- `vertical_m` - positive = above, negative = below
 
 "Ahead" and "right" only mean something once you know which way the leader
 is pointed. A follower configured to sit 15 m *behind* a leader flying due
@@ -61,7 +62,7 @@ This is a standard 2D rotation. Think of it in terms of two unit vectors,
 both anchored to the leader's course angle `θ` (measured clockwise from
 north, same convention as a compass bearing):
 
-- the **ahead** direction, as a compass vector, is `(cos θ, sin θ)` — north component `cos θ`, east component `sin θ`
+- the **ahead** direction, as a compass vector, is `(cos θ, sin θ)` - north component `cos θ`, east component `sin θ`
 - the **right** direction (90° clockwise from ahead) is `(-sin θ, cos θ)`
 
 ```
@@ -88,7 +89,8 @@ north_m = long_m * cos(θ) - lat_m * sin(θ)      // ahead-unit + right-unit
 east_m  = long_m * sin(θ) + lat_m * cos(θ)
 ```
 
-(`FollowManager.cpp:21-23`, using `course_deg` converted to radians as `θ`)
+(`follow.cpp`'s `slotToLatLon()`, using `course_deg` converted to radians as
+`θ`)
 
 **Worked check:** leader heading due east (`θ = 90°`), slot configured
 "behind, centered" (`long_m = -15, lat_m = 0`):
@@ -117,8 +119,8 @@ correct: trailing a leader flying east means sitting to its west.
 ## 2. Convert the north/east offset to a distance and bearing
 
 `(north_m, east_m)` is a Cartesian offset. Geographic projection (next
-step) wants it in polar form — a straight-line distance and a compass
-bearing — so it's converted with the Pythagorean theorem and `atan2`:
+step) wants it in polar form - a straight-line distance and a compass
+bearing - so it's converted with the Pythagorean theorem and `atan2`:
 
 ```
 distance_m  = sqrt(north_m² + east_m²)
@@ -127,7 +129,7 @@ bearing_deg = atan2(east_m, north_m)     // atan2(east, north), not (north, east
 if (bearing_deg < 0) bearing_deg += 360  // atan2 returns [-180°, 180°]; normalize to [0°, 360°)
 ```
 
-(`FollowManager.cpp:25-30`)
+(still inside `slotToLatLon()`)
 
 ```
                          N (0°)
@@ -149,17 +151,18 @@ if (bearing_deg < 0) bearing_deg += 360  // atan2 returns [-180°, 180°]; norma
 ```
 
 Continuing the worked example: `distance_m = sqrt(0² + 15²) = 15`,
-`bearing_deg = atan2(-15, 0) = -90° → 270°` — due west, 15 m away. Matches
+`bearing_deg = atan2(-15, 0) = -90° → 270°` - due west, 15 m away. Matches
 step 1's sanity check.
 
 ## 3. Project that distance + bearing from the leader's position
 
 Now the question is purely geographic: "starting at the leader's lat/lon,
-walk `distance_m` meters in compass direction `bearing_deg` — where do you
+walk `distance_m` meters in compass direction `bearing_deg` - where do you
 end up?" This is the classic "direct geodetic problem," solved here by
 treating the Earth as a sphere of mean radius `R = 6,371,000 m`
-(`GNSSManager::calculatePointAtDistance`, `src/lib/GNSS/GNSSManager.cpp:174-195`,
-reused rather than re-implemented — `FollowManager.cpp:36-38`).
+(`ff::geo::pointAtDistance()`, `lib/ff_core/geo.cpp`, reused rather than
+re-implemented; the whole geodesy module is pure and host-tested in
+`test/test_geo`).
 
 ```
         target ●╮                              ╭● leader
@@ -185,7 +188,7 @@ between them as measured from the Earth's center. The lat/lon formulas
 below solve for where the second point (`lat2`/`lon2`) lands, given the
 first point, that angle, and the compass bearing between them.
 
-First, convert the linear distance into an **angular** distance — the angle,
+First, convert the linear distance into an **angular** distance - the angle,
 as seen from the Earth's center, subtended by that arc. This is just
 arc length ÷ radius, the basic relationship between a circle's radius and
 the angle a given arc length sweeps out:
@@ -205,9 +208,9 @@ lon2 = lon1 + atan2( sin(b)*sin(d)*cos(lat1),
                       cos(d) - sin(lat1)*sin(lat2) )
 ```
 
-(`GNSSManager.cpp:181-184`)
+(`geo.cpp`'s `pointAtDistance()`)
 
-You don't need to re-derive these to use them — the intuition is that
+You don't need to re-derive these to use them - the intuition is that
 they're the spherical equivalent of ordinary "sail this far on this
 heading" navigation, just done with spherical rather than plane
 trigonometry so it stays accurate as bearings and distances get large and
@@ -226,13 +229,13 @@ target.lat_1e7 = round(lat2 * 1e7)
 target.lon_1e7 = round(lon2 * 1e7)
 ```
 
-(`FollowManager.cpp:41-42`)
+(the end of `slotToLatLon()`)
 
-## 4. Altitude is handled separately — no trigonometry involved
+## 4. Altitude is handled separately - no trigonometry involved
 
 Vertical offset doesn't need rotating or projecting; "above" and "below"
 mean the same thing regardless of the leader's heading. The target
-altitude is just three numbers added together (`FollowManager.cpp:279-288`):
+altitude is just three numbers added together (in `service()`):
 
 ```
 alt_cm = follower's own baro/GPS-fused altitude estimate (cm)
@@ -246,10 +249,10 @@ alt_cm = follower's own baro/GPS-fused altitude estimate (cm)
      |   ┌─────────────────────────┐
      |   │ vertical_m offset       │  configured slot height (× 100 for cm)
      |   ├─────────────────────────┤
-     |   │ peer->relalt            │  leader's raw-GPS altitude minus
+     |   │ peer.alt_m − self.alt_m │  leader's raw-GPS altitude minus
      |   │ (× 100 for cm)          │  follower's raw-GPS altitude
      |   ├─────────────────────────┤
-     |   │ local_altitude_cm()     │  follower's own baro/GPS-fused
+     |   │ localAltitudeCm()       │  follower's own baro/GPS-fused
      |   │                         │  home-relative estimate
      |   └─────────────────────────┘
      |   0 ─────────────────────────  follower's home altitude
@@ -261,38 +264,41 @@ controller (baro-fused, generally accurate), while the second comes from
 the leader's raw GPS altitude relative to the follower's raw GPS altitude
 (no baro fusion, since the leader only broadcasts raw GPS telemetry over
 the peer link). Mixing a baro-fused estimate with a raw-GPS delta means the
-combined altitude inherits raw GPS's larger vertical error budget — this is
-why `FOLLOW_MIN_VSEP_M` (the minimum vertical separation for a "stacked"
-slot, `FollowConfig.h:71-73`) is set well above the physical clearance you'd
-otherwise pick, to absorb that measurement noise. See spec §6.2/§7.4 for
-more detail.
+combined altitude inherits raw GPS's larger vertical error budget. This is why
+`minVSepM` (the minimum vertical separation for a "stacked" slot, defaulting to
+`FOLLOW_MIN_VSEP_M` in `lib/ff_core/follow.h`) is set well above the physical
+clearance you would otherwise pick, to absorb that measurement noise. The
+firmware comments call this frame mixing out as a known accuracy bound rather
+than a bug. See the pilot guide's safety bounds section for the flying side of
+it.
 
 ### 4b. The summed altitude is then clamped to an absolute floor
 
-`FOLLOW_MIN_VSEP_M` above only protects the *offset relative to the
-leader* — it says nothing about what happens if the leader itself is
+`minVSepM` above only protects the *offset relative to the leader*. It says
+nothing about what happens if the leader itself is
 flying low, descending, or landing. A follower configured with a `BELOW`
 slot, or simply trailing a leader that descends toward the follower's own
-home elevation, can end up with a summed `alt_cm` of zero or negative —
+home elevation, can end up with a summed `alt_cm` of zero or negative -
 i.e. commanded at or below home altitude. That's a flight-into-terrain
 risk, so after the three terms above are summed, the result is clamped
-(not rejected) to a configurable minimum, `FOLLOW_MIN_ALT_M` (default 3 m,
-home-relative; spec §7.6):
+(not rejected) to a configurable minimum, `minAltM` (default 3 m,
+home-relative):
 
 ```
 alt_cm = sum of the three terms above
-if (alt_cm < FOLLOW_MIN_ALT_M * 100) {
-    alt_cm = FOLLOW_MIN_ALT_M * 100   // floor, not a rejection
+if (alt_cm < minAltM * 100) {
+    alt_cm = minAltM * 100   // floor, not a rejection
 }
 ```
 
-This is a **clamp**, not one of `targetSane()`'s pass/fail checks: the
-waypoint still gets emitted, with the follower still tracking the leader's
-lateral (lat/lon) position — only the vertical component is overridden to
-the floor. Rejecting the waypoint instead (the way `targetSane()` does for
-an unsafe horizontal slot) would leave the follower holding its *last*
-commanded position indefinitely, which isn't obviously safer than holding
-at a known, configured-safe minimum altitude.
+This is a *clamp*, not one of the pass/fail checks: the waypoint still gets
+emitted, with the follower still tracking the leader's lateral (lat/lon)
+position, and only the vertical component overridden to the floor. Rejecting
+the waypoint instead, the way an unsafe horizontal slot is rejected, would
+leave the follower holding its *last* commanded position indefinitely, which
+is not obviously safer than holding at a known, configured-safe minimum
+altitude. The clamp also raises a condition code, which reaches the pilot's
+OSD if they have wired up the condition GVAR.
 
 ```
    alt_cm
@@ -300,11 +306,11 @@ at a known, configured-safe minimum altitude.
      |   ┌─────────────────────────┐
      |   │ vertical_m offset       │
      |   ├─────────────────────────┤
-     |   │ peer->relalt            │  same three terms as step 4 ...
+     |   │ peer.alt_m − self.alt_m │  same three terms as step 4 ...
      |   ├─────────────────────────┤
-     |   │ local_altitude_cm()     │
+     |   │ localAltitudeCm()       │
      |   └─────────────────────────┘
-     |   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  FOLLOW_MIN_ALT_M floor — if the sum
+     |   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  minAltM floor: if the sum
      |                                lands below this line, it's raised
      |                                back up to it before emitting
      |   0 ─────────────────────────  follower's home altitude
@@ -319,10 +325,12 @@ the leader's current course (step 1) → convert to distance + bearing
 great-circle arc to get the target lat/lon (step 3) → add up altitude
 separately (step 4) → clamp the result to the configured altitude floor
 (step 4b) → hand `(lat_1e7, lon_1e7, alt_cm)` to
-`MSPManager::sendFollowWaypoint()` (`FollowManager.cpp:295`), which packages
-it as waypoint #255, INAV's follow-me slot.
+`IFollowFc::sendFollowWaypoint()`, implemented by `src/hal/MspFcLink`, which
+packages it as waypoint #255, INAV's follow-me slot.
 
-Before any of this is sent, `targetSane()` (`FollowManager.cpp:213-244`)
-runs some independent safety checks (minimum separation, runtime distance
-sanity) — those don't change the math above, they just decide whether to
-trust and emit the result.
+Before any of this is sent, two independent safety checks run:
+`offsetGeometrySane()` (minimum separation, and minimum vertical separation for
+a stacked slot) and `targetTooFar()` (the solved target must be within
+`maxTargetDistM` of the follower's own position). Neither changes the math
+above. They decide whether to trust and emit the result, and a failure emits
+nothing at all for that cycle rather than emitting something unsafe.

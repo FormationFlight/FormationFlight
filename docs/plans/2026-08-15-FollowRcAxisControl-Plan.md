@@ -1,5 +1,14 @@
 # FormationFlight — In-Flight RC Control of the Follow Slot — Implementation Plan
 
+> *Historical design record.* This describes the v1-era implementation:
+> `src/lib/Follow` (unbuilt today), the `/followmanager/*` REST endpoints, EEPROM
+> persistence and 1-6 slot ids. Follow now runs as `ff::FollowController` in
+> `lib/ff_core/follow.*`, peers are 32-bit UIDs, and configuration is one JSON
+> document reached through the API in [`../v2-web-api.md`](../v2-web-api.md).
+> Current behavior is documented in
+> [`../user-guide-follow-mode.md`](../user-guide-follow-mode.md). Kept for the
+> reasoning, not as instructions to build from.
+
 **Spec:** [`docs/spec/2026-08-15-FollowRcAxisControl.md`](../spec/2026-08-15-FollowRcAxisControl.md)
 **Depends on:** [`2026-07-31-FollowMeOnInav-Plan.md`](2026-07-31-FollowMeOnInav-Plan.md) and [`2026-08-13-FollowStatusOsdGvar-Plan.md`](2026-08-13-FollowStatusOsdGvar-Plan.md) — both fully shipped. `FollowRuntimeConfig`, EEPROM persistence, `conditionFlagsGvarIndex`, and `updateStatusGvars()` all exist today and are extended, not built from scratch, by this plan.
 **Status:** Draft for review

@@ -1,5 +1,14 @@
 # FormationFlight — Follow-Mode Speed Autothrottle (INAV GVAR) — Implementation Plan
 
+> *Historical design record.* This describes the v1-era implementation:
+> `src/lib/Follow` (unbuilt today), the `/followmanager/*` REST endpoints, EEPROM
+> persistence and 1-6 slot ids. Follow now runs as `ff::FollowController` in
+> `lib/ff_core/follow.*`, peers are 32-bit UIDs, and configuration is one JSON
+> document reached through the API in [`../v2-web-api.md`](../v2-web-api.md).
+> Current behavior is documented in
+> [`../user-guide-follow-mode.md`](../user-guide-follow-mode.md). Kept for the
+> reasoning, not as instructions to build from.
+
 **Spec:** [`docs/spec/2026-08-28-FollowSpeedAutothrottle.md`](../spec/2026-08-28-FollowSpeedAutothrottle.md)
 **Depends on:**
 - [`2026-07-31-FollowMeOnInav-Plan.md`](2026-07-31-FollowMeOnInav-Plan.md) — `PeerLock`, the position-waypoint stream, and the `/peermanager/spoof` + hexagon-patrol bench tooling this plan's tests reuse throughout.

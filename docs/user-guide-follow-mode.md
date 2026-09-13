@@ -128,9 +128,9 @@ cannot see you), triggered but unlocked, or a failed RC pre-arm check (§7.4).
 This is where you set *where* the follower flies relative to the leader. Each
 of the three axes has a direction picker and a gap distance in meters:
 
-- *Fore / aft*: Ahead, Center or Behind.
-- *Left / right*: Left, Center or Right.
-- *Up / down*: Above, Level or Below.
+- *Fore / aft*: `AHEAD`, `IN LINE` or `BEHIND`.
+- *Left / right*: `LEFT`, `CENTRED` or `RIGHT`.
+- *Up / down*: `ABOVE`, `LEVEL` or `BELOW`.
 
 "Behind" plus "15 m" means 15 m behind the leader. The card also prints the
 raw stored values underneath, as `ofsLongM` (+ahead / -behind), `ofsLatM`
@@ -140,7 +140,7 @@ numbers the API uses (§11).
 See [§9's diagram](#9-slot-geometry-diagram) for a picture of what each axis
 means and how the leader's own heading rotates the whole slot with it.
 
-The factory default is *Behind 15 m, Center, Above 10 m* ("chase-high"), chosen
+The factory default is *behind 15 m, centred, above 10 m* ("chase-high"), chosen
 because it keeps the follower clear of the leader's rotor wash while still
 being a sane geometry to bench-test with the leader sitting still or moving on
 the ground.
@@ -196,18 +196,20 @@ sideways or backwards without yawing.
 
 | Mode | Behavior |
 |---|---|
-| *Off* | Do not touch heading at all. Leave it wherever pilot stick input or the previous mode left it. Probably best when the follower is a fixed wing. |
-| *Direction of travel* (`COURSE`) | Nose points the way the leader is currently heading, not necessarily the way the follower itself is moving. |
+| *Off* (`OFF`) | Do not touch heading at all. Leave it wherever pilot stick input or the previous mode left it. Probably best when the follower is a fixed wing. |
+| *Course* (`COURSE`) | Nose points the way the leader is currently heading, not necessarily the way the follower itself is moving. |
 | *Point at leader* (`POINT_LEADER`) | Nose always points toward the leader's live position. Useful for keeping a camera aimed at the leader regardless of formation position. |
-| *Fixed compass heading* (`FIXED`) | Holds an absolute compass heading you enter (0 deg = North, 90 deg = East), regardless of the leader. |
-| *Offset from course* (`COURSE_RELATIVE`) | Like Direction of travel, but with a configurable degree offset added. For example +90 deg points the nose 90 deg clockwise from the leader's course. |
+| *Fixed* (`FIXED`) | Holds the absolute compass heading you enter in *Heading angle* (0 deg = North, 90 deg = East), regardless of the leader. |
+| *Course relative* (`COURSE_RELATIVE`) | The leader's course plus the *Heading angle* offset. For example +90 deg points the nose 90 deg clockwise from the leader's course. |
 
 *Important:* any mode other than Off requires INAV's `HEADING HOLD` box to be
 active on the follower (assigned in Configurator's Modes tab, §2.1). This is a
 separate mode from `NAV POSHOLD` and `GCS NAV`, and heading commands are
 silently ignored by the flight controller if it is not switched on. If you
 configure a heading mode and the nose is not doing what you expect, check this
-first.
+first. Waypoint 255's own heading field is currently inert for a follower in
+INAV 9.x, so `MSP_SET_HEAD` is what actually moves the nose, and that only
+reaches the yaw PID while `HEADING HOLD` is on.
 
 ### RC axis control, GVARs and autothrottle
 
@@ -876,7 +878,9 @@ What you need to know:
   the response is `400` with a plain-text message naming the offending field,
   which is the same string the UI shows.
 - `POST /api/config/save` (empty body) persists the live configuration to
-  flash. Without it your change is gone at the next power cycle.
+  flash. Without it your change is gone at the next power cycle. Saving twice
+  within 2 s is refused with `429`: flash has a finite number of erase cycles
+  and a script has an infinite number of retries.
 - `GET /api/status` includes a `follow` object with the live state: lock state,
   gate, locked UID and name, last target, GVAR values, live and pre-arm
   offsets, and the autothrottle state. Fields that have never been computed are
@@ -901,7 +905,7 @@ curl -s http://192.168.4.1/api/status
 | `ofsLatM` | number | Lateral offset, meters (+right / -left) |
 | `ofsVertM` | number | Vertical offset, meters (+above / -below) |
 | `triggerMode` | string | `"GCSNAV"` or `"AUX"`. Read-only: compiled in, ignored on the way back in |
-| `targetUid` | number | Peer UID to pin to, or `0` for "nearest followable peer" |
+| `targetUid` | string | Peer UID to pin to as 8 hex characters, or `"00000000"` for "nearest followable peer" |
 | `emitHz` | number | Control cycle and target-send rate, Hz. Must be greater than 0 |
 | `peerTimeoutMs` | number | Leader position staleness timeout, ms. Must be greater than 0 |
 | `minSepM` | number | Minimum allowed 3D separation from the leader, meters |
@@ -928,10 +932,9 @@ curl -s http://192.168.4.1/api/status
 
 Two things to watch:
 
-- `targetUid` is a plain JSON *number*, unlike every UID elsewhere in the API,
-  which is a lower-case 8-character hex *string*. The web UI does the
-  conversion for you; a script has to do it itself. `0x1a2b3c4d` is
-  `439041101`.
+- `targetUid` is a UID string, the same 8-character lower-case hex form the
+  peer table and the frame log use, so you can copy one straight off the
+  dashboard. Fewer digits are accepted on the way in and padded out.
 - All GVAR indices must be unique across status, condition, target speed and
   engage, and all RC channels unique across the three axes and the autothrottle
   arm channel. The firmware rejects a collision outright, with the message
@@ -945,7 +948,7 @@ Example `follow` block, at the shipped defaults:
   "ofsLatM": 0,
   "ofsVertM": 10,
   "triggerMode": "GCSNAV",
-  "targetUid": 0,
+  "targetUid": "00000000",
   "emitHz": 4,
   "peerTimeoutMs": 1500,
   "minSepM": 8,

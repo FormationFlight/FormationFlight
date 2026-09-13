@@ -4,7 +4,7 @@ This explains how to turn local code changes into flashable firmware, both for a
 
 ## How the build system fits together
 
-FormationFlight is a [PlatformIO](https://platformio.org/) project (`platformio.ini` at the repo root). There is no separate "compile" step you write by hand — PlatformIO reads the `.ini` config, resolves the target environment, and drives the Arduino framework toolchain for you.
+FormationFlight is a [PlatformIO](https://platformio.org/) project (`platformio.ini` at the repo root). There is no separate "compile" step you write by hand - PlatformIO reads the `.ini` config, resolves the target environment, and drives the Arduino framework toolchain for you.
 
 A few things happen automatically on every build, via `extra_scripts` in `platformio.ini`:
 
@@ -14,16 +14,24 @@ A few things happen automatically on every build, via `extra_scripts` in `platfo
 
 Targets are split across `targets/*.ini` (`diy_espnow.ini`, `diy_lora.ini`, `legacy.ini`, `expresslrs.ini`), each defining PlatformIO environments named like `diy_ESPNOW_esp8266_via_UART` or `expresslrs_rx_2400_via_WiFi`. The `_via_UART` / `_via_WiFi` suffix picks the upload method; the rest of the name identifies the hardware/radio combination. You build one environment (one target) at a time.
 
+There is also a host-native environment, `native`, which builds nothing for hardware: it compiles the pure logic in `lib/ff_core` and runs its unit tests on your machine. It deliberately overrides `extra_scripts` to empty, so none of the Arduino build steps above run for it.
+
+## What the v2 build actually compiles
+
+`build_src_filter` in `platformio.ini` restricts the firmware build to `src/main.cpp` and `src/hal/`. Everything under `src/lib/` is the v1 manager stack, kept in the tree as unbuilt reference until each family is ported, and excluded from every target. If you change a file under `src/lib/` and nothing happens, that is why.
+
+Most of the actual logic is in `lib/ff_core/`, which is platform-independent and compiles for the host as well as for ESP32 and ESP8266.
+
 ## Building locally
 
 ### Option A: VS Code + PlatformIO (recommended for day-to-day dev)
 
 1. Install [VS Code](https://code.visualstudio.com/) and the [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode).
-2. Open the repo folder in VS Code — PlatformIO will detect `platformio.ini` automatically.
+2. Open the repo folder in VS Code - PlatformIO will detect `platformio.ini` automatically.
 3. In the PlatformIO sidebar, pick the environment matching your hardware (e.g. `diy_ESPNOW_esp8266_via_UART`).
 4. Click **Build** to compile, or **Upload** to compile and flash over the selected port.
 
-PlatformIO manages all dependencies (Arduino cores, libraries, toolchains) itself — no manual toolchain setup is needed.
+PlatformIO manages all dependencies (Arduino cores, libraries, toolchains) itself - no manual toolchain setup is needed.
 
 ### Option B: PlatformIO CLI
 
@@ -47,7 +55,7 @@ Build output (the compiled firmware) lands in `.pio/build/<env-name>/firmware.bi
 
 ## Building for ExpressLRS (ELRS) receivers
 
-ELRS receiver targets live in `targets/expresslrs.ini` and are built exactly like any other target — pick the environment matching your receiver's band/hardware and run PlatformIO against it. There is no separate ELRS-specific tooling; the differences between receivers are just build flags (pin mapping, RF band, PA/LNA, antenna diversity, RGB LED) baked into each environment.
+ELRS receiver targets live in `targets/expresslrs.ini` and are built exactly like any other target - pick the environment matching your receiver's band/hardware and run PlatformIO against it. There is no separate ELRS-specific tooling; the differences between receivers are just build flags (pin mapping, RF band, PA/LNA, antenna diversity, RGB LED) baked into each environment.
 
 Available `expresslrs_rx_*` environments (all with `_via_UART` and `_via_WiFi` upload variants):
 
@@ -74,13 +82,26 @@ pio run -e expresslrs_rx_2400_via_WiFi
 
 Swap in the environment name for your specific band/hardware from the table above. As with any target, the compiled binary ends up at `.pio/build/<env-name>/firmware.bin`. In VS Code, the same environments appear in the PlatformIO sidebar and can be built/uploaded with a click.
 
-All ELRS RX targets build on the ESP8266 (`env_common_esp82xx`) base and share LoRa pin config for their RF module family — see `targets/expresslrs.ini` for the exact pin/flag definitions if you're adding support for new ELRS hardware.
+All ELRS RX targets build on the ESP8266 (`env_common_esp82xx`) base and share LoRa pin config for their RF module family - see `targets/expresslrs.ini` for the exact pin/flag definitions if you're adding support for new ELRS hardware.
+
+## Running the tests
+
+Everything off-hardware runs from one script:
+
+```bash
+./scripts/run_tests.sh
+```
+
+That is the native Unity suites (`pio test -e native`), the web UI's `follow-logic.js` tests (`node --test test/follow-logic.test.js`), and the mock server's API and config-validation tests (`python3 test/test_mock_server.py`), which is the same set `.github/workflows/test.yml` runs. Run them individually if you only touched one area. `pio test -e native` is the one that covers the protocol, crypto, peer table, rate control, geodesy, Follow and the traffic simulator.
+
+For UI work, `python3 scripts/mock_server.py` serves `html/` against an in-memory node implementing every endpoint in [`../v2-web-api.md`](../v2-web-api.md), so the web UI can be developed with no hardware attached.
 
 ## After your changes, before opening a PR
 
 1. Build at least one representative target locally (`pio run -e <target>`) to confirm the change compiles.
-2. If you touched anything under `html/`, rebuild so `scripts/build_html.py` regenerates the embedded web UI — this runs automatically as part of `pio run`, but a stale `.pio/` cache can hide breakage, so a clean build (`pio run -e <target> -t clean && pio run -e <target>`) is worth doing if you're unsure.
-3. Push/open a PR. GitHub Actions (`.github/workflows/build.yml`) builds every `_UART`/`_via_UART` environment across all `targets/*.ini` files automatically and uploads the resulting `.bin` files as workflow artifacts, so you can sanity-check the full matrix without building every target yourself.
+2. Run `./scripts/run_tests.sh`. CI runs the same suites, so a failure there is a failure here.
+3. If you touched anything under `html/`, rebuild so `scripts/build_html.py` regenerates the embedded web UI - this runs automatically as part of `pio run`, but a stale `.pio/` cache can hide breakage, so a clean build (`pio run -e <target> -t clean && pio run -e <target>`) is worth doing if you're unsure.
+4. Push/open a PR. GitHub Actions (`.github/workflows/build.yml`) builds every `_UART`/`_via_UART` environment across all `targets/*.ini` files automatically and uploads the resulting `.bin` files as workflow artifacts, so you can sanity-check the full matrix without building every target yourself.
 
 ## What CI does differently
 
@@ -92,4 +113,4 @@ The `build.yml` workflow:
 - Collects `firmware.bin` (and `.bin.gz` if present) per target, plus `bootloader_dio_40m.bin`/`partitions.bin`/`boot_app0.bin` for ESP32 targets, into `~/artifacts/`.
 - On a `v*` tag push, packages all artifacts into a GitHub Release automatically.
 
-You don't need to replicate this locally — it's mainly useful context if a CI build fails for a target you didn't test.
+You don't need to replicate this locally - it's mainly useful context if a CI build fails for a target you didn't test.

@@ -1,5 +1,12 @@
 # FormationFlight — Follow Module Test Suite — Engineering Spec
 
+> *Historical design record.* This was written against the v1 `src/lib/Follow`
+> and its web panel. The suite has since been ported: the Follow tests live in
+> `test/test_follow` against `lib/ff_core/follow.*`, with `test/follow-logic.test.js`
+> and `test/test_mock_server.py` checking the JS and Python validators against the
+> shared fixture in `fixtures/follow-config-cases.json`. Current behavior is
+> documented in [`../user-guide-follow-mode.md`](../user-guide-follow-mode.md).
+
 **Status:** Draft — not yet planned or implemented
 **Target:** `src/lib/Follow/` (C++: `FollowManager.{h,cpp}`, `FollowConfig.h`) and `html/follow.js`
 **Depends on / asserts against:**
