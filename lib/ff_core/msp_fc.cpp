@@ -1,7 +1,7 @@
 #include "msp_fc.h"
 
 #include "msp_crc.h"
-#include "wire.h"
+#include "wire_format.h"
 
 namespace ff {
 

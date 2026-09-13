@@ -2,6 +2,12 @@
 //
 // Explicit little-endian (de)serialization helpers.
 //
+// Named wire_format.h, not wire.h, and it has to stay that way: Arduino's I2C
+// library is Wire.h, and on a case-insensitive filesystem (Windows, macOS) a
+// file called wire.h in this directory shadows it for the whole build. Anything
+// that pulls in Wire.h then gets byte-order helpers instead and fails with an
+// undeclared TwoWire, a long way from the actual cause. Linux CI never sees it.
+//
 // We serialize field-by-field rather than memcpy'ing packed structs so the wire
 // format is fixed regardless of host endianness, struct padding, or compiler.
 // This is what lets the same codec run on-device and under native host tests.

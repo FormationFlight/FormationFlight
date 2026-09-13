@@ -53,6 +53,17 @@ With a single node powered, on the **Radios** page:
 - `rx_dropped` and `tx_dropped` must stay at zero. Either one climbing on an
   idle single node means something is wrong before any RF is involved.
 
+## 3b. T-Beam only: the PMIC
+
+The GPS, the LoRa radio and the peripheral rail all hang off an AXP192, and all
+three come up off. `/api/status` carries a `power` object with battery and
+supply voltage when the PMIC answered on I2C.
+
+**No `power` object on a T-Beam means the AXP192 did not answer**, and the GPS
+and LoRa radio therefore have no power. The serial log says so at boot. Do not
+spend time on the GPS driver before checking this: it will baud-sweep a module
+that is not powered and report nothing useful.
+
 ## 4. The simulator, before any second board
 
 This is the cheapest way to exercise the whole receive path, and it runs the

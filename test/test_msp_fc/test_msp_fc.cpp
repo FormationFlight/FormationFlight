@@ -6,7 +6,7 @@
 #include "msp_crc.h"
 #include "msp_fc.h"
 #include "msp_parser.h"
-#include "wire.h"
+#include "wire_format.h"
 
 using namespace ff;
 

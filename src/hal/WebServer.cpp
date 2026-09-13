@@ -339,6 +339,14 @@ void fillStatus(WebDeps& d, JsonObject root) {
     sim["enabled"] = d.cfg->sim.enabled;
     sim["peers"] = d.sim != nullptr ? d.sim->peerCount() : 0;
 
+    // Only present on a board with a PMIC. A T-Beam reporting no power object
+    // means its AXP192 did not answer, which also means its GPS has no power.
+    if (d.power != nullptr && d.power->present()) {
+        JsonObject power = root.createNestedObject("power");
+        power["battery_v"] = d.power->batteryVolts();
+        power["supply_v"] = d.power->supplyVolts();
+    }
+
     JsonObject wifi = root.createNestedObject("wifi");
     wifi["mode"] = d.cfg->wifi.ap ? "ap" : "ap_sta";
     // The channel ESP-NOW is actually on. Two nodes on different channels cannot

@@ -1,6 +1,6 @@
 #include "ubx.h"
 
-#include "wire.h"
+#include "wire_format.h"
 
 namespace ff {
 

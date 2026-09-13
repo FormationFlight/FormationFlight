@@ -17,6 +17,7 @@
 #include "config.h"
 #include "crypto.h"
 #include "follow.h"
+#include "hal/BoardPower.h"
 #include "hal/ConfigStore.h"
 #include "hal/MspFcLink.h"
 #include "hal/MspRadarOutput.h"
@@ -45,6 +46,7 @@ namespace {
 
 ff::Settings g_settings;
 ff::ConfigStore g_store;
+ff::BoardPower g_power;
 
 ff::RadioHub g_hub;
 ff::RadioEspNow g_espnow;
@@ -145,6 +147,11 @@ void applyLiveConfig(const ff::Settings& cfg) {
 void setup() {
     g_uid = deviceUid();
     randomSeed(micros() ^ g_uid);
+
+    // Power rails before anything that lives on them. On the T-Beam the GPS and
+    // the LoRa radio are behind a PMIC and come up off, so bringing SPI up first
+    // would be initialising an unpowered module.
+    g_power.begin();
 
     // Configuration first: it decides which radios come up, and with what key.
     g_store.begin();
@@ -264,6 +271,7 @@ void setup() {
     web.fw_version = FIRMWARE_VERSION;
     web.uid = g_uid;
     web.wifi_channel = g_wifi_channel;
+    web.power = &g_power;
     web.on_config_applied = applyLiveConfig;
     g_web.begin(web);
 }

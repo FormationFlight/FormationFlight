@@ -212,6 +212,10 @@ Done and committed on `v2`:
   - **Observability**: per-radio counters and a 32-entry frame log on the Node,
     which is what makes "one medium deaf while the other works" visible instead
     of being buried in an aggregate.
+  - **Board power** (`hal/BoardPower`): the T-Beam's AXP192 PMIC gates the GPS,
+    the LoRa radio and the peripheral rail, all of which come up off. Ported from
+    v1's PowerManager and run before anything that lives on those rails. Closes
+    the last Phase 1 deferral.
   - **Simulator** (`ff_core/sim_traffic` + `hal/SimRadio`): peer motion in
     closed form, encoded into real packets, encrypted with the real group key,
     and pushed through `Node::onReceive`. The HITL path exercises the receive
@@ -223,10 +227,6 @@ real firmware links.
 
 Remaining / deferred:
 
-- **T-Beam GPS power** — the onboard GPS is powered by the AXP192 PMIC; enabling
-  that rail (v1's TBeamPower) is not yet ported, so the direct-GPS driver runs but
-  the T-Beam module stays unpowered until that follow-up lands. Any externally
-  powered GPS UART works today.
 - **On-device validation** — builds are compile-verified only; no hardware bring-up
   has been done yet.
 - **Legacy code** — the v1 managers remain in `src/lib` (unbuilt) as reference for

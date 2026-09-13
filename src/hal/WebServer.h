@@ -6,6 +6,7 @@
 #include <Update.h>
 #endif
 
+#include "BoardPower.h"
 #include "ConfigStore.h"
 #include "MspFcLink.h"
 #include "SimRadio.h"
@@ -43,6 +44,7 @@ struct WebDeps {
     const char* fw_version = "dev";
     uint32_t uid = 0;
     uint8_t wifi_channel = 1;
+    BoardPower* power = nullptr;  // null on boards with nothing to report
     // Called after a successful config POST so the caller can push whatever can
     // be changed without a reboot into the live objects.
     void (*on_config_applied)(const Settings&) = nullptr;

@@ -81,6 +81,7 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
     "prearm_offset": { "long_m": -15, "lat_m": 0, "vert_m": 10 }
   },
   "sim": { "enabled": false, "peers": 0 },
+  "power": { "battery_v": 4.02, "supply_v": 5.05 },
   "wifi": { "mode": "ap", "channel": 1, "configured_channel": 1, "ap_clients": 0 },
   "reboot_required": false,
   "config_corrupt": false
@@ -129,6 +130,10 @@ rather than on the air: receive because the driver's ring filled before the loop
 drained it, transmit because the radio was still busy with the previous frame.
 Neither shows up in any other counter, and either one climbing means the node is
 over its budget.
+
+`power` is present only on a board with a power-management IC that answered
+(the T-Beam's AXP192). Its absence on such a board is itself the diagnostic: the
+GPS and LoRa rails are unpowered. Boards without a PMIC never send it.
 
 `wifi.mode` is `"ap"` or `"ap_sta"`; in `ap_sta` the object also carries
 `sta_connected` and `sta_rssi`. `channel` is the channel the radio is actually

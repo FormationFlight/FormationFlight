@@ -1,6 +1,6 @@
 #include "protocol.h"
 
-#include "wire.h"
+#include "wire_format.h"
 
 namespace ff {
 
