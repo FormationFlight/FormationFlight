@@ -35,6 +35,16 @@ public:
     // Short identifier for status/telemetry (e.g. "ESPNOW", "SX127x").
     virtual const char* name() const = 0;
 
+    // Frames lost inside the driver rather than on the air: RX because the ring
+    // filled before the loop drained it, TX because the radio was still busy
+    // with the previous one. Both are invisible in the on-air counters and both
+    // mean the node is over its budget, so they belong in the status view.
+    virtual uint32_t rxDropped() const { return 0; }
+    virtual uint32_t txDropped() const { return 0; }
+
+    // False for a receive-only driver; see IRadioSet::radioTransmits().
+    virtual bool transmits() const { return true; }
+
     bool enabled() const { return enabled_; }
     void setEnabled(bool e) { enabled_ = e; }
 
@@ -50,6 +60,7 @@ public:
     // IRadioSet
     size_t radioCount() const override { return count_; }
     bool radioEnabled(size_t index) const override;
+    bool radioTransmits(size_t index) const override;
     double airtimeMs(size_t index, size_t payload_len) const override;
     void transmit(size_t index, const uint8_t* data, size_t len) override;
 

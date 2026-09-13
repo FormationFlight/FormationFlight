@@ -14,6 +14,10 @@ bool RadioHub::radioEnabled(size_t index) const {
     return index < count_ && radios_[index]->enabled();
 }
 
+bool RadioHub::radioTransmits(size_t index) const {
+    return radioEnabled(index) && radios_[index]->transmits();
+}
+
 double RadioHub::airtimeMs(size_t index, size_t payload_len) const {
     if (index >= count_) {
         return 0.0;

@@ -32,16 +32,26 @@
 // all encrypted. Hiding the UID would require trial-decrypting against every
 // known peer on every received frame, which an ESP8285 cannot afford.
 //
-// Replay: the counter is strictly increasing per sender. A frame whose counter
-// is not above the last one accepted from that UID is dropped, so a recorded
-// packet cannot be re-injected. Because the counter restarts at boot, a peer
-// that has been silent longer than the resync window (see kReplayResyncMs) is
-// allowed to restart its sequence - otherwise a rebooted aircraft could never
-// rejoin. Inside that window a replay is rejected; outside it, an attacker who
-// waits out the window can replay a frame once before the real node's next
-// beacon moves the counter past it. The exposure is bounded to stale position
-// data from a node that has been gone for seconds, which Follow's own
-// maxTargetDistM check already refuses to chase.
+// Replay: each sender has one counter, and the receiver keeps a sliding window
+// per sender (the RFC 4303 scheme) rather than a single high-water mark. A
+// frame is accepted once and only once; a duplicate or anything older than the
+// window is dropped, so a recorded packet cannot be re-injected.
+//
+// The window is what makes multi-radio work. A sender's counter advances across
+// all of its radios together, but the media have wildly different latency: an
+// ESP-NOW frame is on the air for well under a millisecond while a LoRa frame
+// takes tens, so the LoRa frame sent FIRST routinely arrives SECOND with a lower
+// counter. A strict "counter must exceed the last one" rule silently discards
+// every one of those, which looks exactly like a dead LoRa link. The window
+// accepts genuine reordering and still rejects genuine duplicates.
+//
+// Because the counter restarts at boot, a peer silent longer than the resync
+// window (see kReplayResyncMs) is allowed to restart its sequence - otherwise a
+// rebooted aircraft could never rejoin. Inside that window a replay is rejected;
+// outside it, an attacker who waits out the window can replay a frame once
+// before the real node's next beacon moves the counter past it. The exposure is
+// bounded to stale position data from a node that has been gone for seconds,
+// which Follow's own maxTargetDistM check already refuses to chase.
 //
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +78,12 @@ constexpr size_t kNonceLen = 13;
 // Deliberately several beacon intervals: long enough that a live node can never
 // trip it, short enough that a genuine reboot rejoins the formation quickly.
 constexpr uint32_t kReplayResyncMs = 10000;
+
+// How far behind the newest counter a frame may still be accepted, in packets.
+// Sized for cross-medium reordering, which is only ever a packet or two deep
+// (the fast medium cannot get more than a few frames ahead inside one slow
+// frame's airtime); 32 is generous and costs one word per tracked sender.
+constexpr uint32_t kReplayWindowBits = 32;
 
 // Derives the 128-bit group key from a passphrase: the first half of its
 // SHA-256. An empty passphrase yields a fixed, publicly known key, which is
@@ -106,10 +122,18 @@ public:
 private:
     struct ReplaySlot {
         uint32_t uid = 0;
-        uint32_t counter = 0;
+        // Highest counter accepted from this sender, and a bitmap of the
+        // kReplayWindowBits counters below it: bit i means (high - 1 - i) has
+        // already been seen.
+        uint32_t high = 0;
+        uint32_t window = 0;
         uint32_t last_ms = 0;
         bool used = false;
     };
+
+    // Decides whether `counter` from this sender is new. Updates the window on
+    // acceptance. `fresh` means first contact, where any counter is acceptable.
+    static bool acceptCounter(ReplaySlot& slot, uint32_t counter, bool reset);
 
     // Returns the slot for `uid`, allocating or evicting the least recently used
     // one as needed. `fresh` is set when the slot was just created, i.e. this is

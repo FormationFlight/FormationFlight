@@ -21,9 +21,11 @@ struct FakeRadioSet : IRadioSet {
     size_t n_radios = 1;
     double airtimes[kMaxRadios] = {14.0, 14.0, 14.0, 14.0};
     bool enabled_[kMaxRadios] = {true, true, true, true};
+    bool transmits_[kMaxRadios] = {true, true, true, true};
 
     size_t radioCount() const override { return n_radios; }
     bool radioEnabled(size_t i) const override { return enabled_[i]; }
+    bool radioTransmits(size_t i) const override { return enabled_[i] && transmits_[i]; }
     double airtimeMs(size_t i, size_t) const override { return airtimes[i]; }
     void transmit(size_t i, const uint8_t* d, size_t len) override {
         Tx t{};
@@ -48,6 +50,21 @@ struct FakeLocation : ILocationSource {
 
 struct NullCrypto : ICrypto {
     size_t encrypt(uint8_t*, size_t len, size_t) override { return len; }
+    bool decrypt(uint8_t*, size_t len, size_t& out_len, uint32_t) override {
+        out_len = len;
+        return true;
+    }
+};
+
+// Stamps a distinct byte on every frame it encrypts, so a test can tell whether
+// two radios got the same ciphertext or separately encrypted copies.
+struct StampingCrypto : ICrypto {
+    uint32_t calls = 0;
+    size_t encrypt(uint8_t* buf, size_t len, size_t cap) override {
+        if (cap <= len) return 0;
+        buf[len] = static_cast<uint8_t>(++calls);
+        return len + 1;
+    }
     bool decrypt(uint8_t*, size_t len, size_t& out_len, uint32_t) override {
         out_len = len;
         return true;
@@ -549,6 +566,106 @@ void test_transmissions_are_counted_and_logged_per_radio() {
     TEST_ASSERT_TRUE(saw_tx);
 }
 
+// An announce goes out on every radio, encrypted SEPARATELY for each. Encrypting
+// once and broadcasting the same bytes puts the same frame counter on both
+// media, and the receiver's replay check then correctly throws the second copy
+// away -- so announces would only ever land on whichever radio won the race, and
+// a peer would never be marked as heard on the other one. That failure is
+// invisible without two radios, which is exactly why it is pinned here.
+void test_announce_is_encrypted_separately_for_each_radio() {
+    FakeRadioSet radio;
+    radio.n_radios = 2;
+    FakeLocation location;
+    StampingCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    NodeConfig cfg = baseConfig();
+    cfg.announce_interval_ms = 100;
+    Node node(cfg, deps);
+    node.begin(0);
+    node.poll(100);
+
+    // One announce, two radios, two encrypt calls, two different frames.
+    size_t announces[2] = {0, 0};
+    const uint8_t* first[2] = {nullptr, nullptr};
+    size_t first_len[2] = {0, 0};
+    for (auto& t : radio.sent) {
+        if (t.data[1] == static_cast<uint8_t>(PacketType::Announce)) {
+            if (announces[t.radio] == 0) {
+                first[t.radio] = t.data;
+                first_len[t.radio] = t.len;
+            }
+            announces[t.radio]++;
+        }
+    }
+    TEST_ASSERT_EQUAL_size_t(1, announces[0]);
+    TEST_ASSERT_EQUAL_size_t(1, announces[1]);
+    TEST_ASSERT_NOT_NULL(first[0]);
+    TEST_ASSERT_NOT_NULL(first[1]);
+    TEST_ASSERT_EQUAL_size_t(first_len[0], first_len[1]);
+    // Same payload, different cipher output: separately encrypted.
+    TEST_ASSERT_NOT_EQUAL(0, std::memcmp(first[0], first[1], first_len[0]));
+}
+
+// A disabled radio must not be encrypted for at all. Encrypting and discarding
+// would burn a frame counter on something nobody ever hears, opening a gap in
+// the sequence the receiver's replay window then has to absorb for nothing.
+void test_disabled_radio_is_not_announced_to() {
+    FakeRadioSet radio;
+    radio.n_radios = 2;
+    radio.enabled_[1] = false;
+    FakeLocation location;
+    StampingCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    NodeConfig cfg = baseConfig();
+    cfg.announce_interval_ms = 100;
+    Node node(cfg, deps);
+    node.begin(0);
+    node.poll(100);
+
+    size_t announces = 0;
+    for (auto& t : radio.sent) {
+        if (t.data[1] == static_cast<uint8_t>(PacketType::Announce)) {
+            announces++;
+            TEST_ASSERT_EQUAL_size_t(0, t.radio);  // never the disabled one
+        }
+    }
+    TEST_ASSERT_EQUAL_size_t(1, announces);
+    TEST_ASSERT_EQUAL_size_t(0, radio.countForRadio(1));
+
+    // One encrypt for that announce, and one per beacon that actually went out.
+    TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(radio.sent.size()), crypto.calls);
+}
+
+// A receive-only radio -- the traffic simulator -- must never be transmitted on.
+// Beaconing into it burns frame counters on frames nobody can hear and, worse,
+// shows a phantom transmitting radio in the status view at exactly the moment
+// someone is trying to work out why a real radio is quiet.
+void test_receive_only_radio_is_never_transmitted_on() {
+    FakeRadioSet radio;
+    radio.n_radios = 2;
+    radio.transmits_[1] = false;  // the simulator
+    FakeLocation location;
+    location.loc.valid = true;
+    NullCrypto crypto;
+    NodeDeps deps{&radio, &location, &crypto, nullptr, rngHalf, nullptr};
+    NodeConfig cfg = baseConfig();
+    cfg.announce_interval_ms = 100;
+    Node node(cfg, deps);
+    node.begin(0);
+    for (uint32_t t = 10; t <= 2000; t += 10) {
+        node.poll(t);
+    }
+
+    TEST_ASSERT_TRUE(radio.countForRadio(0) > 0);
+    TEST_ASSERT_EQUAL_size_t(0, radio.countForRadio(1));
+    TEST_ASSERT_EQUAL_UINT32(0, node.radioStats(1).tx);
+
+    // But it still receives: that is the whole point of it.
+    injectPeer(node, 0xABCD, 2000, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, node.radioStats(1).rx_ok);
+    TEST_ASSERT_EQUAL_UINT32(1, node.activePeerCountOn(1, 2000));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_beacons_at_min_rate_when_alone);
@@ -571,5 +688,8 @@ int main(int, char**) {
     RUN_TEST(test_own_frame_heard_back_is_logged_as_self_not_as_an_error);
     RUN_TEST(test_undecodable_frame_is_counted_as_a_decode_failure);
     RUN_TEST(test_transmissions_are_counted_and_logged_per_radio);
+    RUN_TEST(test_announce_is_encrypted_separately_for_each_radio);
+    RUN_TEST(test_disabled_radio_is_not_announced_to);
+    RUN_TEST(test_receive_only_radio_is_never_transmitted_on);
     return UNITY_END();
 }

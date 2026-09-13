@@ -35,6 +35,7 @@ public:
 
     // RadioDriver
     void transmit(const uint8_t* /*data*/, size_t /*len*/) override {}
+    bool transmits() const override { return false; }
     double airtimeMs(size_t /*payload_len*/) const override { return 0.1; }
     void serviceRx() override;
     bool popRx(RxFrame& out) override;

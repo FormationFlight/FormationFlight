@@ -75,6 +75,11 @@ struct WifiSettings {
     // Password for our own AP. Empty leaves the AP open, which is the v1
     // behaviour and fine on a field bench.
     char ap_psk[kMaxPskLen + 1] = {0};
+    // WiFi channel for our AP, and therefore for ESP-NOW: the two share one
+    // radio and cannot be on different channels. Every node that should hear
+    // every other over ESP-NOW must agree on this. 1, 6 and 11 are the
+    // non-overlapping choices in 2.4 GHz.
+    uint8_t channel = 1;
 };
 
 struct SimSettings {

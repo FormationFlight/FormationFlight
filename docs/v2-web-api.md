@@ -49,7 +49,7 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
       "tx": 412, "rx_ok": 389, "rx_crypto_fail": 0, "rx_replay": 0,
       "rx_decode_fail": 0, "rx_self": 412, "last_rssi": -52,
       "last_rx_age_ms": 84, "beacon_interval_ms": 100, "airtime_ms": 0.4,
-      "peers": 2
+      "peers": 2, "rx_dropped": 0, "tx_dropped": 0
     }
   ],
   "peers": [
@@ -81,6 +81,7 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
     "prearm_offset": { "long_m": -15, "lat_m": 0, "vert_m": 10 }
   },
   "sim": { "enabled": false, "peers": 0 },
+  "wifi": { "mode": "ap", "channel": 1, "configured_channel": 1, "ap_clients": 0 },
   "reboot_required": false,
   "config_corrupt": false
 }
@@ -123,12 +124,32 @@ UI can make it obvious the numbers are not real RF.
 the peer reports itself armed, bit 1 (`2`) it has a GPS fix. A peer without a
 fix is tracked and displayed but is never followable.
 
+`radios[].rx_dropped` and `tx_dropped` count frames lost *inside the node*
+rather than on the air: receive because the driver's ring filled before the loop
+drained it, transmit because the radio was still busy with the previous frame.
+Neither shows up in any other counter, and either one climbing means the node is
+over its budget.
+
+`wifi.mode` is `"ap"` or `"ap_sta"`; in `ap_sta` the object also carries
+`sta_connected` and `sta_rssi`. `channel` is the channel the radio is actually
+on and `configured_channel` is the one `wifi.channel` asked for. **They differ
+when the node has joined an external network, because the router owns the
+channel then.** That matters far more than it looks: ESP-NOW rides whatever
+channel the WiFi radio is on, so two nodes on different channels cannot hear
+each other over ESP-NOW while both still report themselves perfectly healthy.
+It is the single most confusing failure this firmware can produce, which is why
+both numbers are published.
+
 ## GET /api/config
 
 The full configuration, exactly as `lib/ff_core/config.h` defines it. Secrets
 (`security.passphrase`, `wifi.psk`, `wifi.ap_psk`) come back as `"••••••••"`
 when set and `""` when not. Posting that placeholder back means "leave it
 alone", so the UI can round-trip the document it was given.
+
+`wifi.channel` (1-13) sets the AP's channel and therefore ESP-NOW's. Every node
+that should hear every other over ESP-NOW must agree on it. 1, 6 and 11 are the
+non-overlapping choices.
 
 ## POST /api/config
 

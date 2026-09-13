@@ -25,13 +25,22 @@ public:
     bool popRx(RxFrame& out) override { return rx_.pop(out); }
     const char* name() const override { return "SX128x"; }
 
-    uint32_t rxDropped() const { return rx_.dropped(); }
+    uint32_t rxDropped() const override { return rx_.dropped(); }
+    uint32_t txDropped() const override { return tx_dropped_; }
     void onDioIsr() { dio_pending_ = true; }
 
 private:
+    // If a transmit-done interrupt is ever missed the radio would sit in
+    // transmit forever and the link would simply stop, with nothing in the
+    // counters to say why. Recover after this long instead.
+    static constexpr uint32_t kTxTimeoutMs = 500;
+
     SX1281* radio_ = nullptr;
     volatile bool dio_pending_ = false;
     bool transmitting_ = false;
+    uint32_t tx_start_ms_ = 0;
+    uint32_t tx_dropped_ = 0;
+    uint32_t tx_timeouts_ = 0;
     SpscRing<RxFrame, 8> rx_;
 };
 

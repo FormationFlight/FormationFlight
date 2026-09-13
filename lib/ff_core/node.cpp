@@ -118,7 +118,7 @@ void Node::onMspRadarTick() {
 }
 
 void Node::sendBeacon(size_t index) {
-    if (deps_.radios == nullptr || !deps_.radios->radioEnabled(index)) {
+    if (deps_.radios == nullptr || !deps_.radios->radioTransmits(index)) {
         return;
     }
     NodeLocation loc =
@@ -169,25 +169,42 @@ void Node::sendAnnounce() {
     }
     pkt.capabilities = cfg_.capabilities;
 
-    uint8_t buf[kMaxRxFrame];
-    size_t len = encodeAnnounce(pkt, buf, sizeof(buf));
-    if (len == 0) {
+    uint8_t plain[kMaxRxFrame];
+    const size_t plain_len = encodeAnnounce(pkt, plain, sizeof(plain));
+    if (plain_len == 0) {
         return;
     }
-    if (deps_.crypto != nullptr) {
-        len = deps_.crypto->encrypt(buf, len, sizeof(buf));
-        if (len == 0) {
-            return;
-        }
-    }
-    // Announce (identity, not rate-controlled) goes out on every enabled radio.
+
+    // Announce (identity, not rate-controlled) goes out on every enabled radio,
+    // encrypted SEPARATELY for each. Encrypting once and broadcasting the same
+    // bytes would put the same frame counter on both media, and the receiver's
+    // replay check would correctly reject the second copy as a duplicate -- so
+    // announces would only ever land on whichever radio happened to arrive
+    // first, and the peer would never be marked as heard on the other one.
+    bool sent = false;
     for (size_t i = 0; i < radio_count_; i++) {
-        if (deps_.radios->radioEnabled(i)) {
-            deps_.radios->transmit(i, buf, len);
-            radio_stats_[i].tx++;
-            logFrame(i, cfg_.uid, len, 0, static_cast<uint8_t>(PacketType::Announce),
-                     FrameResult::Tx);
+        if (!deps_.radios->radioTransmits(i)) {
+            continue;
         }
+        uint8_t buf[kMaxRxFrame];
+        for (size_t b = 0; b < plain_len; b++) {
+            buf[b] = plain[b];
+        }
+        size_t len = plain_len;
+        if (deps_.crypto != nullptr) {
+            len = deps_.crypto->encrypt(buf, len, sizeof(buf));
+            if (len == 0) {
+                continue;
+            }
+        }
+        deps_.radios->transmit(i, buf, len);
+        radio_stats_[i].tx++;
+        logFrame(i, cfg_.uid, len, 0, static_cast<uint8_t>(PacketType::Announce),
+                 FrameResult::Tx);
+        sent = true;
+    }
+    if (!sent) {
+        return;
     }
     stats_.announces_sent++;
     stats_.last_tx_ms = sched_.now();

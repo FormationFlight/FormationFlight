@@ -78,23 +78,48 @@ void RadioSX128x::transmit(const uint8_t* data, size_t len) {
     digitalWrite(LORA_PIN_ANT, ant & 1);
     ant++;
 #endif
+    if (transmitting_) {
+        // A previous frame is still on the air. Calling startTransmit() again
+        // here would abandon it mid-packet and put garbage on the channel. The
+        // Node beacons each radio independently and announces fan out to all of
+        // them, so two sends CAN land in the same loop iteration; ALOHA is built
+        // to tolerate a dropped beacon, a corrupted one it is not.
+        tx_dropped_++;
+        return;
+    }
     transmitting_ = true;
+    tx_start_ms_ = millis();
     radio_->startTransmit(const_cast<uint8_t*>(data), len);
 }
 
 void RadioSX128x::serviceRx() {
-    if (radio_ == nullptr || !dio_pending_) {
+    if (radio_ == nullptr) {
+        return;
+    }
+
+    // Watchdog first, and outside the dio_pending_ shortcut: a missed
+    // transmit-done interrupt leaves transmitting_ stuck true, every later
+    // transmit is then dropped by the guard above, and the radio goes quiet with
+    // nothing but txDropped() climbing to say so.
+    if (transmitting_ && (millis() - tx_start_ms_) > kTxTimeoutMs) {
+        tx_timeouts_++;
+        transmitting_ = false;
+        radio_->finishTransmit();
+        radio_->startReceive();
+    }
+
+    if (!dio_pending_) {
         return;
     }
     dio_pending_ = false;
 
     const uint16_t flags = radio_->getIrqStatus();
 
+    // Both can be set: a packet may have arrived while we were still holding a
+    // completed transmit. Handle each, rather than returning after the first.
     if (flags & RADIOLIB_SX128X_IRQ_TX_DONE) {
         radio_->finishTransmit();
         transmitting_ = false;
-        radio_->startReceive();
-        return;
     }
 
     if ((flags & RADIOLIB_SX128X_IRQ_RX_DONE) &&

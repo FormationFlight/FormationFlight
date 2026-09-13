@@ -81,6 +81,7 @@ ff::FollowController* g_follow = nullptr;
 ff::WebServer g_web;
 
 uint32_t g_uid = 0;
+uint8_t g_wifi_channel = 1;
 
 // What the configuration said at boot. Some settings cannot be applied to a
 // running node -- the group key, and any radio that was never constructed --
@@ -167,9 +168,13 @@ void setup() {
 
     snprintf(g_boot.passphrase, sizeof(g_boot.passphrase), "%s", g_settings.security.passphrase);
 
-    // ESP-NOW brings up WiFi; do it before the MSP UART so nothing races on boot.
+    // WiFi first, once, and nothing may change its mode afterwards: ESP-NOW
+    // binds to the AP interface this creates. Getting this order wrong kills the
+    // 2.4 GHz link while every counter still reads healthy.
+    g_wifi_channel = ff::wifiBringUp(g_settings, g_uid);
+
     if (g_settings.radios.espnow_enabled) {
-        g_espnow.begin();
+        g_espnow.begin(g_wifi_channel);
         g_hub.add(&g_espnow);
         g_boot.espnow_constructed = true;
     }
@@ -258,12 +263,23 @@ void setup() {
     web.location = location;
     web.fw_version = FIRMWARE_VERSION;
     web.uid = g_uid;
+    web.wifi_channel = g_wifi_channel;
     web.on_config_applied = applyLiveConfig;
     g_web.begin(web);
 }
 
 void loop() {
     const uint32_t now = millis();
+
+    // A firmware upload is erasing and writing flash. On ESP8266 that stalls the
+    // CPU for milliseconds at a time with interrupts disabled, so beaconing
+    // through it achieves nothing except corrupt transmissions and a starved web
+    // server. Hold the radio work still until the upload finishes; the node
+    // reboots straight afterwards anyway.
+    if (g_web.otaActive()) {
+        g_web.loop(now);
+        return;
+    }
 
     // Manufacture any simulated traffic before the hub drains the radios, so
     // simulated frames are picked up in the same iteration they are produced.

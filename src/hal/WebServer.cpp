@@ -103,39 +103,58 @@ double deg1e7(int32_t v) { return static_cast<double>(v) / 1e7; }
 
 }  // namespace
 
+// The Arduino cores spell this differently on each platform. Returns by value:
+// the ESP8266 core hands back a String temporary, and taking c_str() off it
+// leaves a pointer to freed memory as soon as the expression ends.
+String updateErrorText() {
+#if defined(PLATFORM_ESP8266)
+    return Update.getErrorString();
+#else
+    return String(Update.errorString());
+#endif
+}
+
+uint8_t wifiBringUp(const Settings& cfg, uint32_t uid) {
+    char ap_ssid[40];
+    // The AP name carries the UID so several nodes on a bench can be told apart
+    // without connecting to each in turn.
+    std::snprintf(ap_ssid, sizeof(ap_ssid), "FormationFlight-%08x",
+                  static_cast<unsigned>(uid));
+
+    const bool join = !cfg.wifi.ap && cfg.wifi.ssid[0] != '\0';
+
+    // AP+STA when joining, never plain STA: ESP-NOW lives on the AP interface,
+    // and dropping it takes the 2.4 GHz link down with it.
+    WiFi.mode(join ? WIFI_AP_STA : WIFI_AP);
+
+    const char* psk = cfg.wifi.ap_psk[0] != '\0' ? cfg.wifi.ap_psk : nullptr;
+    WiFi.softAP(ap_ssid, psk, cfg.wifi.channel);
+
+    if (join) {
+        WiFi.begin(cfg.wifi.ssid, cfg.wifi.psk);
+        // Deliberately does not block: a node whose home network is out of range
+        // must still boot, beacon and fly. The association completes in the
+        // background, or it does not, and either way the radio work runs.
+    }
+    return wifiChannel();
+}
+
+uint8_t wifiChannel() {
+#if defined(PLATFORM_ESP8266)
+    return static_cast<uint8_t>(wifi_get_channel());
+#else
+    return static_cast<uint8_t>(WiFi.channel());
+#endif
+}
+
 void WebServer::begin(const WebDeps& deps) {
     instance_ = this;
     deps_ = deps;
-    startWifi();
+    // WiFi is already up: main() brings it up before the radios, because ESP-NOW
+    // binds to the interface this would otherwise reconfigure.
     server_ = new AsyncWebServer(80);
     registerRoutes();
     server_->begin();
-}
-
-void WebServer::startWifi() {
-    const Settings& cfg = *deps_.cfg;
-
-    char ap_ssid[40];
-    // The AP name carries the UID so several nodes on a bench are telling apart
-    // without having to connect to each in turn.
-    std::snprintf(ap_ssid, sizeof(ap_ssid), "FormationFlight-%08x",
-                  static_cast<unsigned>(deps_.uid));
-
-    if (!cfg.wifi.ap && cfg.wifi.ssid[0] != '\0') {
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(cfg.wifi.ssid, cfg.wifi.psk);
-        // Deliberately does not block: a node whose home network is out of range
-        // must still boot, beacon and fly. The station association completes in
-        // the background, or it does not, and either way the radio work runs.
-        return;
-    }
-
-    WiFi.mode(WIFI_AP);
-    if (cfg.wifi.ap_psk[0] != '\0') {
-        WiFi.softAP(ap_ssid, cfg.wifi.ap_psk);
-    } else {
-        WiFi.softAP(ap_ssid);
-    }
 }
 
 void WebServer::loop(uint32_t now_ms) {
@@ -199,6 +218,10 @@ void fillStatus(WebDeps& d, JsonObject root) {
         r["beacon_interval_ms"] = rs.beacon_interval_ms;
         r["airtime_ms"] = rs.airtime_ms;
         r["peers"] = d.node->activePeerCountOn(i, now);
+        // Frames lost inside the driver rather than on the air. Invisible in
+        // every other counter, and the first sign a node is over its budget.
+        r["rx_dropped"] = drv != nullptr ? drv->rxDropped() : 0;
+        r["tx_dropped"] = drv != nullptr ? drv->txDropped() : 0;
     }
 
     JsonArray peers = root.createNestedArray("peers");
@@ -315,6 +338,19 @@ void fillStatus(WebDeps& d, JsonObject root) {
     JsonObject sim = root.createNestedObject("sim");
     sim["enabled"] = d.cfg->sim.enabled;
     sim["peers"] = d.sim != nullptr ? d.sim->peerCount() : 0;
+
+    JsonObject wifi = root.createNestedObject("wifi");
+    wifi["mode"] = d.cfg->wifi.ap ? "ap" : "ap_sta";
+    // The channel ESP-NOW is actually on. Two nodes on different channels cannot
+    // hear each other over ESP-NOW however healthy both look, and joining an
+    // external network hands the choice to the router, so this is worth showing.
+    wifi["channel"] = wifiChannel();
+    wifi["configured_channel"] = d.cfg->wifi.channel;
+    wifi["ap_clients"] = WiFi.softAPgetStationNum();
+    if (!d.cfg->wifi.ap) {
+        wifi["sta_connected"] = WiFi.status() == WL_CONNECTED;
+        wifi["sta_rssi"] = WiFi.RSSI();
+    }
 
     root["reboot_required"] = WebServer::instance()->rebootRequired();
     root["config_corrupt"] = d.store != nullptr && d.store->lastLoadCorrupt();
@@ -561,54 +597,62 @@ void WebServer::registerRoutes() {
 
 // ---- Firmware upload ---------------------------------------------------------
 
+// ---- Firmware upload ---------------------------------------------------------
+//
+// ESPAsyncWebServer streams the body to handleFileUploadData in chunks and then
+// calls handleFileUploadResponse once, so the outcome has to be carried between
+// them on the server object.
+
 void handleFileUploadData(AsyncWebServerRequest* request, const String& filename, size_t index,
                           uint8_t* data, size_t len, bool final) {
     WebServer* w = WebServer::instance();
+
+    if (index == 0) {
+        // A new upload. Clear whatever the previous one left behind, or a retry
+        // after a failure reports the old error and never even starts.
+        w->otaStatus() = 0;
+        w->otaMessage() = "";
+    }
+    if (w->otaStatus() != 0) {
+        return;  // already failed; swallow the rest of the body
+    }
+
 #if defined(PLATFORM_ESP8266)
-    if (!filename.endsWith(".bin") && !filename.endsWith(".bin.gz")) {
-        w->otaMessage() = "must upload .bin or .bin.gz";
+    const bool named_ok = filename.endsWith(".bin") || filename.endsWith(".bin.gz");
+    const char* want = "must upload .bin or .bin.gz";
 #else
-    if (!filename.endsWith(".bin")) {
-        w->otaMessage() = "must upload .bin";
+    const bool named_ok = filename.endsWith(".bin");
+    const char* want = "must upload .bin";
 #endif
-        w->otaStatus() = 400;
+    if (!named_ok) {
+        // Checked before a single byte reaches flash: uploading the wrong file
+        // and finding out after the erase is a brick, not an error message.
+        w->failOta(400, want);
         return;
     }
 
-    if (index == 0 && !Update.isRunning()) {
+    if (index == 0) {
+        if (Update.isRunning()) {
+            Update.end(false);
+        }
 #if defined(PLATFORM_ESP8266)
         Update.runAsync(true);
 #endif
         if (!Update.begin(request->contentLength(), U_FLASH)) {
-#if defined(PLATFORM_ESP8266)
-            w->otaMessage() = Update.getErrorString();
-#else
-            w->otaMessage() = Update.errorString();
-#endif
-            w->otaStatus() = 500;
+            w->failOta(500, updateErrorText());
             return;
         }
         w->setOtaActive();
     }
 
     if (Update.write(data, len) != len) {
-#if defined(PLATFORM_ESP8266)
-        w->otaMessage() = Update.getErrorString();
-#else
-        w->otaMessage() = Update.errorString();
-#endif
-        w->otaStatus() = 500;
+        w->failOta(500, updateErrorText());
         return;
     }
 
     if (final) {
         if (!Update.end(true)) {
-#if defined(PLATFORM_ESP8266)
-            w->otaMessage() = Update.getErrorString();
-#else
-            w->otaMessage() = Update.errorString();
-#endif
-            w->otaStatus() = 500;
+            w->failOta(500, updateErrorText());
             return;
         }
         w->otaMessage() = "update complete, rebooting";

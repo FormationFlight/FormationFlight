@@ -1,5 +1,10 @@
 #pragma once
 #include <ESPAsyncWebServer.h>
+#if defined(PLATFORM_ESP8266)
+#include <Updater.h>
+#else
+#include <Update.h>
+#endif
 
 #include "ConfigStore.h"
 #include "MspFcLink.h"
@@ -37,16 +42,40 @@ struct WebDeps {
     ILocationSource* location = nullptr;
     const char* fw_version = "dev";
     uint32_t uid = 0;
+    uint8_t wifi_channel = 1;
     // Called after a successful config POST so the caller can push whatever can
     // be changed without a reboot into the live objects.
     void (*on_config_applied)(const Settings&) = nullptr;
 };
+
+// Brings WiFi up in the mode the config asks for, and returns the channel the
+// radio ended up on.
+//
+// This MUST run before RadioEspNow::begin(), and nothing may call WiFi.mode()
+// afterwards. ESP-NOW binds to the AP interface, so a later mode change tears
+// its interface out from under it and the 2.4 GHz link dies silently, with the
+// LoRa radio still working and nothing in the counters to explain it. Station
+// mode therefore comes up as AP+STA rather than STA: the AP interface has to
+// survive for ESP-NOW to exist at all.
+//
+// The channel matters just as much. ESP-NOW rides whatever channel the WiFi
+// radio is on, so two nodes on different channels cannot hear each other even
+// though both look healthy. wifi.channel pins it; joining an external network
+// overrides it, because the router owns the channel then -- which is exactly
+// why joining one is a poor idea on an aircraft that needs ESP-NOW.
+uint8_t wifiBringUp(const Settings& cfg, uint32_t uid);
+
+// The channel the radio is actually on, for the status view.
+uint8_t wifiChannel();
 
 // ESPAsyncWebServer calls upload handlers as plain functions, so these cannot be
 // members; they reach the server through WebServer::instance().
 void handleFileUploadData(AsyncWebServerRequest* request, const String& filename, size_t index,
                           uint8_t* data, size_t len, bool final);
 void handleFileUploadResponse(AsyncWebServerRequest* request);
+
+// The current Update library error, spelled the way this platform spells it.
+String updateErrorText();
 
 class WebServer {
 public:
@@ -64,6 +93,19 @@ public:
     static WebServer* instance() { return instance_; }
     WebDeps& deps() { return deps_; }
     void setOtaActive() { ota_active_ = true; }
+
+    // Records a failed upload and, critically, clears the in-progress flag.
+    // Leaving it set would keep loop() parked with the radios held still for
+    // good: a mistyped filename would take the node off the air until a power
+    // cycle, which is a far worse outcome than the failed update itself.
+    void failOta(uint16_t code, const String& message) {
+        ota_status_ = code;
+        ota_message_ = message;
+        ota_active_ = false;
+        if (Update.isRunning()) {
+            Update.end(false);
+        }
+    }
     String& otaMessage() { return ota_message_; }
     uint16_t& otaStatus() { return ota_status_; }
     void requestReboot(uint32_t at_ms) { reboot_at_ms_ = at_ms; }
@@ -79,7 +121,6 @@ public:
     }
 
 private:
-    void startWifi();
     void registerRoutes();
 
     static WebServer* instance_;

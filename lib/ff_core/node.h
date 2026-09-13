@@ -58,6 +58,12 @@ public:
     virtual bool radioEnabled(size_t index) const = 0;
     // Time on air for a payload on radio `index`, used to size that radio's rate.
     virtual double airtimeMs(size_t index, size_t payload_len) const = 0;
+    // Whether this radio can actually put frames on the air. The traffic
+    // simulator cannot: it manufactures other aircraft, and there is nobody on
+    // the far side to hear us. Beaconing into it would burn frame counters on
+    // frames that go nowhere and, worse, show a phantom transmitting radio in
+    // the status view while a real one is being debugged.
+    virtual bool radioTransmits(size_t index) const { return radioEnabled(index); }
     // Transmit on a single radio.
     virtual void transmit(size_t index, const uint8_t* data, size_t len) = 0;
 };

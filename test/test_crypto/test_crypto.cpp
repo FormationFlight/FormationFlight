@@ -459,7 +459,12 @@ void test_replayed_frame_is_rejected() {
     TEST_ASSERT_TRUE(rx.lastRejectWasReplay());
 }
 
-void test_counter_must_advance_within_a_session() {
+// Within a session every counter is accepted exactly once, in whatever order it
+// turns up. This deliberately does NOT require counters to arrive increasing:
+// an earlier version of this code did, and that rule silently discarded the
+// slower medium's frames on any node running two radios (see the window tests
+// below). What must hold is "once, and only once".
+void test_each_counter_is_accepted_exactly_once_in_any_order() {
     uint8_t key[kAesKeySize];
     deriveGroupKey("hangar", key);
 
@@ -476,14 +481,22 @@ void test_counter_must_advance_within_a_session() {
         lens[i] = tx.encrypt(frames[i], plain_len, sizeof(frames[i]));
     }
 
+    const int order[3] = {2, 0, 1};
     size_t out_len = 0;
-    uint8_t scratch[64];
-    std::memcpy(scratch, frames[2], lens[2]);
-    TEST_ASSERT_TRUE(rx.decrypt(scratch, lens[2], out_len, 1000));  // newest accepted
-    std::memcpy(scratch, frames[0], lens[0]);
-    TEST_ASSERT_FALSE(rx.decrypt(scratch, lens[0], out_len, 1010));  // older rejected
-    std::memcpy(scratch, frames[1], lens[1]);
-    TEST_ASSERT_FALSE(rx.decrypt(scratch, lens[1], out_len, 1020));
+    for (int i = 0; i < 3; i++) {
+        uint8_t scratch[64];
+        std::memcpy(scratch, frames[order[i]], lens[order[i]]);
+        TEST_ASSERT_TRUE(rx.decrypt(scratch, lens[order[i]], out_len, 1000 + i * 10));
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, rx.replayCount());
+
+    // A second delivery of any of them is a replay.
+    for (int i = 0; i < 3; i++) {
+        uint8_t scratch[64];
+        std::memcpy(scratch, frames[i], lens[i]);
+        TEST_ASSERT_FALSE(rx.decrypt(scratch, lens[i], out_len, 1100 + i * 10));
+    }
+    TEST_ASSERT_EQUAL_UINT32(3, rx.replayCount());
 }
 
 void test_rebooted_peer_resyncs_after_the_quiet_window() {
@@ -593,6 +606,129 @@ void test_announce_frame_fits_the_documented_size() {
     TEST_ASSERT_TRUE(frame_len <= kAnnounceFrameSize);
 }
 
+// ---- Anti-replay window ------------------------------------------------------
+//
+// The window exists for multi-radio. A sender's counter advances across all of
+// its radios together, but ESP-NOW is on the air for under a millisecond while
+// LoRa takes tens, so the LoRa frame sent FIRST routinely lands SECOND with a
+// lower counter. A strict "must exceed the last" rule drops every one of those,
+// which on the bench looks exactly like a dead LoRa link.
+
+// Capture a sender's next frame without delivering it, so tests can reorder.
+struct CapturedFrame {
+    uint8_t buf[64];
+    size_t len;
+};
+
+static CapturedFrame captureFrame(CcmCrypto& tx, uint32_t uid) {
+    CapturedFrame f{};
+    const size_t plain_len = makePositionPacket(uid, f.buf, sizeof(f.buf));
+    f.len = tx.encrypt(f.buf, plain_len, sizeof(f.buf));
+    return f;
+}
+
+static bool deliver(CcmCrypto& rx, CapturedFrame f, uint32_t now_ms) {
+    size_t out_len = 0;
+    return rx.decrypt(f.buf, f.len, out_len, now_ms);
+}
+
+void test_reordered_frames_are_accepted_within_the_window() {
+    uint8_t key[kAesKeySize];
+    deriveGroupKey("hangar", key);
+    CcmCrypto tx;
+    tx.begin(0x1234, key, 0);
+    CcmCrypto rx;
+    rx.begin(0x5678, key, 0);
+
+    CapturedFrame a = captureFrame(tx, 0x1234);  // counter N
+    CapturedFrame b = captureFrame(tx, 0x1234);  // N+1
+    CapturedFrame c = captureFrame(tx, 0x1234);  // N+2
+
+    // Arrive newest-first, as a slow medium losing the race would produce.
+    TEST_ASSERT_TRUE(deliver(rx, c, 1000));
+    TEST_ASSERT_TRUE(deliver(rx, a, 1010));
+    TEST_ASSERT_TRUE(deliver(rx, b, 1020));
+    TEST_ASSERT_EQUAL_UINT32(0, rx.replayCount());
+}
+
+// The concrete dual-radio case, spelled out: a LoRa beacon fires first, an
+// ESP-NOW beacon fires a few milliseconds later and overtakes it.
+void test_slow_medium_frame_overtaken_by_the_fast_one_still_lands() {
+    uint8_t key[kAesKeySize];
+    deriveGroupKey("hangar", key);
+    CcmCrypto tx;
+    tx.begin(0x1234, key, 0);
+    CcmCrypto rx;
+    rx.begin(0x5678, key, 0);
+
+    CapturedFrame lora = captureFrame(tx, 0x1234);    // sent at t=0, 20 ms on air
+    CapturedFrame espnow = captureFrame(tx, 0x1234);  // sent at t=2, under 1 ms
+
+    TEST_ASSERT_TRUE(deliver(rx, espnow, 1003));
+    TEST_ASSERT_TRUE(deliver(rx, lora, 1020));
+    TEST_ASSERT_EQUAL_UINT32(0, rx.replayCount());
+}
+
+void test_a_duplicate_inside_the_window_is_still_rejected() {
+    uint8_t key[kAesKeySize];
+    deriveGroupKey("hangar", key);
+    CcmCrypto tx;
+    tx.begin(0x1234, key, 0);
+    CcmCrypto rx;
+    rx.begin(0x5678, key, 0);
+
+    CapturedFrame a = captureFrame(tx, 0x1234);
+    CapturedFrame b = captureFrame(tx, 0x1234);
+
+    TEST_ASSERT_TRUE(deliver(rx, b, 1000));
+    TEST_ASSERT_TRUE(deliver(rx, a, 1010));
+    // Reordering is forgiven; being sent the same frame twice is not.
+    TEST_ASSERT_FALSE(deliver(rx, a, 1020));
+    TEST_ASSERT_FALSE(deliver(rx, b, 1030));
+    TEST_ASSERT_EQUAL_UINT32(2, rx.replayCount());
+}
+
+void test_a_frame_older_than_the_window_is_rejected() {
+    uint8_t key[kAesKeySize];
+    deriveGroupKey("hangar", key);
+    CcmCrypto tx;
+    tx.begin(0x1234, key, 0);
+    CcmCrypto rx;
+    rx.begin(0x5678, key, 0);
+
+    CapturedFrame ancient = captureFrame(tx, 0x1234);
+    // Move the sender well past the window without delivering anything.
+    for (uint32_t i = 0; i < kReplayWindowBits + 4; i++) {
+        CapturedFrame f = captureFrame(tx, 0x1234);
+        TEST_ASSERT_TRUE(deliver(rx, f, 1000 + i));
+    }
+    TEST_ASSERT_FALSE(deliver(rx, ancient, 2000));
+    TEST_ASSERT_TRUE(rx.lastRejectWasReplay());
+}
+
+// A long gap in delivery must not wedge the window: the next frame is simply
+// far ahead, which slides it clean rather than filling it.
+void test_a_large_forward_jump_resets_the_window() {
+    uint8_t key[kAesKeySize];
+    deriveGroupKey("hangar", key);
+    CcmCrypto tx;
+    tx.begin(0x1234, key, 0);
+    CcmCrypto rx;
+    rx.begin(0x5678, key, 0);
+
+    CapturedFrame first = captureFrame(tx, 0x1234);
+    TEST_ASSERT_TRUE(deliver(rx, first, 1000));
+
+    for (uint32_t i = 0; i < 200; i++) {
+        (void)captureFrame(tx, 0x1234);  // transmitted, never received
+    }
+    CapturedFrame far = captureFrame(tx, 0x1234);
+    TEST_ASSERT_TRUE(deliver(rx, far, 1100));
+    // And the one right behind it still fits in the freshly slid window.
+    CapturedFrame next = captureFrame(tx, 0x1234);
+    TEST_ASSERT_TRUE(deliver(rx, next, 1110));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_aes128_fips197_vector);
@@ -621,9 +757,14 @@ int main(int, char**) {
     RUN_TEST(test_wrong_group_passphrase_is_rejected);
     RUN_TEST(test_flipping_any_clear_header_byte_is_rejected);
     RUN_TEST(test_replayed_frame_is_rejected);
-    RUN_TEST(test_counter_must_advance_within_a_session);
+    RUN_TEST(test_each_counter_is_accepted_exactly_once_in_any_order);
     RUN_TEST(test_rebooted_peer_resyncs_after_the_quiet_window);
     RUN_TEST(test_two_senders_do_not_share_a_counter);
+    RUN_TEST(test_reordered_frames_are_accepted_within_the_window);
+    RUN_TEST(test_slow_medium_frame_overtaken_by_the_fast_one_still_lands);
+    RUN_TEST(test_a_duplicate_inside_the_window_is_still_rejected);
+    RUN_TEST(test_a_frame_older_than_the_window_is_rejected);
+    RUN_TEST(test_a_large_forward_jump_resets_the_window);
     RUN_TEST(test_encrypt_refuses_a_buffer_without_room_for_the_tag);
     RUN_TEST(test_truncated_frame_is_rejected);
     RUN_TEST(test_announce_frame_fits_the_documented_size);

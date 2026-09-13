@@ -110,6 +110,38 @@ CcmCrypto::ReplaySlot* CcmCrypto::slotFor(uint32_t uid, uint32_t now_ms, bool& f
     return victim;
 }
 
+bool CcmCrypto::acceptCounter(ReplaySlot& slot, uint32_t counter, bool reset) {
+    if (reset) {
+        slot.high = counter;
+        slot.window = 0;
+        return true;
+    }
+
+    if (counter > slot.high) {
+        // Newer than anything seen: slide the window up and record that the
+        // previous high was seen.
+        const uint32_t advance = counter - slot.high;
+        if (advance >= kReplayWindowBits) {
+            slot.window = 0;
+        } else {
+            slot.window = (slot.window << advance) | (1u << (advance - 1));
+        }
+        slot.high = counter;
+        return true;
+    }
+
+    const uint32_t behind = slot.high - counter;
+    if (behind == 0 || behind > kReplayWindowBits) {
+        return false;  // the current high again, or older than we can vouch for
+    }
+    const uint32_t bit = 1u << (behind - 1);
+    if (slot.window & bit) {
+        return false;  // already accepted this one
+    }
+    slot.window |= bit;
+    return true;
+}
+
 bool CcmCrypto::decrypt(uint8_t* buf, size_t len, size_t& out_len, uint32_t now_ms) {
     last_reject_replay_ = false;
     if (len < kFrameHeaderLen + kFrameTagLen) {
@@ -132,17 +164,16 @@ bool CcmCrypto::decrypt(uint8_t* buf, size_t len, size_t& out_len, uint32_t now_
         return false;
     }
 
-    // Authenticated. Now reject replays: the counter must advance, unless this
-    // sender has been quiet long enough to have plausibly rebooted.
+    // Authenticated. Now reject replays. First contact, or a sender that has
+    // been quiet long enough to have plausibly rebooted, restarts the window.
     bool fresh = false;
     ReplaySlot* slot = slotFor(uid, now_ms, fresh);
-    const bool resync = (now_ms - slot->last_ms) > kReplayResyncMs;
-    if (!fresh && !resync && counter <= slot->counter) {
+    const bool reset = fresh || (now_ms - slot->last_ms) > kReplayResyncMs;
+    if (!acceptCounter(*slot, counter, reset)) {
         replay_++;
         last_reject_replay_ = true;
         return false;
     }
-    slot->counter = counter;
     slot->last_ms = now_ms;
 
     // Close the counter gap so the caller sees the original plaintext packet.

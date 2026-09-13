@@ -135,6 +135,7 @@ void configToJson(const Settings& cfg, JsonObject out, bool redact_secrets) {
     wifi["ssid"] = cfg.wifi.ssid;
     putSecret(wifi, "psk", cfg.wifi.psk, redact_secrets);
     putSecret(wifi, "ap_psk", cfg.wifi.ap_psk, redact_secrets);
+    wifi["channel"] = cfg.wifi.channel;
 
     JsonObject sim = out.createNestedObject("sim");
     sim["enabled"] = cfg.sim.enabled;
@@ -188,6 +189,10 @@ bool configValidate(const Settings& cfg, const char** err) {
     }
     if (cfg.radios.lora_power_dbm < 0 || cfg.radios.lora_power_dbm > 30) {
         *err = "radios.lora_power_dbm must be 0 (target default) or 1-30";
+        return false;
+    }
+    if (cfg.wifi.channel < 1 || cfg.wifi.channel > 13) {
+        *err = "wifi.channel must be 1-13";
         return false;
     }
     if (!cfg.wifi.ap && cfg.wifi.ssid[0] == '\0') {
@@ -251,6 +256,7 @@ bool configMergeJson(JsonObjectConst in, Settings& cfg, const char** err) {
         copyStr(wifi["ssid"], next.wifi.ssid, kMaxSsidLen);
         copyStr(wifi["psk"], next.wifi.psk, kMaxPskLen);
         copyStr(wifi["ap_psk"], next.wifi.ap_psk, kMaxPskLen);
+        mergeVal(wifi, "channel", next.wifi.channel);
     }
     if (in.containsKey("sim")) {
         mergeVal(in["sim"].as<JsonObjectConst>(), "enabled", next.sim.enabled);

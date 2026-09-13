@@ -51,37 +51,31 @@ void RadioEspNow::ingest(const uint8_t* data, int len) {
     rx_.push(frame);
 }
 
-bool RadioEspNow::begin() {
+bool RadioEspNow::begin(uint8_t channel) {
     g_instance = this;
 
-    // Bring WiFi up as an AP so the ESP-NOW interface is active without joining a
-    // network. A hidden SSID derived from the chip id keeps beacons unobtrusive.
-#if defined(PLATFORM_ESP32)
-    WiFi.mode(WIFI_MODE_AP);
-    uint32_t id = static_cast<uint32_t>(ESP.getEfuseMac() & 0xFFFFFFFFu);
-#elif defined(PLATFORM_ESP8266)
-    WiFi.mode(WIFI_AP);
-    uint32_t id = ESP.getChipId();
-#endif
-    char ssid[20];
-    snprintf(ssid, sizeof(ssid), "FF-%06X", static_cast<unsigned>(id & 0xFFFFFF));
-    WiFi.softAP(ssid, nullptr, 1, /*hidden=*/1);
-
+    // WiFi is brought up once, before any radio, by wifiBringUp(). This used to
+    // start its own hidden AP here, which the web server then reconfigured out
+    // from under it -- and in station mode removed the AP interface entirely,
+    // taking ESP-NOW with it while every counter still read healthy.
     if (esp_now_init() != 0) {
         return false;
     }
 
 #if defined(PLATFORM_ESP8266)
     esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-    esp_now_add_peer(kBroadcast, ESP_NOW_ROLE_COMBO, 1, nullptr, 0);
+    esp_now_add_peer(kBroadcast, ESP_NOW_ROLE_COMBO, channel, nullptr, 0);
 #elif defined(PLATFORM_ESP32)
     esp_now_peer_info_t peer;
     memset(&peer, 0, sizeof(peer));
     memcpy(peer.peer_addr, kBroadcast, 6);
     peer.ifidx = WIFI_IF_AP;
+    // 0 means "whatever channel the interface is on", which is what we want:
+    // wifiBringUp() already put it on the configured one.
     peer.channel = 0;
     peer.encrypt = false;
     esp_now_add_peer(&peer);
+    (void)channel;
 #endif
 
     esp_now_register_recv_cb(onRecv);
@@ -89,7 +83,11 @@ bool RadioEspNow::begin() {
 }
 
 void RadioEspNow::transmit(const uint8_t* data, size_t len) {
-    esp_now_send(kBroadcast, const_cast<uint8_t*>(data), len);
+    if (esp_now_send(kBroadcast, const_cast<uint8_t*>(data), len) != 0) {
+        // Queue full or the interface is down. Worth counting: it is the first
+        // symptom of ESP-NOW having lost its interface, and otherwise invisible.
+        tx_failed_++;
+    }
 }
 
 double RadioEspNow::airtimeMs(size_t /*payload_len*/) const {
