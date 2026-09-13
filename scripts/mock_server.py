@@ -821,11 +821,23 @@ def _new_radio_stats():
             "rx_dropped": 0, "tx_dropped": 0}
 
 
-# Frames lost inside the node rather than on the air, faked on LoRa only: 61 ms
-# of airtime per frame is what actually runs a node out of budget first, and
-# keeping one radio clean is what makes the UI's non-zero styling legible.
-LORA_TX_DROP_EVERY = 3    # one in three LoRa transmits finds the radio still busy
+# Receive frames lost inside the node rather than on the air, faked on LoRa
+# only: 61 ms of airtime per frame is what actually runs a node out of budget
+# first, and keeping one radio clean is what makes the UI's non-zero styling
+# legible. Nothing fakes a transmit drop -- see LORA_TX_DEFER_EVERY_MS.
 LORA_RX_DROP_EVERY = 23   # receive ring overruns, in frames
+
+# Transmits held back one airtime and then sent. The node has two transmit
+# schedules on one half-duplex LoRa radio -- the per-radio ALOHA beacon, paced
+# by the rate controller, and the node announce, which runs on its own fixed
+# timer and fans out to every radio -- and neither knows the other exists. On
+# the 915 settings the project ships they land on top of each other about once
+# every six seconds, and the driver parks the second frame in its one-frame
+# slot (ff::TxSlot) rather than throwing it away.
+#
+# Node time, not frame count: what sets the rate is the two schedules sliding
+# past each other, not how often this mock happens to tick.
+LORA_TX_DEFER_EVERY_MS = 6000
 
 
 class MockNode:
@@ -1138,14 +1150,11 @@ class MockNode:
             if not self._radio_enabled(radio):
                 radio = self._first_enabled_radio()
             announce = (seq // 5) % 16 == 0
-            # Refused by the driver because the previous frame is still going
-            # out. Nothing is transmitted and nothing is logged: the frame log
-            # is the main loop's view, and this frame never left the driver.
-            # Offset so the node's very first transmit is never the dropped one
-            # -- a freshly started mock should look alive immediately.
-            if radio == RADIO_LORA and (seq // 20) % LORA_TX_DROP_EVERY == 2:
-                self.radio_stats[radio]["tx_dropped"] += 1
-                return
+            # Nothing is dropped on the way out. A beacon that lands on top of
+            # an announce is held in the driver's slot and sent an airtime
+            # later (tx_deferred, derived from node time below); a drop now
+            # takes a THIRD frame wanting the radio with one already waiting,
+            # which does not happen on the healthy radio this mock models.
             self.radio_stats[radio]["tx"] += 1
             self.tx_counter += 1
             if announce:
@@ -1502,6 +1511,24 @@ class MockNode:
         pct = (battery_v - 3.30) / (4.15 - 3.30) * 100.0
         return int(max(0, min(100, round(pct))))
 
+    @staticmethod
+    def _tx_deferred(index, now_ms):
+        """Frames the driver held back one airtime and then sent.
+
+        Derived from node time rather than counted per frame, the way the SNR
+        wobble is: the collision rate comes from the beacon and announce
+        schedules sliding past each other, not from this mock's tick. Monotonic
+        in now_ms, so the counter never goes backwards.
+
+        Zero on every other radio. ESP-NOW hands the frame to the MAC and the
+        simulated radio never keys an antenna, so neither driver has a slot to
+        defer into or a counter to report -- the firmware still emits the field
+        for them, at zero.
+        """
+        if index != RADIO_LORA:
+            return 0
+        return max(0, now_ms) // LORA_TX_DEFER_EVERY_MS
+
     def status_json(self, now_ms):
         lat, lon, alt = self.self_location(now_ms)
         peers = self._peer_list()
@@ -1530,7 +1557,18 @@ class MockNode:
                 # Frames lost inside the node rather than on the air, so no
                 # on-air counter anywhere shows them.
                 "rx_dropped": rs["rx_dropped"],
+                # A transmit that never happened, and nothing on the air
+                # records it: a third frame wanted the radio with one on the
+                # air and another already in the slot. Zero on a healthy node,
+                # which is what makes it worth styling.
                 "tx_dropped": rs["tx_dropped"],
+                # Held back one airtime and then sent. Not a fault and not a
+                # loss, and expected to climb steadily on LoRa.
+                "tx_deferred": self._tx_deferred(index, now_ms),
+                # The transmit-done interrupt never arrived and the driver's
+                # watchdog had to recover the radio. This one IS a fault, and
+                # this mock models a radio whose interrupts arrive.
+                "tx_timeouts": 0,
                 # False for a receive-only driver; SimRadio is the one here.
                 "transmits": index != RADIO_SIM,
             }

@@ -105,16 +105,39 @@ void RadioSX127x::transmit(const uint8_t* data, size_t len) {
     }
     if (transmitting_) {
         // A previous frame is still on the air. Calling startTransmit() again
-        // here would abandon it mid-packet and put garbage on the channel. The
-        // Node beacons each radio independently and announces fan out to all of
-        // them, so two sends CAN land in the same loop iteration; ALOHA is built
-        // to tolerate a dropped beacon, a corrupted one it is not.
-        tx_dropped_++;
+        // here would abandon it mid-packet and put a truncated frame on the
+        // channel, which is worse than sending nothing. The Node beacons each
+        // radio independently and announces fan out to all of them, so two
+        // sends CAN land in the same loop iteration -- on the 915 settings
+        // that happens about once every six seconds, which used to show up as
+        // a drop count climbing on a radio that was working perfectly.
+        //
+        // So it waits its turn instead. Only a third frame arriving inside the
+        // same airtime is a real drop.
+        if (!pending_.push(data, len)) {
+            tx_dropped_++;
+        }
         return;
     }
+    startTx(data, len);
+}
+
+void RadioSX127x::startTx(const uint8_t* data, size_t len) {
     transmitting_ = true;
     tx_start_ms_ = millis();
+    // RadioLib writes the payload into the chip's FIFO here and returns, so the
+    // caller's buffer does not have to outlive this call -- which is what lets
+    // sendPending() clear the slot immediately afterwards.
     radio_->startTransmit(const_cast<uint8_t*>(data), len);
+}
+
+bool RadioSX127x::sendPending() {
+    if (pending_.empty()) {
+        return false;
+    }
+    startTx(pending_.data(), pending_.size());
+    pending_.clear();
+    return true;
 }
 
 void RadioSX127x::serviceRx() {
@@ -122,22 +145,41 @@ void RadioSX127x::serviceRx() {
         return;
     }
 
+    // Anything that could have freed the radio sets this, so the tail of the
+    // function knows whether it has to put the radio back to work. Skipping
+    // that on a quiet pass matters: startReceive() is an SPI transaction, and
+    // this runs every time round the main loop.
+    bool radio_freed = false;
+
     // Watchdog first, and outside the dio_pending_ shortcut: a missed
     // transmit-done interrupt leaves transmitting_ stuck true, every later
-    // transmit is then dropped by the guard above, and the radio goes quiet with
-    // nothing but txDropped() climbing to say so.
+    // transmit is then dropped by the guard above, and the radio goes quiet
+    // with nothing but the counters climbing to say so.
     if (transmitting_ && (millis() - tx_start_ms_) > kTxTimeoutMs) {
         tx_timeouts_++;
         transmitting_ = false;
         radio_->finishTransmit();
-        radio_->startReceive();
+        radio_freed = true;
     }
 
-    if (!dio_pending_) {
+    if (dio_pending_) {
+        dio_pending_ = false;
+        radio_freed = true;
+        serviceIrq();
+    }
+
+    if (!radio_freed || transmitting_) {
         return;
     }
-    dio_pending_ = false;
+    // The radio is idle and something just finished on it. Send the frame that
+    // was held back, if there is one, and only otherwise go back to listening:
+    // startReceive() after a startTransmit() aborts the transmission.
+    if (!sendPending()) {
+        radio_->startReceive();
+    }
+}
 
+void RadioSX127x::serviceIrq() {
     const uint16_t flags = radio_->getIRQFlags();
 
     // Both can be set: a packet may have arrived while we were still holding a
@@ -164,8 +206,6 @@ void RadioSX127x::serviceRx() {
             rx_.push(frame);
         }
     }
-
-    radio_->startReceive();
 }
 
 RadioSX127x::Info RadioSX127x::info() const {

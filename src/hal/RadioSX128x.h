@@ -6,6 +6,7 @@
 #include "radio_hub.h"
 #include "ring_buffer.h"
 #include "rx_frame.h"
+#include "tx_slot.h"
 
 namespace ff {
 
@@ -28,6 +29,8 @@ public:
     Info info() const override;
     uint32_t rxDropped() const override { return rx_.dropped(); }
     uint32_t txDropped() const override { return tx_dropped_; }
+    uint32_t txDeferred() const override { return pending_.deferred(); }
+    uint32_t txTimeouts() const override { return tx_timeouts_; }
     void onDioIsr() { dio_pending_ = true; }
 
 private:
@@ -44,6 +47,19 @@ private:
     float last_snr_db_ = 0.0f;
     bool have_snr_ = false;
     uint32_t tx_timeouts_ = 0;
+    // One frame deep, so a beacon and an announce arriving in the same loop
+    // iteration cost the second one an airtime of latency instead of costing it
+    // its existence. See tx_slot.h for why it is not deeper.
+    TxSlot pending_;
+
+    // Starts the frame waiting in pending_, if there is one. Returns false when
+    // the slot was empty and the caller should put the radio back into receive:
+    // startReceive() after a startTransmit() would abort the transmission.
+    bool sendPending();
+    void startTx(const uint8_t* data, size_t len);
+    // The interrupt half of serviceRx(), split out so serviceRx() owns the one
+    // decision about what the radio does next.
+    void serviceIrq();
     SpscRing<RxFrame, 8> rx_;
 };
 

@@ -52,6 +52,8 @@ With a single node powered, on the **Radios** page:
 - `beacon_interval_ms` should sit at the 100 ms floor with no peers.
 - `rx_dropped` and `tx_dropped` must stay at zero. Either one climbing on an
   idle single node means something is wrong before any RF is involved.
+- `tx_deferred` climbing on a LoRa radio is expected and is not a fault. See
+  the transmit counters in section 6.
 
 ## 3b. T-Beam only: the PMIC
 
@@ -168,11 +170,25 @@ With both ESP-NOW and LoRa enabled on both nodes:
   ESP-NOW frame sent later and carrying a higher counter. The receiver keeps a
   32-deep sliding window specifically to accept that. A climbing replay count
   means the window is not doing its job and LoRa frames are being discarded.
-- `tx_dropped` on LoRa should stay at zero. It counts transmits refused because
-  the radio was still busy with the previous frame, which can happen when a
-  beacon and an announce fall in the same loop iteration. A few are survivable,
-  ALOHA is built for it. A steady climb means the beacon interval is too short
-  for the airtime, or transmit-done interrupts are being missed.
+- **The three transmit counters read together.** A LoRa radio carries two
+  independent transmit schedules - the per-radio ALOHA beacon and the node
+  announce, which runs on its own timer and fans out to every radio - and
+  neither knows the other exists. On the 915 settings a frame occupies the
+  channel for 42.6 ms against a 284 ms beacon interval, so the two collide
+  roughly once every six seconds. The driver holds the second frame for one
+  airtime rather than dropping it.
+  - `tx_deferred` counts those. It climbs steadily on any LoRa node and is not
+    a fault: the frame went out, one airtime late. Measured on a bench T-Beam,
+    one every 6.7 s.
+  - `tx_dropped` must stay at zero. It now means a *third* frame wanted the
+    radio while one was on the air and another was already waiting, which
+    should not happen at these rates. Firmware before the deferral slot counted
+    ordinary collisions here and showed about 5%.
+  - `tx_timeouts` must stay at zero. Anything above it means transmit-done
+    interrupts are going missing, the radio stalls for the full 500 ms
+    watchdog, and every transmit inside that window is refused. A climbing
+    `tx_dropped` next to a non-zero `tx_timeouts` is that fault, not a load
+    problem and not a range one.
 
 Then disable one radio at a time from Settings and confirm the other keeps
 working on its own.

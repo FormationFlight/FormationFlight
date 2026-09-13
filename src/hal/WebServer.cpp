@@ -272,6 +272,12 @@ void fillStatus(WebDeps& d, JsonObject root) {
         // every other counter, and the first sign a node is over its budget.
         r["rx_dropped"] = drv != nullptr ? drv->rxDropped() : 0;
         r["tx_dropped"] = drv != nullptr ? drv->txDropped() : 0;
+        // Deferrals are the benign half of what used to be counted as drops,
+        // and timeouts are the malignant half. Separating them is the only way
+        // to tell a node whose beacon and announce schedules overlapped from
+        // one whose transmit-done interrupts are going missing.
+        r["tx_deferred"] = drv != nullptr ? drv->txDeferred() : 0;
+        r["tx_timeouts"] = drv != nullptr ? drv->txTimeouts() : 0;
         r["transmits"] = drv != nullptr && drv->transmits();
         // Read back from the driver, not from the build flags: confirming the
         // radio really is where the target intended is the first thing worth

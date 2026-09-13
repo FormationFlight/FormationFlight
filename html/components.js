@@ -484,11 +484,16 @@ export function RadioCard({ radio }) {
   // rejection in the header because a rejection is someone else's traffic,
   // while a drop is this node failing to keep up with its own.
   const dropped = (r.rx_dropped || 0) + (r.tx_dropped || 0);
+  // A missing transmit-done interrupt outranks everything: the radio stops for
+  // half a second at a time and every transmit in that window is refused, so
+  // the drop count it produces is a symptom and this is the cause.
+  const stalling = (r.tx_timeouts || 0) > 0;
   const state = !r.enabled ? ['disabled', tipColors.gray]
     : r.sim ? ['simulated', 'bg-violet-100 text-violet-900 dark:bg-violet-900 dark:text-violet-100']
-      : dropped > 0 ? ['dropping', tipColors.red]
-        : rejected > 0 ? ['rejecting', tipColors.yellow]
-          : ['enabled', tipColors.green];
+      : stalling ? ['tx stalling', tipColors.red]
+        : dropped > 0 ? ['dropping', tipColors.red]
+          : rejected > 0 ? ['rejecting', tipColors.yellow]
+            : ['enabled', tipColors.green];
   return html`
 <${Card} title=${r.name} icon=${Icons.antenna}
   right=${html`<${Colored} text=${state[0]} colors=${state[1]} />`}>
@@ -502,8 +507,16 @@ export function RadioCard({ radio }) {
   <//>
   <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
     <${Counter} label="RX dropped" value=${r.rx_dropped} tone=${r.rx_dropped ? 'text-red-600' : ''} tip="Frames the driver threw away because its receive ring filled before the main loop drained it. Lost inside this node, so no on-air counter anywhere will show them - this is the first sign the node is over its budget." />
-    <${Counter} label="TX dropped" value=${r.tx_dropped} tone=${r.tx_dropped ? 'text-red-600' : ''} tip="Transmits the driver refused because the radio was still busy with the previous frame, or because the send queue was full. The frame never went out and nothing on the air records it." />
+    <${Counter} label="TX dropped" value=${r.tx_dropped} tone=${r.tx_dropped ? 'text-red-600' : ''} tip="Transmits that never happened: a third frame wanted this radio while one was on the air and another was already waiting. Nothing on the air records them. A count that climbs steadily alongside TX timeouts is that fault, not this one." />
   <//>
+  ${present(r.tx_deferred) && html`
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Counter} label="TX deferred" value=${r.tx_deferred}
+      tip="Frames held back one airtime because the radio was mid-transmission, and then sent. Not a fault and not a loss: the beacon and the announce run on independent schedules and land together several times a minute by design. This number is expected to climb." />
+    <${Counter} label="TX timeouts" value=${r.tx_timeouts}
+      tone=${r.tx_timeouts ? 'text-red-600' : ''}
+      tip="Times the transmit-done interrupt never arrived and the driver's watchdog had to recover the radio half a second later. Every transmit inside that window is refused, so this is usually the real cause behind a runaway drop count. Anything above zero is a wiring or interrupt problem, not a range one." />
+  <//>`}
   <div class="grid ${present(r.last_snr_db) ? 'grid-cols-3' : 'grid-cols-2'} gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
     <div class="flex flex-col" title="Signal strength of the most recent frame received on this radio.">
       <span class="text-xs uppercase tracking-wide text-gray-400">Last RSSI<//>

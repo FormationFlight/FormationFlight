@@ -50,14 +50,16 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
       "tx": 412, "rx_ok": 389, "rx_crypto_fail": 0, "rx_replay": 0,
       "rx_decode_fail": 0, "rx_self": 412, "last_rssi": -52,
       "last_rx_age_ms": 84, "beacon_interval_ms": 100, "airtime_ms": 0.4,
-      "peers": 2, "rx_dropped": 0, "tx_dropped": 0, "transmits": true
+      "peers": 2, "rx_dropped": 0, "tx_dropped": 0, "tx_deferred": 0,
+      "tx_timeouts": 0, "transmits": true
     },
     {
       "index": 1, "name": "LORA", "enabled": true, "sim": false,
       "tx": 51, "rx_ok": 48, "rx_crypto_fail": 1, "rx_replay": 0,
       "rx_decode_fail": 0, "rx_self": 2, "last_rssi": -66,
       "last_rx_age_ms": 210, "beacon_interval_ms": 816, "airtime_ms": 61.2,
-      "peers": 1, "rx_dropped": 2, "tx_dropped": 3, "transmits": true,
+      "peers": 1, "rx_dropped": 2, "tx_dropped": 0, "tx_deferred": 9,
+      "tx_timeouts": 0, "transmits": true,
       "modulation": { "frequency_hz": 920000000, "bandwidth_khz": 500.0,
         "spreading_factor": 8, "coding_rate": 7, "power_dbm": 10 },
       "last_snr_db": 9.75
@@ -166,11 +168,46 @@ UI can make it obvious the numbers are not real RF.
 the peer reports itself armed, bit 1 (`2`) it has a GPS fix. A peer without a
 fix is tracked and displayed but is never followable.
 
-`radios[].rx_dropped` and `tx_dropped` count frames lost *inside the node*
-rather than on the air: receive because the driver's ring filled before the loop
-drained it, transmit because the radio was still busy with the previous frame.
-Neither shows up in any other counter, and either one climbing means the node is
-over its budget.
+`radios[].rx_dropped` counts frames lost *inside the node* rather than on the
+air: the driver's receive ring filled before the main loop drained it. It shows
+up in no other counter, and it climbing means the node is over its budget.
+
+`radios[].tx_deferred`, `tx_dropped` and `tx_timeouts` are the transmit side,
+and they are three different things. All three are always present, zero on a
+driver that does not track them - which is every driver except the two LoRa
+ones.
+
+The reason there are three of them: the node has two independent transmit
+schedules sharing one half-duplex LoRa radio. The per-radio ALOHA beacon is
+paced by the rate controller; the node announce runs on its own fixed timer
+(`peers.announce_interval_ms`, 2000 ms by default) and fans out to every radio.
+Neither knows the other exists. On the 915 settings this project ships (SF8,
+500 kHz, CR 4/7) a position frame holds the channel for 42.62 ms and the beacon
+interval when the node is alone is 284 ms, so the radio is busy 15% of the time
+from beacons alone: an announce lands inside a beacon about 15% of the time and
+a beacon inside an announce about 2.3%, which together is roughly one collision
+every six seconds.
+
+- `tx_deferred` is a frame the driver held back one airtime, in its one-frame
+  slot, and then sent. It is not a fault and not a loss - it cost that frame one
+  airtime of latency and nothing else. It is *expected* to climb steadily on a
+  LoRa radio, by design, and a UI should not style it as an error.
+- `tx_dropped` is a frame that never went out, and nothing on the air records
+  it. It now takes a *third* frame wanting the radio while one is on the air and
+  another is already waiting in the slot. Older firmware counted every ordinary
+  beacon/announce collision here too, which is why a perfectly healthy radio
+  reported a steadily climbing drop count; that half of it is `tx_deferred` now,
+  and what is left is a real overrun.
+- `tx_timeouts` counts times the transmit-done interrupt never arrived and the
+  driver's 500 ms watchdog had to recover the radio. This one IS a fault.
+
+Read them together. Compare `tx_dropped` against `tx` over the same period:
+with the slot in place, drops on a healthy node should be at or near zero, so a
+ratio that is anything but negligible is worth chasing. If `tx_dropped` is
+climbing *and* `tx_timeouts` is non-zero, the timeouts are the diagnosis and the
+drops are the symptom - every transmit attempted inside a watchdog window is
+refused, so the drop count runs away on its own. Anything above zero in
+`tx_timeouts` points at wiring or interrupts, not at range and not at load.
 
 `radios[].transmits` is false for a receive-only driver, which the simulated
 radio is: it injects frames and never keys an antenna.

@@ -47,6 +47,7 @@ from mock_server import (  # noqa: E402
     LOG_LEVELS,
     LOG_TEXT_LEN,
     LORA_MODULATION,
+    LORA_TX_DEFER_EVERY_MS,
     MAX_NAME_LEN,
     MAX_PASSPHRASE_LEN,
     REDACTED_SECRET,
@@ -508,7 +509,8 @@ class StatusShapeTest(ApiTestCase):
             for key in ("index", "name", "enabled", "sim", "tx", "rx_ok",
                         "rx_crypto_fail", "rx_replay", "rx_decode_fail", "rx_self",
                         "last_rssi", "last_rx_age_ms", "beacon_interval_ms",
-                        "airtime_ms", "peers", "rx_dropped", "tx_dropped"):
+                        "airtime_ms", "peers", "rx_dropped", "tx_dropped",
+                        "tx_deferred", "tx_timeouts"):
                 self.assertIn(key, radio, radio.get("name"))
             self.assertIsInstance(radio["sim"], bool)
             self.assertIsInstance(radio["enabled"], bool)
@@ -521,6 +523,21 @@ class StatusShapeTest(ApiTestCase):
             self.assertGreaterEqual(radio["tx_dropped"], 0)
             # False only for a receive-only driver, which the simulated radio is.
             self.assertIsInstance(radio["transmits"], bool)
+
+    def test_transmit_counters_are_present_on_every_radio(self):
+        """tx_deferred and tx_timeouts are emitted unconditionally, zero-filled
+        for the drivers that do not track them, so the UI can tell "none" from
+        "this firmware does not report it"."""
+        radios = {r["name"]: r for r in self.get_json("/api/status")["radios"]}
+        for radio in radios.values():
+            self.assertIsInstance(radio["tx_deferred"], int, radio["name"])
+            self.assertIsInstance(radio["tx_timeouts"], int, radio["name"])
+            self.assertGreaterEqual(radio["tx_deferred"], 0, radio["name"])
+            self.assertGreaterEqual(radio["tx_timeouts"], 0, radio["name"])
+        # ESP-NOW hands the frame to the MAC: no one-frame slot to defer into
+        # and no transmit-done interrupt to miss, so its driver reports neither.
+        self.assertEqual(radios["ESPNOW"]["tx_deferred"], 0)
+        self.assertEqual(radios["ESPNOW"]["tx_timeouts"], 0)
 
     def test_modulation_is_present_on_lora_and_absent_everywhere_else(self):
         """Read back from the driver, so only a driver with a frequency has one.
@@ -1165,6 +1182,11 @@ class LiveModelTest(unittest.TestCase):
         node.advance()
         return node
 
+    @staticmethod
+    def lora(node):
+        return {r["name"]: r
+                for r in node.status_json(node.uptime_ms())["radios"]}["LORA"]
+
     def test_follow_walks_idle_then_acquiring_then_locked(self):
         node = MockNode()
         node.advance()
@@ -1483,6 +1505,52 @@ class LiveModelTest(unittest.TestCase):
         self.assertNotIn("last_snr_db", radios["ESPNOW"])
         self.assertNotIn("modulation", radios["ESPNOW"])
 
+    def test_lora_defers_rather_than_drops(self):
+        """The beacon and the announce are independent schedules on one
+        half-duplex radio and collide several times a minute by design. The
+        driver holds the second frame an airtime and sends it, so a healthy node
+        climbs tx_deferred and leaves tx_dropped alone -- the old behaviour was
+        a drop count climbing on a radio that was working perfectly."""
+        node = self.aged_node(seconds=30.0)
+        lora = self.lora(node)
+        # Roughly one collision every six seconds, so half a minute has some.
+        self.assertGreater(lora["tx_deferred"], 0)
+        self.assertEqual(lora["tx_dropped"], 0)
+        self.assertEqual(lora["tx_timeouts"], 0)
+
+        node._t0 -= 60.0
+        node.advance()
+        later = self.lora(node)
+        self.assertGreater(later["tx_deferred"], lora["tx_deferred"])
+        # A deferral is not a loss and a timeout is not a thing a healthy radio
+        # does: neither of the two fault counters moves with them.
+        self.assertEqual(later["tx_dropped"], 0)
+        self.assertEqual(later["tx_timeouts"], 0)
+        # Paced by node time rather than by this mock's tick, so the rate is the
+        # one the two schedules actually produce. Generous bounds: what matters
+        # is the order of magnitude, not the exact arithmetic.
+        gained = later["tx_deferred"] - lora["tx_deferred"]
+        expected = 60000 // LORA_TX_DEFER_EVERY_MS
+        self.assertGreaterEqual(gained, expected - 1)
+        self.assertLessEqual(gained, expected + 1)
+
+    def test_transmit_counters_never_go_backwards(self):
+        """They are since-boot totals. A UI that diffs two polls to get a rate
+        reads a negative one if they ever step back."""
+        node = self.aged_node(seconds=5.0)
+        seen = {}
+        for _ in range(6):
+            for radio in node.status_json(node.uptime_ms())["radios"]:
+                for key in ("tx", "tx_deferred", "tx_dropped", "tx_timeouts"):
+                    prev = seen.get((radio["name"], key), 0)
+                    self.assertGreaterEqual(radio[key], prev,
+                                            f"{radio['name']}.{key}")
+                    seen[(radio["name"], key)] = radio[key]
+            node._t0 -= 7.0
+            node.advance()
+        # And the run actually went somewhere, or the check above proves nothing.
+        self.assertGreater(seen[("LORA", "tx_deferred")], 0)
+
     def test_the_simulated_radio_has_no_modulation_and_does_not_transmit(self):
         node = self.aged_node(config_patch={"sim": {"enabled": True}})
         radios = {r["name"]: r for r in node.status_json(node.uptime_ms())["radios"]}
@@ -1493,6 +1561,10 @@ class LiveModelTest(unittest.TestCase):
         self.assertNotIn("last_snr_db", radios["SIM"])
         self.assertFalse(radios["SIM"]["transmits"])
         self.assertTrue(radios["LORA"]["transmits"])
+        # Nothing to defer and no interrupt to miss on a radio that never keys
+        # an antenna, but the fields are still there at zero.
+        self.assertEqual(radios["SIM"]["tx_deferred"], 0)
+        self.assertEqual(radios["SIM"]["tx_timeouts"], 0)
 
     def test_power_on_battery_is_self_consistent(self):
         """Nothing charges at zero volts of supply. The two cases have to stay

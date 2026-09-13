@@ -42,6 +42,20 @@ public:
     virtual uint32_t rxDropped() const { return 0; }
     virtual uint32_t txDropped() const { return 0; }
 
+    // Frames held back one airtime because the radio was mid-transmission, and
+    // then sent. Not a fault: the node's beacon and announce schedules are
+    // independent and land together several times a minute by design. Reported
+    // because the alternative to counting them separately is a drop counter
+    // that climbs on a perfectly healthy radio.
+    virtual uint32_t txDeferred() const { return 0; }
+
+    // Times the transmit-done interrupt never arrived and the driver's watchdog
+    // had to recover the radio. This one IS a fault, and it is the reason
+    // txDropped() can run away: every transmit inside the watchdog window is
+    // refused. Counting it separately is what tells a node whose two schedules
+    // merely overlapped from a node whose interrupts are going missing.
+    virtual uint32_t txTimeouts() const { return 0; }
+
     // False for a receive-only driver; see IRadioSet::radioTransmits().
     virtual bool transmits() const { return true; }
 
