@@ -3,7 +3,7 @@ import { h, render, useRef, useState, useEffect, html, Router } from './bundle.j
 import LoadingSpinner, {
   Icons, tipColors, Button, Colored, Stat, Setting, Notification, Banner, Card, Note,
   SectionTitle, ConfigActions, PeerTable, RadarScope, RadioCard, WifiCard, FrameLogView, Sparkline,
-  PowerCard, NoPowerCard, SystemCard, LoopCard, LogView, LOG_FILTERS, GnssCard,
+  PowerCard, NoPowerCard, SystemCard, LoopCard, LogView, LOG_FILTERS, GnssCard, GnssLinkCard,
   Th, Td, peerPartial, present, num, age, uptime, latLon, speedMs, courseDeg, DASH,
 } from './components.js';
 import FollowPage from './follow.js';
@@ -786,6 +786,7 @@ const LOG_POLL_MS = 1000;
 const LOG_SCROLLBACK = 400;
 
 function System({ status }) {
+  const [gnss, setGnss] = useState(null);
   const [log, setLog] = useState({ entries: [], total: null, capacity: null, warnings: 0, errors: 0 });
   const [logError, setLogError] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -823,6 +824,21 @@ function System({ status }) {
     return () => { stopped = true; clearTimeout(timer); };
   }, []);
 
+  // Slower than the log: these counters move in the thousands and nothing about
+  // them needs to be watched at a second's resolution.
+  useEffect(() => {
+    let stopped = false, timer = null;
+    const tick = () => {
+      if (stopped) return;
+      api('/api/gnss')
+        .then(r => { if (!stopped && r) setGnss(r); })
+        .catch(() => { /* absent on a build with no GPS; the card says so */ })
+        .then(() => { if (!stopped) timer = setTimeout(tick, 2000); });
+    };
+    tick();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, []);
+
   const clearLog = () => api('/api/log', { method: 'DELETE' })
     .then(() => {
       // The device keeps its running total across a clear so a client cursor
@@ -845,6 +861,10 @@ function System({ status }) {
     ${power ? html`<${PowerCard} power=${power} />` : html`<${NoPowerCard} expected=${pmicMissing} />`}
     <${SystemCard} system=${status.system} node=${status.node} />
     <${LoopCard} loop=${status.loop} />
+  <//>
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <${GnssCard} location=${status.location} />
+    <${GnssLinkCard} link=${gnss} />
   <//>
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
     <div class="lg:col-span-2">

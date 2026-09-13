@@ -11,6 +11,20 @@ int32_t readI32(const uint8_t* p, size_t off) {
     return wire::get_i32(q);
 }
 uint8_t readU8(const uint8_t* p, size_t off) { return p[off]; }
+uint16_t readU16(const uint8_t* p, size_t off) {
+    const uint8_t* q = p + off;
+    return wire::get_u16(q);
+}
+
+// Ground course arrives in several units across the UBX messages; every one of
+// them ends up here as decidegrees in [0, 3599].
+uint16_t normaliseCourseDdeg(int32_t ddeg) {
+    ddeg %= 3600;
+    if (ddeg < 0) {
+        ddeg += 3600;
+    }
+    return static_cast<uint16_t>(ddeg);
+}
 
 // Write a full UBX frame (sync..checksum) around a payload already placed at
 // buf+6. Returns the total frame length.
@@ -120,11 +134,80 @@ bool decodeNavPvt(const uint8_t* p, uint16_t len, UbxFix& out) {
     out.speed_cms = static_cast<uint16_t>(readI32(p, 60) / 10);  // mm/s -> cm/s
 
     // headMot is deg * 1e5; convert to decidegrees and normalize to [0,3599].
-    int32_t ddeg = readI32(p, 64) / 10000;
-    ddeg %= 3600;
-    if (ddeg < 0) ddeg += 3600;
-    out.course_ddeg = static_cast<uint16_t>(ddeg);
+    out.course_ddeg = normaliseCourseDdeg(readI32(p, 64) / 10000);
     return true;
+}
+
+bool decodeNavPosllh(const uint8_t* p, uint16_t len, UbxPosLlh& out) {
+    if (len < 28) {
+        return false;
+    }
+    out.lon = readI32(p, 4);
+    out.lat = readI32(p, 8);
+    // hMSL, at offset 16, in millimetres. Offset 12 is height above the
+    // ellipsoid, which is the wrong one and differs by tens of metres.
+    out.alt_m = static_cast<int16_t>(readI32(p, 16) / 1000);
+    return true;
+}
+
+bool decodeNavSol(const uint8_t* p, uint16_t len, UbxSol& out) {
+    if (len < 52) {
+        return false;
+    }
+    const uint8_t fix_type = readU8(p, 10);
+    const uint8_t flags = readU8(p, 11);
+    // Bit 0 is GPSfixOK. Same rule as NAV-PVT's gnssFixOK: a fix the receiver
+    // does not trust is reported as no fix rather than as its claimed quality.
+    const bool ok = (flags & 0x01) != 0;
+    out.valid = ok && (fix_type == 2 || fix_type == 3);
+    out.fix_type = ok ? fix_type : 0;
+    out.num_sat = readU8(p, 47);
+    return true;
+}
+
+bool decodeNavVelned(const uint8_t* p, uint16_t len, UbxVelNed& out) {
+    if (len < 36) {
+        return false;
+    }
+    // gSpeed at offset 20 is ground speed; offset 16 is 3D speed, which is
+    // larger whenever the aircraft is climbing.
+    const int32_t gspeed = readI32(p, 20);
+    out.speed_cms = static_cast<uint16_t>(gspeed < 0 ? 0 : gspeed);
+    // heading is deg * 1e5; to decidegrees is a division by 10000.
+    out.course_ddeg = normaliseCourseDdeg(readI32(p, 24) / 10000);
+    return true;
+}
+
+bool decodeNavDop(const uint8_t* p, uint16_t len, uint16_t& hdop_x100) {
+    if (len < 18) {
+        return false;
+    }
+    // hDOP is already scaled x100, which is what NodeLocation wants.
+    hdop_x100 = readU16(p, 12);
+    return true;
+}
+
+bool decodeAck(const uint8_t* p, uint16_t len, uint8_t& cls, uint8_t& id) {
+    if (len < 2) {
+        return false;
+    }
+    cls = p[0];
+    id = p[1];
+    return true;
+}
+
+size_t buildLegacyNavConfig(uint8_t* buf, size_t cap) {
+    static const uint8_t kIds[] = {kUbxIdNavPosllh, kUbxIdNavSol, kUbxIdNavVelned,
+                                   kUbxIdNavDop};
+    size_t total = 0;
+    for (size_t i = 0; i < sizeof(kIds) / sizeof(kIds[0]); i++) {
+        const size_t n = buildCfgMsg(kUbxClassNav, kIds[i], 1, buf + total, cap - total);
+        if (n == 0) {
+            return 0;
+        }
+        total += n;
+    }
+    return total;
 }
 
 size_t buildCfgRate(uint16_t meas_ms, uint8_t* buf, size_t cap) {

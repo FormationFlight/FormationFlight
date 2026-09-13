@@ -2,6 +2,10 @@
 
 #include "DirectGpsLocationSource.h"
 
+#include <cstring>
+
+#include "log.h"
+
 namespace ff {
 
 namespace {
@@ -44,9 +48,22 @@ void DirectGpsLocationSource::sendConfig() {
     n = buildCfgRate(meas_ms_, buf, sizeof(buf));
     serial_->write(buf, n);
 
-    // Emit UBX-NAV-PVT every solution.
-    n = buildCfgMsg(kUbxClassNav, kUbxIdNavPvt, 1, buf, sizeof(buf));
-    serial_->write(buf, n);
+    if (legacy_) {
+        // Already established that this module predates NAV-PVT. Go straight to
+        // the older set so a re-sweep does not spend four seconds relearning it.
+        uint8_t legacy[64];
+        n = buildLegacyNavConfig(legacy, sizeof(legacy));
+        if (n != 0) {
+            serial_->write(legacy, n);
+        }
+    } else {
+        // Emit UBX-NAV-PVT every solution, and watch for the answer: a module
+        // old enough to lack it will NAK this, and that NAK is the only thing
+        // that distinguishes it from a module that is simply not wired up.
+        n = buildCfgMsg(kUbxClassNav, kUbxIdNavPvt, 1, buf, sizeof(buf));
+        serial_->write(buf, n);
+        awaiting_pvt_ack_ = true;
+    }
 
     // Silence the standard NMEA sentences (GGA,GLL,GSA,GSV,RMC,VTG) so the fast
     // stream stays compact.
@@ -79,9 +96,20 @@ void DirectGpsLocationSource::service() {
 
     // Drain buffered bytes (capped) -- never wait.
     for (int budget = 256; budget > 0 && serial_->available() > 0; budget--) {
-        if (parser_.feed(static_cast<uint8_t>(serial_->read()))) {
-            if (parser_.msgClass() == kUbxClassNav && parser_.msgId() == kUbxIdNavPvt) {
-                handlePvt();
+        const uint8_t b = static_cast<uint8_t>(serial_->read());
+        noteByte(b);
+        if (parser_.feed(b)) {
+            ubx_frames_++;
+            noteMessage(parser_.msgClass(), parser_.msgId());
+            if (parser_.msgClass() == kUbxClassNav) {
+                if (parser_.msgId() == kUbxIdNavPvt) {
+                    nav_pvt_++;
+                    handlePvt();
+                } else {
+                    handleLegacyNav(parser_.msgId());
+                }
+            } else if (parser_.msgClass() == kUbxClassAck) {
+                handleAck(parser_.msgId() == kUbxIdAckAck);
             }
         }
     }
@@ -116,7 +144,152 @@ void DirectGpsLocationSource::service() {
         state_ = Sweep;
         sweep_idx_ = 0;
         sweep_step_ms_ = now - kSweepStepMs;
+        sweeps_++;
+        // Only the first one. This loops every four seconds when a module will
+        // not speak to us, and 48 log entries would be gone in three minutes.
+        if (sweeps_ == 1) {
+            FF_LOGW("GNSS: no NAV-PVT in %us, restarting baud sweep (%u bytes seen)",
+                    static_cast<unsigned>(kSilenceTimeoutMs / 1000),
+                    static_cast<unsigned>(bytes_));
+        }
     }
+}
+
+// The older navigation messages, each carrying one part of what NAV-PVT says in
+// a single frame. They are merged into the same cached location, so whichever
+// protocol generation the module speaks, everything above this driver sees the
+// same thing.
+void DirectGpsLocationSource::handleLegacyNav(uint8_t id) {
+    switch (id) {
+        case kUbxIdNavPosllh: {
+            UbxPosLlh p{};
+            if (!decodeNavPosllh(parser_.payload(), parser_.length(), p)) return;
+            cached_.lat = p.lat;
+            cached_.lon = p.lon;
+            cached_.alt_m = p.alt_m;
+            break;
+        }
+        case kUbxIdNavSol: {
+            UbxSol sol{};
+            if (!decodeNavSol(parser_.payload(), parser_.length(), sol)) return;
+            cached_.valid = sol.valid;
+            cached_.fix_type = sol.fix_type;
+            cached_.sats = sol.num_sat;
+            break;
+        }
+        case kUbxIdNavVelned: {
+            UbxVelNed v{};
+            if (!decodeNavVelned(parser_.payload(), parser_.length(), v)) return;
+            cached_.speed_cms = v.speed_cms;
+            cached_.course_ddeg = v.course_ddeg;
+            break;
+        }
+        case kUbxIdNavDop: {
+            uint16_t hdop = 0;
+            if (!decodeNavDop(parser_.payload(), parser_.length(), hdop)) return;
+            cached_.hdop = hdop;
+            break;
+        }
+        default:
+            return;
+    }
+    // Any of the four counts as the module talking to us, so the silence
+    // watchdog does not restart a sweep that has already succeeded.
+    last_pvt_ms_ = millis();
+}
+
+// A NAK for the message we just asked for is the module saying it has never
+// heard of it, which is exactly what a pre-protocol-14 receiver does when asked
+// for NAV-PVT. Without acting on it the driver waits forever for a message that
+// is never going to arrive, while the receiver sits there holding a fix.
+void DirectGpsLocationSource::handleAck(bool acked) {
+    if (!awaiting_pvt_ack_ || legacy_) {
+        return;
+    }
+    uint8_t cls = 0, id = 0;
+    if (!decodeAck(parser_.payload(), parser_.length(), cls, id)) {
+        return;
+    }
+    if (cls != kUbxClassCfg || id != kUbxIdCfgMsg) {
+        return;  // some other request; not the answer we are waiting on
+    }
+    awaiting_pvt_ack_ = false;
+    if (acked) {
+        return;  // modern module, NAV-PVT is on its way
+    }
+
+    legacy_ = true;
+    FF_LOGW("GNSS: module has no NAV-PVT, falling back to the legacy nav set");
+    uint8_t buf[64];
+    const size_t n = buildLegacyNavConfig(buf, sizeof(buf));
+    if (n != 0) {
+        serial_->write(buf, n);
+    }
+    // Give the module the full silence window to answer the new request rather
+    // than tearing the sweep down while it is still being configured.
+    last_pvt_ms_ = millis();
+}
+
+void DirectGpsLocationSource::noteByte(uint8_t b) {
+    bytes_++;
+    last_byte_ms_ = millis();
+    // An NMEA sentence starts "$G..." for every GNSS talker, or "$P" for a
+    // proprietary one. Testing the second byte as well matters: a bare '$' is
+    // 0x24, which turns up constantly inside binary UBX payloads, and counting
+    // those made a pure-UBX stream look like it was full of NMEA.
+    if (prev_byte_ == '$' && (b == 'G' || b == 'P')) {
+        nmea_++;
+    }
+    prev_byte_ = b;
+    sniff_[sniff_head_] = b;
+    sniff_head_ = (sniff_head_ + 1) % kSniffBytes;
+    if (sniff_count_ < kSniffBytes) {
+        sniff_count_++;
+    }
+}
+
+void DirectGpsLocationSource::noteMessage(uint8_t cls, uint8_t id) {
+    for (size_t i = 0; i < kGnssSeenTypes; i++) {
+        if (seen_[i].count != 0 && seen_[i].cls == cls && seen_[i].id == id) {
+            seen_[i].count++;
+            return;
+        }
+        if (seen_[i].count == 0) {
+            seen_[i].cls = cls;
+            seen_[i].id = id;
+            seen_[i].count = 1;
+            return;
+        }
+    }
+    // Table full. Nine distinct message types means the module is sending its
+    // defaults rather than what we asked for, which the counts already show.
+}
+
+GnssLinkStats DirectGpsLocationSource::gnssStats(uint32_t now_ms) const {
+    GnssLinkStats s;
+    s.bytes = bytes_;
+    s.ubx_frames = ubx_frames_;
+    s.nav_pvt = nav_pvt_;
+    s.nmea = nmea_;
+    s.sweeps = sweeps_;
+    s.baud = current_baud_;
+    s.configured = (state_ == Parse);
+    s.last_byte_age_ms = (last_byte_ms_ == 0) ? 0 : (now_ms - last_byte_ms_);
+    s.last_pvt_age_ms = (nav_pvt_ == 0) ? 0 : (now_ms - last_pvt_ms_);
+    for (size_t i = 0; i < kGnssSeenTypes; i++) {
+        s.seen[i] = seen_[i];
+    }
+    return s;
+}
+
+size_t DirectGpsLocationSource::gnssSniff(uint8_t* out, size_t cap) const {
+    const size_t n = (sniff_count_ < cap) ? sniff_count_ : cap;
+    // Oldest first, so a hex dump reads in the order the bytes arrived.
+    const size_t start = (sniff_head_ + kSniffBytes - n) % kSniffBytes;
+    for (size_t i = 0; i < n; i++) {
+        out[i] = sniff_[(start + i) % kSniffBytes];
+    }
+    return n;
 }
 
 }  // namespace ff

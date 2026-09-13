@@ -14,6 +14,7 @@
 #include "SimRadio.h"
 #include "config.h"
 #include "crypto.h"
+#include "gnss_link.h"
 #include "follow.h"
 #include "node.h"
 #include "radio_hub.h"
@@ -43,6 +44,7 @@ struct WebDeps {
     SimRadio* sim = nullptr;             // null when the simulator is compiled out
     CcmCrypto* crypto = nullptr;         // null in plaintext passthrough mode
     ILocationSource* location = nullptr;
+    IGnssLink* gnss = nullptr;  // null unless a GPS is wired straight to this node
     const char* fw_version = "dev";
     uint32_t uid = 0;
     uint8_t wifi_channel = 1;

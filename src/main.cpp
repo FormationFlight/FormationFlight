@@ -309,8 +309,10 @@ void setup() {
 #ifdef GNSS_ENABLED
     g_gps.begin(GNSS_UART_INDEX, GNSS_PIN_RX, GNSS_PIN_TX, g_settings.gnss_rate_hz);
     ff::ILocationSource* location = &g_gps;
+    ff::IGnssLink* gnss_link = &g_gps;
 #else
     ff::ILocationSource* location = &g_fc;
+    ff::IGnssLink* gnss_link = nullptr;
 #endif
 
 #ifdef IO_LED_PIN
@@ -360,6 +362,7 @@ void setup() {
     web.sim = &g_sim;
     web.crypto = g_crypto_enabled ? &g_ccm : nullptr;
     web.location = location;
+    web.gnss = gnss_link;
     web.fw_version = FIRMWARE_VERSION;
     web.uid = g_uid;
     web.wifi_channel = g_wifi_channel;

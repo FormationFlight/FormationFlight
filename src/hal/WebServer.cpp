@@ -618,6 +618,62 @@ void WebServer::registerRoutes() {
         sendJson(request, doc);
     });
 
+    // What the GPS module is saying, as opposed to whether we understood it.
+    //
+    // A receiver with a fix and a receiver that is not wired up look identical
+    // in /api/status: no fix, zero satellites. The byte count separates those
+    // two on its own, and the raw tap settles everything else - a module can be
+    // working perfectly and still be unintelligible to us, and no count of
+    // frames we parsed successfully can show that, because it reads zero either
+    // way.
+    s->on("/api/gnss", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebDeps& d = WebServer::instance()->deps();
+        DynamicJsonDocument doc(4096);
+        JsonObject root = doc.to<JsonObject>();
+        if (d.gnss == nullptr) {
+            root["present"] = false;
+            sendJson(request, doc);
+            return;
+        }
+        root["present"] = true;
+        const GnssLinkStats st = d.gnss->gnssStats(millis());
+        root["bytes"] = st.bytes;
+        root["ubx_frames"] = st.ubx_frames;
+        root["nav_pvt"] = st.nav_pvt;
+        root["nmea"] = st.nmea;
+        root["sweeps"] = st.sweeps;
+        root["baud"] = st.baud;
+        root["configured"] = st.configured;
+        root["last_byte_age_ms"] = st.last_byte_age_ms;
+        root["last_pvt_age_ms"] = st.last_pvt_age_ms;
+
+        JsonArray seen = root.createNestedArray("seen");
+        char idbuf[16];
+        for (size_t i = 0; i < kGnssSeenTypes; i++) {
+            if (st.seen[i].count == 0) {
+                continue;
+            }
+            JsonObject o = seen.createNestedObject();
+            std::snprintf(idbuf, sizeof(idbuf), "%02x:%02x", st.seen[i].cls, st.seen[i].id);
+            o["msg"] = idbuf;
+            o["count"] = st.seen[i].count;
+        }
+
+        uint8_t raw[192];
+        const size_t n = d.gnss->gnssSniff(raw, sizeof(raw));
+        // Hex, because the interesting cases are a module speaking a protocol
+        // we did not ask for, and that is only recognisable byte by byte.
+        String hex;
+        hex.reserve(n * 2 + 1);
+        static const char kHex[] = "0123456789abcdef";
+        for (size_t i = 0; i < n; i++) {
+            hex += kHex[raw[i] >> 4];
+            hex += kHex[raw[i] & 0x0F];
+        }
+        root["raw_hex"] = hex;
+        sendJson(request, doc);
+    });
+
     s->on("/api/log", HTTP_DELETE, [](AsyncWebServerRequest* request) {
         logRing().clear();
         request->send(200, "text/plain", "cleared");

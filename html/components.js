@@ -1185,3 +1185,93 @@ export function GnssCard({ location }) {
   <//>`}
 <//>`;
 }
+
+/**
+ * What the GPS module is saying, as opposed to whether we understood it.
+ *
+ * A receiver holding a perfect fix and a receiver that is not wired up look
+ * identical on the GNSS card above: no fix, zero satellites. Only the byte
+ * count separates those two, which is why it is here and not left to a serial
+ * console nobody has attached.
+ */
+export function GnssLinkCard({ link }) {
+  const g = link || {};
+  if (!g.present) {
+    return html`
+<${Card} title="GPS link" icon=${Icons.wrench}
+  right=${html`<${Colored} text="none wired" colors=${tipColors.gray} />`}>
+  <p class="text-sm text-slate-500 dark:text-slate-400">
+    No GPS wired directly to this node. Position comes from the flight controller over MSP, so if it is
+    missing, look at the FC link rather than here.
+  <//>
+<//>`;
+  }
+  const silent = !g.bytes;
+  const talkingButUnread = g.bytes > 0 && !g.ubx_frames;
+  const chip = silent ? ['silent', tipColors.red, 'Not one byte has arrived. The module is unpowered, mis-wired, or at a baud rate the sweep never reaches. Nothing else on this card matters until this changes.']
+    : talkingButUnread ? ['not understood', tipColors.red, 'Bytes are arriving but none of them parse as UBX. The port configuration never took effect, or this is not a u-blox module.']
+      : g.sweeps > 0 && !g.configured ? ['searching', tipColors.yellow, 'Cycling through baud rates looking for the module.']
+        : ['linked', tipColors.green, 'Configured, and navigation messages are arriving.'];
+  // NAV-PVT only exists from u-blox protocol 14. An older module rejects the
+  // request for it and the driver falls back, so zero here next to a healthy
+  // frame count is a legitimate steady state, not a fault.
+  const legacy = g.configured && g.ubx_frames > 0 && !g.nav_pvt;
+  return html`
+<${Card} title="GPS link" icon=${Icons.wrench}
+  right=${html`<${Colored} text=${chip[0]} colors=${chip[1]} title=${chip[2]} />`}>
+  <div class="grid grid-cols-3 gap-3">
+    <${Metric} label="Bytes" value=${num(g.bytes)}
+      tone=${silent ? 'text-red-600' : ''}
+      tip="Every byte the UART handed us, whether or not it parsed. Zero means the module is not talking at all, and no amount of looking at the fix will tell you that." />
+    <${Metric} label="UBX frames" value=${num(g.ubx_frames)}
+      tone=${talkingButUnread ? 'text-red-600' : ''}
+      tip="Checksum-valid UBX frames. Zero while bytes climb means we are hearing the module and cannot read it." />
+    <${Metric} label="Baud" value=${num(g.baud)}
+      tip="The port speed the driver settled on. It sweeps candidates at startup and raises the module to its own target." />
+  <//>
+  <div class="grid grid-cols-3 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="NAV-PVT" value=${num(g.nav_pvt)}
+      tip="The single modern message carrying everything. It only exists from u-blox protocol 14, so an older receiver reports zero here for ever and is working perfectly." />
+    <${Metric} label="NMEA" value=${num(g.nmea)}
+      tip="NMEA sentences seen. A handful at startup is normal, before our port configuration takes effect. A count that keeps climbing means it never did." />
+    <${Metric} label="Sweeps" value=${num(g.sweeps)}
+      tone=${g.sweeps > 0 ? 'text-yellow-600' : ''}
+      tip="Times the driver gave up and restarted baud detection. Anything climbing means it has never held a conversation for four seconds together." />
+  <//>
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="Last byte" value=${present(g.last_byte_age_ms) && g.bytes ? age(g.last_byte_age_ms) + ' ago' : 'never'}
+      tip="Time since anything at all arrived from the module." />
+    <${Metric} label="Last fix message" value=${present(g.last_pvt_age_ms) && (g.nav_pvt || g.ubx_frames) ? age(g.last_pvt_age_ms) + ' ago' : 'never'}
+      tip="Time since a usable navigation message arrived. Four seconds of this and the driver restarts its sweep." />
+  <//>
+  ${(g.seen || []).length > 0 && html`
+  <div class="mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <div class="text-xs uppercase tracking-wide text-gray-400 mb-2"
+      title="UBX message types received, by class and id. What the module actually sends, which is not always what it was asked for.">Messages seen<//>
+    <div class="flex flex-wrap gap-2">
+      ${g.seen.map(m => html`
+        <span key=${m.msg} class="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+          title=${UBX_NAMES[m.msg] || 'UBX class:id'}>${UBX_NAMES[m.msg] || m.msg} · ${num(m.count)}<//>`)}
+    <//>
+  <//>`}
+  ${legacy && html`
+  <div class="mt-4 flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded px-3 py-2">
+    <${Icons.info} class="w-5 h-5 shrink-0" />
+    <span>This module predates NAV-PVT and rejected the request for it, so the driver fell back to the older
+      navigation messages. Position, satellites and HDOP are all present either way. Nothing to fix.<//>
+  <//>`}
+<//>`;
+}
+
+// The handful of UBX messages this firmware ever asks for or sees, so the chips
+// read as names rather than as hex nobody remembers.
+const UBX_NAMES = {
+  '01:02': 'NAV-POSLLH',
+  '01:03': 'NAV-STATUS',
+  '01:04': 'NAV-DOP',
+  '01:06': 'NAV-SOL',
+  '01:07': 'NAV-PVT',
+  '01:12': 'NAV-VELNED',
+  '05:00': 'ACK-NAK',
+  '05:01': 'ACK-ACK',
+};

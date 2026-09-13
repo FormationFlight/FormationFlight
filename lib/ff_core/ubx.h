@@ -22,6 +22,25 @@ namespace ff {
 
 constexpr uint8_t kUbxClassNav = 0x01;
 constexpr uint8_t kUbxIdNavPvt = 0x07;
+
+// The legacy navigation set.
+//
+// NAV-PVT is a single message carrying everything, and it arrived in u-blox
+// protocol version 14. Anything older -- a NEO-6M, which is what a great many
+// T-Beams are actually fitted with -- does not have it, NAKs the CFG-MSG that
+// asks for it, and then sits there emitting nothing while the receiver is
+// perfectly happy and holding a fix. Four older messages cover the same ground.
+constexpr uint8_t kUbxIdNavPosllh = 0x02;  // lat, lon, altitude
+constexpr uint8_t kUbxIdNavSol = 0x06;     // fix type, satellites used
+constexpr uint8_t kUbxIdNavVelned = 0x12;  // ground speed, heading
+constexpr uint8_t kUbxIdNavDop = 0x04;     // dilution of precision
+
+// Acknowledgements. The NAK is load-bearing: it is how a module tells us it has
+// never heard of the message we just asked for, and it is the only warning we
+// get before an indefinite silence that looks exactly like bad wiring.
+constexpr uint8_t kUbxClassAck = 0x05;
+constexpr uint8_t kUbxIdAckNak = 0x00;
+constexpr uint8_t kUbxIdAckAck = 0x01;
 constexpr uint8_t kUbxClassCfg = 0x06;
 constexpr uint8_t kUbxIdCfgPrt = 0x00;
 constexpr uint8_t kUbxIdCfgMsg = 0x01;
@@ -47,6 +66,38 @@ struct UbxFix {
     uint16_t speed_cms = 0;    // cm/s
     uint16_t course_ddeg = 0;  // decidegrees 0..3599
 };
+
+// UBX-NAV-POSLLH: position only.
+struct UbxPosLlh {
+    int32_t lat = 0;   // deg * 1e7
+    int32_t lon = 0;   // deg * 1e7
+    int16_t alt_m = 0; // metres MSL
+};
+
+// UBX-NAV-SOL: fix quality only.
+struct UbxSol {
+    bool valid = false;
+    uint8_t fix_type = 0;  // same numbering as NAV-PVT: 0 none, 2 2D, 3 3D
+    uint8_t num_sat = 0;
+};
+
+// UBX-NAV-VELNED: motion only.
+struct UbxVelNed {
+    uint16_t speed_cms = 0;
+    uint16_t course_ddeg = 0;  // 0..3599
+};
+
+bool decodeNavPosllh(const uint8_t* p, uint16_t len, UbxPosLlh& out);
+bool decodeNavSol(const uint8_t* p, uint16_t len, UbxSol& out);
+bool decodeNavVelned(const uint8_t* p, uint16_t len, UbxVelNed& out);
+// Horizontal dilution of precision, x100, matching NodeLocation::hdop.
+bool decodeNavDop(const uint8_t* p, uint16_t len, uint16_t& hdop_x100);
+// The class and id of the message being acknowledged or rejected.
+bool decodeAck(const uint8_t* p, uint16_t len, uint8_t& cls, uint8_t& id);
+
+// Enables the legacy navigation set on `buf`, which must hold at least
+// 4 * (8 + 3) bytes. Returns the total length written.
+size_t buildLegacyNavConfig(uint8_t* buf, size_t cap);
 
 class UbxParser {
 public:
