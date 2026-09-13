@@ -93,6 +93,11 @@ def generate_handler(file_path, file_array_name, encoding):
     mime_type = get_mime_type(file_path)
     handler_base = '''
     server->on("{file_path}", HTTP_GET, [](AsyncWebServerRequest *request) {{
+        // Counted like every other handler. Serving the UI's own scripts is the
+        // single largest burst of work this server does, and leaving it out
+        // would charge it to the main loop on any platform where the server
+        // preempts the sketch. See webBusyUs() in WebServer.h.
+        ff::WebBusyScope busy;
         AsyncWebServerResponse *response = request->beginResponse_P(200, "{mime_type}", (uint8_t *){file_array_name}, sizeof({file_array_name}));
         response->addHeader("Content-Encoding", "{encoding}");
         request->send(response);

@@ -1012,11 +1012,21 @@ export const microseconds = v => (present(v)
 /**
  * How long the main loop takes to go round.
  *
- * ALOHA gets its collision behavior from transmitting close to when it meant
- * to. A loop that stalls for longer than the beacon interval does not merely
- * transmit late, it misses the transmission entirely, and the mean hides that
- * completely - which is why the worst case and the overrun count are the two
- * numbers given the most room here.
+ * Time spent inside web request handlers is deducted from these figures and
+ * reported separately, because on a chip with a preemptive scheduler it
+ * otherwise lands on whichever iteration it interrupted and reads as a node
+ * that cannot keep up. Measured on hardware, thirty status requests moved an
+ * ESP32's worst iteration to 325 ms and moved an ESP8266's, running identical
+ * firmware, by nothing at all.
+ *
+ * The deduction is partial by nature. What the network stack does on its own
+ * behalf cannot be attributed, so the maximum still carries some of it, which
+ * is why the stall threshold is set at a quarter of the peer timeout rather
+ * than somewhere that would assume a clean measurement.
+ *
+ * What is left is worth watching. ALOHA gets its collision behavior from
+ * transmitting close to when it meant to, and a node that keeps working as it
+ * slows down goes on working right until it does not.
  */
 export function LoopCard({ loop, onReset }) {
   const l = loop || {};
@@ -1028,11 +1038,11 @@ export function LoopCard({ loop, onReset }) {
 <${Card} title="Main loop" icon=${Icons.clock}
   right=${html`
     <div class="flex items-center gap-3">
-      <${Colored} text=${over ? over + ' overrun' + (over === 1 ? '' : 's') : 'clean'}
+      <${Colored} text=${over ? over + ' stall' + (over === 1 ? '' : 's') : 'healthy'}
         colors=${over ? tipColors.red : tipColors.green}
         title=${present(threshold) && threshold > 0
-          ? 'Loop iterations that took at least ' + microseconds(threshold) + ', the fastest beacon interval this node uses. Each one could have missed a transmission outright.'
-          : 'Overrun counting is off on this build.'} />
+          ? 'Iterations of the node's own work that took at least ' + microseconds(threshold) + ', a quarter of the peer timeout. Losing one beacon is not counted: the beacon stream is redundant and peers hold a node for six seconds. This is a stall long enough to be a real fraction of the way to being dropped by everyone.'
+          : 'Stall counting is off on this build.'} />
       ${onReset && html`<button type="button" onclick=${onReset}
         class="px-2 py-0.5 text-xs font-medium rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
         title="Clear the min, max and mean window. The overrun count deliberately survives: 'it has stalled since boot' does not stop being true because someone pressed a button.">reset<//>`}
@@ -1051,17 +1061,34 @@ export function LoopCard({ loop, onReset }) {
       tip="The worst iteration in the window. This is the number that matters: one enormous stall behind a healthy mean is exactly what this exists to surface." />
     <${Metric} label="Samples" value=${num(l.samples)} tip="Iterations measured since the window was last reset." />
   <//>
+  ${present(l.web_busy_ms) && html`
+  <div class="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-gray-200 dark:border-slate-700">
+    <${Metric} label="Serving this page" value=${webTime(l.web_busy_ms)}
+      tip="Time spent inside request handlers since boot, deducted from the figures above. It is a real cost and it is not a fault: a node with this page open is busier than one without, and used to report that as a loop that could not keep up. The network stack's own work cannot be attributed this way, so some of it still shows in the maximum." />
+    <${Metric} label="Requests served" value=${num(l.web_requests)}
+      tip="Web requests answered since boot." />
+  <//>`}
   ${over > 0 && html`
   <div class="mt-4 flex items-start gap-2 text-sm text-red-900 dark:text-red-200 bg-red-100 dark:bg-red-900 rounded px-3 py-2">
     <${Icons.warn} class="w-5 h-5 shrink-0" />
     <span>
-      <span class="font-semibold">${over} iteration${over === 1 ? '' : 's'} ran past ${microseconds(threshold)}.<//>
-      ${' '}Worst was ${microseconds(l.max_us)}. A stall that long can swallow a beacon whole, and nothing on
-      the air records a transmission that never happened.
+      <span class="font-semibold">${over} stall${over === 1 ? '' : 's'} past ${microseconds(threshold)}.<//>
+      ${' '}Worst was ${microseconds(l.max_us)}, and that is the node's own work with the web server already
+      discounted. A stall this long costs several beacons in a row, which is the pattern that makes peers
+      drop a node rather than just losing an update.
     <//>
   <//>`}
 <//>`;
 }
+
+// Web time runs to minutes on a node someone has left a dashboard open against,
+// and a six-digit millisecond count reads as alarming when it is not.
+const webTime = ms => {
+  if (!present(ms)) return DASH;
+  if (ms < 1000) return ms + ' ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
+  return Math.floor(ms / 60000) + 'm ' + String(Math.floor(ms / 1000) % 60).padStart(2, '0') + 's';
+};
 
 // ---- Device log --------------------------------------------------------------
 

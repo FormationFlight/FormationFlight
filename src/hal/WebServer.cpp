@@ -212,6 +212,28 @@ void WebServer::loop(uint32_t now_ms) {
 
 namespace {
 
+}  // namespace
+
+namespace {
+// Accumulated across two tasks on ESP32 (the async server writes, the loop
+// reads). Both are 32-bit aligned scalars, so a read never sees half a value;
+// the worst case is a read landing one request early, which costs a few hundred
+// microseconds of accuracy on a counter measured in seconds.
+volatile uint32_t g_web_busy_us = 0;
+volatile uint32_t g_web_requests = 0;
+}  // namespace
+
+uint32_t webBusyUs() { return g_web_busy_us; }
+uint32_t webRequests() { return g_web_requests; }
+
+WebBusyScope::WebBusyScope() : start_us_(micros()) {}
+WebBusyScope::~WebBusyScope() {
+    g_web_busy_us += micros() - start_us_;
+    g_web_requests++;
+}
+
+namespace {
+
 void fillStatus(WebDeps& d, JsonObject root) {
     char hex[9];
 
@@ -448,6 +470,10 @@ void fillStatus(WebDeps& d, JsonObject root) {
 
     if (d.loop_stats != nullptr) {
         JsonObject lp = root.createNestedObject("loop");
+        // Reported rather than merely deducted: the time is real, it is just
+        // not the loop's fault.
+        lp["web_busy_ms"] = static_cast<uint32_t>(d.loop_stats->excludedUs() / 1000);
+        lp["web_requests"] = webRequests();
         lp["last_us"] = d.loop_stats->lastUs();
         lp["min_us"] = d.loop_stats->minUs();
         lp["max_us"] = d.loop_stats->maxUs();
@@ -478,6 +504,7 @@ void WebServer::registerRoutes() {
     AsyncWebServer* server = server_;
 
     s->on("/api/status", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         DynamicJsonDocument doc(kStatusJsonCapacity);
         JsonObject root = doc.to<JsonObject>();
         fillStatus(WebServer::instance()->deps(), root);
@@ -485,6 +512,7 @@ void WebServer::registerRoutes() {
     });
 
     s->on("/api/config", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         DynamicJsonDocument doc(kConfigJsonCapacity);
         JsonObject root = doc.to<JsonObject>();
         configToJson(*WebServer::instance()->deps().cfg, root, /*redact_secrets=*/true);
@@ -496,6 +524,7 @@ void WebServer::registerRoutes() {
     // plumbing.
     AsyncCallbackJsonWebHandler* configPost = new AsyncCallbackJsonWebHandler(
         "/api/config", [](AsyncWebServerRequest* request, JsonVariant& json) {
+            WebBusyScope busy;
             WebDeps& d = WebServer::instance()->deps();
             if (!json.is<JsonObject>()) {
                 request->send(400, "text/plain", "body must be a JSON object");
@@ -517,6 +546,7 @@ void WebServer::registerRoutes() {
     s->addHandler(configPost);
 
     s->on("/api/config/save", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         WebServer* w = WebServer::instance();
         WebDeps& d = w->deps();
         if (!w->saveAllowed(millis())) {
@@ -533,6 +563,7 @@ void WebServer::registerRoutes() {
     });
 
     s->on("/api/config/reset", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         WebDeps& d = WebServer::instance()->deps();
         *d.cfg = Settings{};
         if (d.store != nullptr) {
@@ -548,6 +579,7 @@ void WebServer::registerRoutes() {
     });
 
     s->on("/api/frames", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         WebDeps& d = WebServer::instance()->deps();
         const FrameLog& log = d.node->frameLog();
         uint32_t since = 0;
@@ -589,6 +621,7 @@ void WebServer::registerRoutes() {
     // console UART is the MSP UART, so printing a diagnostic there injects
     // bytes into the flight controller's serial link.
     s->on("/api/log", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         const LogRing& lg = logRing();
         uint32_t since = 0;
         if (request->hasParam("since")) {
@@ -627,6 +660,7 @@ void WebServer::registerRoutes() {
     // frames we parsed successfully can show that, because it reads zero either
     // way.
     s->on("/api/gnss", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         WebDeps& d = WebServer::instance()->deps();
         DynamicJsonDocument doc(4096);
         JsonObject root = doc.to<JsonObject>();
@@ -674,7 +708,27 @@ void WebServer::registerRoutes() {
         sendJson(request, doc);
     });
 
+    // Clears the min/max/mean window. The stall count and the accumulated web
+    // time deliberately survive, because "this node has stalled at some point
+    // since boot" does not stop being true when someone presses a button.
+    //
+    // It earns its place on a board that has just booted: WiFi coming up and
+    // the first association produce a worst-case figure that never recurs, and
+    // without a way to clear it that one number sits at the top of the page for
+    // the rest of the session looking like a recurring fault.
+    s->on("/api/loop/reset", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        if (d.loop_stats == nullptr) {
+            request->send(404, "text/plain", "no loop stats on this build");
+            return;
+        }
+        d.loop_stats->reset();
+        request->send(200, "text/plain", "reset");
+    });
+
     s->on("/api/log", HTTP_DELETE, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         logRing().clear();
         request->send(200, "text/plain", "cleared");
     });
@@ -682,6 +736,7 @@ void WebServer::registerRoutes() {
     // ---- Simulated traffic ----------------------------------------------------
 
     s->on("/api/sim", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         WebDeps& d = WebServer::instance()->deps();
         DynamicJsonDocument doc(2048);
         JsonObject root = doc.to<JsonObject>();
@@ -712,6 +767,7 @@ void WebServer::registerRoutes() {
 
     AsyncCallbackJsonWebHandler* simPost = new AsyncCallbackJsonWebHandler(
         "/api/sim/peer", [](AsyncWebServerRequest* request, JsonVariant& json) {
+            WebBusyScope busy;
             WebDeps& d = WebServer::instance()->deps();
             if (d.sim == nullptr) {
                 request->send(409, "text/plain", "simulator not available on this build");
@@ -760,6 +816,7 @@ void WebServer::registerRoutes() {
     s->addHandler(simPost);
 
     s->on("/api/sim/peer", HTTP_DELETE, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         WebDeps& d = WebServer::instance()->deps();
         if (d.sim == nullptr || !request->hasParam("uid")) {
             request->send(400, "text/plain", "uid required");
@@ -771,6 +828,7 @@ void WebServer::registerRoutes() {
     });
 
     s->on("/api/sim/clear", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         WebDeps& d = WebServer::instance()->deps();
         if (d.sim != nullptr) {
             d.sim->clear();
@@ -779,6 +837,7 @@ void WebServer::registerRoutes() {
     });
 
     s->on("/api/system/reboot", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         // Reboot after the response has had time to go out; rebooting inside the
         // handler drops the connection and the UI reports a failure.
         WebServer::instance()->requestReboot(millis() + 500);
@@ -788,6 +847,7 @@ void WebServer::registerRoutes() {
     s->on("/update", HTTP_POST, handleFileUploadResponse, handleFileUploadData);
 
     s->onNotFound([](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
         if (request->method() == HTTP_OPTIONS) {
             request->send(200);  // CORS preflight, for UI development off-device
         } else {

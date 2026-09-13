@@ -84,6 +84,31 @@ void handleFileUploadResponse(AsyncWebServerRequest* request);
 // The current Update library error, spelled the way this platform spells it.
 String updateErrorText();
 
+// Microseconds spent inside request handlers since boot, and requests served.
+//
+// This exists because of where that time lands. On ESP32 the async server runs
+// in its own, higher-priority task: it preempts the Arduino loop task, and the
+// loop's own wall-clock timing charges every microsecond of a request to
+// whichever iteration it interrupted. On ESP8266 there is no preemption and the
+// same work runs between iterations, where the loop timer never sees it.
+// Measured on hardware, thirty status requests moved an ESP32's worst iteration
+// to 325 ms and moved an ESP8266's by literally nothing.
+//
+// So the loop deducts this, and reports it separately. Serving a dashboard is a
+// real cost and it is not a symptom of a node that cannot keep up.
+uint32_t webBusyUs();
+uint32_t webRequests();
+
+// Times a request handler. Declare one at the top of a handler body.
+class WebBusyScope {
+public:
+    WebBusyScope();
+    ~WebBusyScope();
+
+private:
+    uint32_t start_us_;
+};
+
 class WebServer {
 public:
     // Brings up WiFi (AP or station per the config) and starts the server.

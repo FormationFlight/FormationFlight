@@ -348,9 +348,13 @@ void setup() {
         FF_LOGI("listen only: this node receives and never transmits");
     }
 
-    // A loop longer than the fastest beacon interval can miss a transmission
-    // outright, so that is what counts as an overrun.
-    g_loop.setOverrunThresholdUs(g_settings.rate.min_interval_ms * 1000u);
+    // A quarter of the peer timeout. Not the fastest beacon interval, which is
+    // what this used to be: ALOHA loses transmissions by design, the beacon
+    // stream is redundant, and peers do not give up on a node for six seconds,
+    // so a stall costing one beacon is not a fault. Measured on a T-Beam, the
+    // old threshold counted 1691 overruns on a node that was working perfectly,
+    // almost all of them the web server preempting the loop task.
+    g_loop.setOverrunThresholdUs((g_settings.peer_timeout_ms / 4u) * 1000u);
 
     ff::WebDeps web;
     web.cfg = &g_settings;
@@ -376,6 +380,11 @@ void setup() {
 
 void loop() {
     const uint32_t loop_start_us = micros();
+    // Read before the iteration and again after, so whatever the web server
+    // spent *while this iteration was open* can be taken back off. On ESP32
+    // that work happens in a higher-priority task which preempts this one, and
+    // without this the loop timer reports the dashboard's cost as the node's.
+    const uint32_t web_busy_before = ff::webBusyUs();
     const uint32_t now = millis();
 
     // A firmware upload is erasing and writing flash. On ESP8266 that stalls the
@@ -418,5 +427,5 @@ void loop() {
     // Measured last so it covers the whole iteration. ALOHA tolerates jitter by
     // design, which is exactly why this is worth watching: the node keeps
     // working as it slows down, right up until it does not.
-    g_loop.addSample(micros() - loop_start_us);
+    g_loop.addSample(micros() - loop_start_us, ff::webBusyUs() - web_busy_before);
 }

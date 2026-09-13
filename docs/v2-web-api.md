@@ -107,9 +107,10 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
     "min_free_heap": 23904
   },
   "loop": {
+    "web_busy_ms": 1184, "web_requests": 617,
     "last_us": 346, "min_us": 114, "max_us": 212868, "mean_us": 348,
-    "rate_hz": 2873, "samples": 201141, "overruns": 3,
-    "overrun_threshold_us": 100000
+    "rate_hz": 2873, "samples": 201141, "overruns": 0,
+    "overrun_threshold_us": 1500000
   },
   "log": { "total": 44, "warnings": 8, "errors": 1 },
   "reboot_required": false,
@@ -302,18 +303,64 @@ design, which is exactly why this is worth publishing: the firmware keeps
 working as it gets slower, right up until it does not.
 
 - `last_us`, `min_us`, `max_us`, `mean_us` - one iteration's duration in
-  microseconds. **`max_us` is the number that matters.** A 2 ms mean with a
-  300 ms peak is a node with a problem, and the mean alone looks healthy.
+  microseconds, with time spent inside web request handlers deducted (see
+  below). **`max_us` is the number that matters.** A 2 ms mean with a 300 ms
+  peak is a node with a problem, and the mean alone looks healthy.
 - `rate_hz` - loops per second, derived from the mean.
 - `samples` - iterations measured.
-- `overruns` - iterations longer than `overrun_threshold_us`.
-- `overrun_threshold_us` - the threshold, set at boot from the shortest beacon
-  interval (`rate.min_interval_ms`). A loop longer than that can miss a
-  transmission outright, which no on-air counter would explain.
+- `overruns` - iterations at or above `overrun_threshold_us`.
+- `overrun_threshold_us` - the threshold, set at boot to a quarter of the peer
+  timeout (`peers.timeout_ms`, 6000 ms by default, so `1500000` here).
+  **Read this field rather than hardcoding a value**; it moves with the
+  configured timeout and it is not what it used to be.
+- `web_busy_ms` - total milliseconds spent inside request handlers since boot.
+- `web_requests` - requests served since boot.
 
 `min_us`, `mean_us` and `rate_hz` read `0` before the first sample.
 
 `loop` is absent on a build with no loop timing wired to the web server.
+
+#### What the timer does and does not include
+
+An iteration is timed wall-clock, top to bottom. On ESP32 the sketch loop is a
+FreeRTOS task and the async web server runs in its own, higher-priority task, so
+a request that preempts the loop gets charged to whichever iteration it
+interrupted. On ESP8266 there is no preemption and the same callbacks run
+*between* iterations, where the loop timer never sees them. Measured on
+hardware: thirty status requests moved an ESP32's worst iteration to 325 ms and
+moved an ESP8266's - identical firmware, identical request - by literally zero
+microseconds. The same field meant two incomparable things depending on the
+chip.
+
+So handler time is now measured and subtracted from each loop sample, and
+reported rather than discarded: that is what `web_busy_ms` and `web_requests`
+are. The subtraction saturates at zero, so a sample whose deduction would go
+negative records `0` rather than wrapping to an enormous number - which is one
+way `min_us` can legitimately read `0` on a busy node.
+
+**The attribution is deliberately partial.** Time inside our own handlers is
+measurable; time the network stack spends on its own behalf is not, so some of
+it still lands on the loop. On a T-Beam the deduction removed roughly half of a
+322 ms worst iteration. Read `max_us` as "the loop, plus whatever networking we
+could not attribute", not as a clean measurement of the loop alone.
+
+What this buys is that the figure is now broadly comparable across chips, which
+it was not before: polling the dashboard no longer inflates an ESP32's numbers
+while leaving an ESP8266's untouched. A UI that graphs `max_us` should still
+show `web_busy_ms` alongside it, because serving a dashboard is a real cost and
+it is not a symptom of a node that cannot keep up.
+
+#### What an overrun means
+
+An overrun is a stall long enough to be a quarter of the way to being dropped by
+every peer. It used to be "one iteration longer than the fastest beacon
+interval" (`rate.min_interval_ms`, 100 ms by default), on the reasoning that a
+longer loop can miss a transmission outright. That was wrong in spirit: ALOHA
+loses transmissions by design, the beacon stream is redundant, and peers do not
+give up on a node for `peers.timeout_ms`. Counting a single missed beacon as a
+fault made a perfectly healthy T-Beam report 1691 overruns, nearly all of them
+the web server preempting the loop task. Against the current threshold the same
+node reports none, and a non-zero count is worth chasing.
 
 ### Log counters
 

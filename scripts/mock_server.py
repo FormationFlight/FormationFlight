@@ -23,7 +23,10 @@ drift. Each carries a comment naming what it mirrors:
     lib/ff_core/log.cpp, including the two rules that matter to a polling
     client: `total` counts everything ever logged and a clear does not reset it.
   - loop_json() mirrors ff::LoopStats (loop_stats.h), down to minUs() reading 0
-    before the first sample and rateHz() being derived from the mean.
+    before the first sample and rateHz() being derived from the mean. The two
+    web counters mirror WebBusyScope (WebServer.h) rather than being invented:
+    this server really does time its own handlers, so `web_busy_ms` and
+    `web_requests` move when the UI polls, exactly as they do on a node.
   - system_json() mirrors fillSystem() in WebServer.cpp.
   - gnss_json() mirrors ff::GnssLinkStats (lib/ff_core/gnss_link.h) as
     DirectGpsLocationSource fills it in, including the two rules a reader can
@@ -811,7 +814,7 @@ RESET_REASON_SOFTWARE = "software restart"
 LOOP_MEAN_US = 320
 LOOP_MIN_US = 96
 LOOP_SPIKE_EVERY_MS = 4500      # a few-millisecond loop, well under the threshold
-LOOP_OVERRUN_EVERY_MS = 23000   # a loop long enough to miss a transmission
+LOOP_OVERRUN_EVERY_MS = 23000   # a stall a quarter of the way to being dropped
 LOOP_EVENT_BUDGET = 64          # cap on spikes replayed in one catch-up pass
 
 # One log line every LOG_INTERVAL_MS of node time: slow enough to read, fast
@@ -1086,7 +1089,7 @@ class MockNode:
     # -- lifecycle ----------------------------------------------------------
 
     def _boot(self):
-        self._t0 = time.monotonic()
+        self._t0 = time.perf_counter()
         self.frames = deque(maxlen=FRAME_LOG_CAPACITY)
         self.frame_total = 0
         self.frame_seq = 0
@@ -1134,11 +1137,19 @@ class MockNode:
         self.loop_min_us = 0
         self.loop_max_us = 0
         self.loop_overruns = 0
-        # main.cpp: the threshold is the shortest beacon interval, snapshotted
-        # at boot. A loop longer than that can miss a transmission outright.
-        self.loop_overrun_us = int(self.config["rate"].get("min_interval_ms", 100)) * 1000
+        # main.cpp: a quarter of the peer timeout, snapshotted at boot. Not the
+        # shortest beacon interval, which is what this used to be -- ALOHA loses
+        # transmissions by design and peers do not drop a node for six seconds,
+        # so one missed beacon is not a fault. An overrun is a stall long enough
+        # to be a quarter of the way to every peer giving up on this node.
+        self.loop_overrun_us = int(self.config["peers"].get("timeout_ms", 6000)) // 4 * 1000
         self.loop_next_spike_ms = LOOP_SPIKE_EVERY_MS
         self.loop_next_overrun_ms = LOOP_OVERRUN_EVERY_MS
+        # WebBusyScope (WebServer.h): handler time, measured so it can be taken
+        # back off the loop sample, and reported rather than discarded. Since
+        # boot, so a reboot zeroes them along with everything else here.
+        self.web_busy_us = 0
+        self.web_requests = 0
 
         # -- system ----------------------------------------------------------
         self.min_free_heap = self.free_heap(0)
@@ -1252,7 +1263,12 @@ class MockNode:
     # -- clock --------------------------------------------------------------
 
     def uptime_ms(self):
-        return int((time.monotonic() - self._t0) * 1000.0)
+        """perf_counter() rather than monotonic(), and the same clock the
+        request timer uses. monotonic() ticks about every 16 ms on Windows,
+        which is an eternity next to a handler measured in microseconds: a node
+        could report having spent 2 ms answering requests while still claiming
+        an uptime of 0. Both readings were true; only the clocks disagreed."""
+        return int((time.perf_counter() - self._t0) * 1000.0)
 
     def free_heap(self, now_ms):
         """ESP.getFreeHeap(). Wobbles like a real heap under fragmentation, so a
@@ -1318,8 +1334,8 @@ class MockNode:
 
         budget = LOOP_EVENT_BUDGET
         while self.loop_next_spike_ms <= now_ms and budget > 0:
-            # Long, but not long enough to miss a beacon: this is the number the
-            # mean hides, which is the whole reason max_us is published.
+            # Long, but nowhere near the overrun threshold: this is the number
+            # the mean hides, which is the whole reason max_us is published.
             self.loop_max_us = max(self.loop_max_us,
                                    int(self.loop_rng.uniform(2000, 16000)))
             self.loop_next_spike_ms += LOOP_SPIKE_EVERY_MS
@@ -1327,6 +1343,11 @@ class MockNode:
         if self.loop_next_spike_ms < now_ms:
             self.loop_next_spike_ms = now_ms + LOOP_SPIKE_EVERY_MS
 
+        # Rare on purpose, and rarer still now that the threshold is fifteen
+        # times what it used to be: one every LOOP_OVERRUN_EVERY_MS against a
+        # loop running thousands of times a second is roughly one iteration in
+        # 65000, which is what a node with an occasional real stall looks like.
+        # A node that overruns often is a different bug report.
         while self.loop_next_overrun_ms <= now_ms and budget > 0:
             over = int(self.loop_overrun_us * self.loop_rng.uniform(1.05, 2.4))
             self.loop_max_us = max(self.loop_max_us, over)
@@ -1335,6 +1356,21 @@ class MockNode:
             budget -= 1
         if self.loop_next_overrun_ms < now_ms:
             self.loop_next_overrun_ms = now_ms + LOOP_OVERRUN_EVERY_MS
+
+    def note_web_request(self, busy_us):
+        """WebBusyScope's destructor: one request served, and the microseconds
+        spent inside the handler.
+
+        Unlike the loop model, this is not scheduled against node time -- it is
+        the real thing, timed around this server's own handlers, because that is
+        what the firmware counts too. Poll harder and it climbs faster, which is
+        exactly the effect the field exists to make visible. Clamped at 0: a
+        clock that went backwards between the two reads is a zero-cost request,
+        never a negative one.
+        """
+        with self.lock:
+            self.web_busy_us += max(0, int(busy_us))
+            self.web_requests += 1
 
     def active_peers(self):
         """Peers that show up in the peer table: the built-in RF ones always,
@@ -1655,9 +1691,15 @@ class MockNode:
     def loop_json(self):
         """ff::LoopStats, as fillStatus() serialises it. minUs() and rateHz()
         read 0 before the first sample, so a node that has not looped yet says
-        so rather than claiming a 0 us loop."""
+        so rather than claiming a 0 us loop.
+
+        The durations here are already the post-deduction numbers: web_busy_ms
+        is what was taken off them, reported rather than thrown away, so a UI
+        can say the dashboard cost that time instead of blaming the loop."""
         mean = int(self.loop_total_us // self.loop_samples) if self.loop_samples else 0
         return {
+            "web_busy_ms": self.web_busy_us // 1000,
+            "web_requests": self.web_requests,
             "last_us": self.loop_last_us,
             "min_us": self.loop_min_us if self.loop_samples else 0,
             "max_us": self.loop_max_us,
@@ -2385,6 +2427,27 @@ def make_handler(node, config_path=None, quiet=True):
                     data = ENDPOINT_PREFIX_RE.sub(
                         'const ENDPOINT_PREFIX = "";', text).encode("utf-8")
             self._send(data, ctype)
+
+    # WebBusyScope, from the outside: the firmware declares one at the top of
+    # each handler body, and this is the same measurement in the one place a
+    # BaseHTTPRequestHandler makes it cheap to take. Only the verbs that answer
+    # an actual request are timed -- a CORS preflight never reaches a handler on
+    # the device -- and handle_one_request() is deliberately left alone, because
+    # on a keep-alive connection it spends most of its life blocked waiting for
+    # the next request, which is not time anyone spent serving anything.
+    def _timed(verb):
+        def wrapper(self):
+            start = time.perf_counter()
+            try:
+                return verb(self)
+            finally:
+                node.note_web_request(int((time.perf_counter() - start) * 1e6))
+        wrapper.__name__ = verb.__name__
+        wrapper.__doc__ = verb.__doc__
+        return wrapper
+
+    for _verb in ("do_GET", "do_HEAD", "do_POST", "do_DELETE"):
+        setattr(Handler, _verb, _timed(getattr(Handler, _verb)))
 
     return Handler
 

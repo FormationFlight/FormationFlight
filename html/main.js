@@ -839,6 +839,12 @@ function System({ status }) {
     return () => { stopped = true; clearTimeout(timer); };
   }, []);
 
+  // The window only. A node that stalled an hour ago has still stalled, so the
+  // count and the accumulated web time are left alone by the device.
+  const resetLoop = () => postEmpty('/api/loop/reset')
+    .then(() => setClearResult({ ok: true, text: 'Loop window reset' }))
+    .catch(e => setClearResult({ ok: false, text: e.message }));
+
   const clearLog = () => api('/api/log', { method: 'DELETE' })
     .then(() => {
       // The device keeps its running total across a clear so a client cursor
@@ -860,7 +866,7 @@ function System({ status }) {
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     ${power ? html`<${PowerCard} power=${power} />` : html`<${NoPowerCard} expected=${pmicMissing} />`}
     <${SystemCard} system=${status.system} node=${status.node} />
-    <${LoopCard} loop=${status.loop} />
+    <${LoopCard} loop=${status.loop} onReset=${resetLoop} />
   <//>
   <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-2 gap-4">
     <${GnssCard} location=${status.location} />

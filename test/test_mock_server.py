@@ -626,9 +626,11 @@ class StatusShapeTest(ApiTestCase):
         self.assertEqual(sys_doc["free_heap"], self.get_json("/api/status")["node"]["free_heap"])
 
     def test_loop_block(self):
-        loop = self.get_json("/api/status")["loop"]
+        doc = self.get_json("/api/status")
+        loop = doc["loop"]
         self.assertEqual(set(loop), {"last_us", "min_us", "max_us", "mean_us", "rate_hz",
-                                     "samples", "overruns", "overrun_threshold_us"})
+                                     "samples", "overruns", "overrun_threshold_us",
+                                     "web_busy_ms", "web_requests"})
         for key, value in loop.items():
             self.assertIsInstance(value, int, key)
             self.assertGreaterEqual(value, 0, key)
@@ -636,8 +638,31 @@ class StatusShapeTest(ApiTestCase):
         self.assertLessEqual(loop["mean_us"], loop["max_us"])
         # rateHz() is derived from the mean, not measured separately.
         self.assertEqual(loop["rate_hz"], 1000000 // loop["mean_us"])
-        # Set at boot from the shortest beacon interval (rate.min_interval_ms).
-        self.assertEqual(loop["overrun_threshold_us"], 100 * 1000)
+        # Set at boot to a quarter of the peer timeout (peers.timeout_ms), not
+        # to the shortest beacon interval, which is what it used to be. A client
+        # has to read the field: 100 ms is no longer the answer.
+        self.assertEqual(loop["overrun_threshold_us"], 6000 // 4 * 1000)
+        # Handler time is deducted from the loop samples and reported here, so
+        # the cost of serving this very document is attributable. It cannot
+        # exceed the time the node has been up.
+        self.assertLessEqual(loop["web_busy_ms"], doc["node"]["uptime_ms"])
+
+    def test_loop_web_counters_only_ever_climb(self):
+        """WebBusyScope's two counters are since boot, so they are monotonic --
+        and unlike the loop model they move because requests were served, which
+        is the whole point of publishing them next to max_us."""
+        first = self.get_json("/api/status")["loop"]
+        for _ in range(5):
+            self.get_json("/api/status")
+        doc = self.get_json("/api/status")
+        second = doc["loop"]
+        for block in (first, second):
+            for key in ("web_busy_ms", "web_requests"):
+                self.assertIsInstance(block[key], int, key)
+                self.assertGreaterEqual(block[key], 0, key)
+        self.assertGreater(second["web_requests"], first["web_requests"])
+        self.assertGreaterEqual(second["web_busy_ms"], first["web_busy_ms"])
+        self.assertLessEqual(second["web_busy_ms"], doc["node"]["uptime_ms"])
 
     def test_log_counters_block(self):
         """The status document carries the counters only; the lines themselves
@@ -1609,15 +1634,51 @@ class LiveModelTest(unittest.TestCase):
         self.assertGreaterEqual(second["max_us"], first["max_us"])
         self.assertGreaterEqual(second["overruns"], first["overruns"])
 
-    def test_the_overrun_threshold_is_the_shortest_beacon_interval(self):
-        """main.cpp snapshots it from rate.min_interval_ms at boot: a loop
-        longer than that can miss a transmission outright."""
-        node = self.aged_node(config_patch={"rate": {"min_interval_ms": 250}})
-        self.assertEqual(node.loop_json()["overrun_threshold_us"], 100 * 1000)
+    def test_the_overrun_threshold_is_a_quarter_of_the_peer_timeout(self):
+        """main.cpp snapshots it from peers.timeout_ms at boot. Not from
+        rate.min_interval_ms, which is what it used to be: ALOHA loses
+        transmissions by design, so a stall costing one beacon is not a fault.
+        An overrun is a stall a quarter of the way to every peer dropping the
+        node, and it moves when the timeout does -- hardcoding 100 ms in a
+        client is now simply wrong."""
+        node = self.aged_node(config_patch={"peers": {"timeout_ms": 12000}})
+        self.assertEqual(node.loop_json()["overrun_threshold_us"], 6000 // 4 * 1000)
+        # RAM-only until it is saved and the node restarts, same as the firmware.
         node.saved_config = copy.deepcopy(node.config)
         node.reboot()
         node.advance()
-        self.assertEqual(node.loop_json()["overrun_threshold_us"], 250 * 1000)
+        self.assertEqual(node.loop_json()["overrun_threshold_us"], 12000 // 4 * 1000)
+
+    def test_web_handler_time_is_counted_and_cannot_outrun_uptime(self):
+        """WebBusyScope: what gets deducted from the loop samples is reported
+        rather than discarded, so a UI can blame the dashboard for it instead of
+        the loop."""
+        node = self.aged_node(seconds=30.0)
+        loop = node.loop_json()
+        # Nothing has asked this node anything yet, and it says so.
+        self.assertEqual(loop["web_requests"], 0)
+        self.assertEqual(loop["web_busy_ms"], 0)
+
+        node.note_web_request(4500)
+        node.note_web_request(1200)
+        after = node.loop_json()
+        self.assertEqual(after["web_requests"], 2)
+        self.assertEqual(after["web_busy_ms"], 5)   # 5700 us, truncated
+        # Saturating like addSample()'s deduction: a clock that ran backwards
+        # across the two reads is a zero-cost request, never a negative one.
+        node.note_web_request(-10000)
+        third = node.loop_json()
+        self.assertEqual(third["web_requests"], 3)
+        self.assertEqual(third["web_busy_ms"], after["web_busy_ms"])
+        # A node cannot have spent longer inside its handlers than it has been
+        # running.
+        self.assertLessEqual(third["web_busy_ms"], node.uptime_ms())
+
+        # Both are since boot, so a restart zeroes them.
+        node.reboot()
+        node.advance()
+        self.assertEqual(node.loop_json()["web_requests"], 0)
+        self.assertEqual(node.loop_json()["web_busy_ms"], 0)
 
     def test_a_reboot_shows_up_as_a_software_restart(self):
         """Why the node last restarted is the single most useful thing to know
