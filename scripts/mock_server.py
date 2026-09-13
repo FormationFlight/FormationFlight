@@ -8,13 +8,20 @@ rolls (with the occasional crypto_fail so the debug view's error styling has
 something to render), and Follow walks IDLE -> ACQUIRING -> LOCKED the way the
 controller does on hardware.
 
-Two things here are hand-maintained mirrors of firmware code and must not drift:
+Several things here are hand-maintained mirrors of firmware code and must not
+drift. Each carries a comment naming what it mirrors:
 
   - default_config() mirrors the struct defaults in lib/ff_core/config.h
     (via RateConfig in rate_control.h and FollowConfig in follow.h).
   - validate_config() mirrors ff::configValidate() in lib/ff_core/config.cpp and
     validate_follow_config() mirrors ff::followValidateConfig() in follow.cpp,
     down to the error strings, which the UI shows verbatim.
+  - merge_config() mirrors ff::configMergeJson(), including the redaction
+    placeholder rule and "a rejected merge changes nothing".
+  - MovingPeer mirrors ff::SimPeerConfig and ff::simPeerAt() in sim_traffic.cpp.
+  - The handlers' status codes and response bodies mirror src/hal/WebServer.cpp,
+    which is the other implementation of this same contract. Where that file is
+    more specific than the doc, it wins: it is what the UI will actually meet.
 
 test/test_mock_server.py checks the Follow half against
 docs/spec/fixtures/follow-config-cases.json -- the same fixture the C++
@@ -191,9 +198,10 @@ def default_follow_config():
         "minTargetSpeedMps": 0.0,
         "maxTargetSpeedMps": 0.0,
         # enums / RAM-only
-        "headingMode": "POINT_LEADER",   # FOLLOW_HEADING_MODE
-        "triggerMode": "GCSNAV",         # FOLLOW_TRIGGER_MODE, read-only in JSON
-        "debug": False,                  # FOLLOW_DEBUG_ENABLED, never persisted
+        "headingMode": HEADING_MODE_NAMES[2],   # FOLLOW_HEADING_MODE, POINT_LEADER
+        "triggerMode": TRIGGER_MODE_NAMES[0],   # FOLLOW_TRIGGER_MODE (GCSNAV),
+                                                # compile-time, read-only in JSON
+        "debug": False,                         # FOLLOW_DEBUG_ENABLED, never persisted
     }
 
 
@@ -945,6 +953,7 @@ class MockNode:
         if now_ms < FOLLOW_ACQUIRE_AT_MS:
             self.follow_state = 0          # IDLE, gate not up yet
             self.locked_uid = 0
+            self.locked_name = ""
             return
         peer = self._resolve_lock(now_ms)
         if peer is None or now_ms < FOLLOW_LOCK_AT_MS:

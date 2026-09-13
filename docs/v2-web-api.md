@@ -77,16 +77,37 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
     "prearm_failed": false,
     "prearm_offset": { "long_m": -15, "lat_m": 0, "vert_m": 10 }
   },
-  "sim": { "enabled": false, "peers": 0 }
+  "sim": { "enabled": false, "peers": 0 },
+  "reboot_required": false,
+  "config_corrupt": false
 }
 ```
 
+`reboot_required` goes true once a setting was changed that only takes effect at
+boot: the group passphrase, or enabling a radio that was off when the node
+started. `config_corrupt` means the stored config file existed but could not be
+parsed or did not validate, so the node is running on defaults and the file has
+been left alone for recovery. The UI should say both out loud.
+
 `fc.platform` is INAV's mixer platform type: 0 multirotor, 1 airplane, 255 not
-yet answered. `follow.target`, `follow.live_offset` and `follow.prearm_offset`
-are absent when the corresponding value has never been computed, rather than
-present and zero: zero is a legitimate offset and must not be confused with "no
-data". Same for `follow.status_gvar` and `follow.condition_gvar`, which are
-absent while that GVAR slot is disabled.
+yet answered.
+
+Absent is not the same as zero, and the firmware omits rather than zero-fills:
+
+- `follow.target`, `follow.live_offset`, `follow.autothrottle_engaged` and
+  `follow.target_speed_cms` appear only once a target has actually been solved.
+  Zero is a legitimate offset and must not be confused with "no data".
+- `follow.prearm_offset` appears only while the pre-arm check is running, which
+  needs the craft disarmed with at least one RC axis assigned.
+- `follow.status_gvar` and `follow.condition_gvar` appear only while that GVAR
+  slot is enabled and has been sent at least once.
+- `peers[].distance_m`, `bearing_deg` and `rel_alt_m` appear only when this node
+  has its own fix; without one there is nothing to measure from.
+- `crypto` carries its counters only when the cipher is on. With it off the
+  object is just `{"mode": "none"}`.
+
+`follow.locked_uid` and `follow.locked_name` are always present, reading
+`"00000000"` and `""` when nothing is locked.
 
 `radios[].sim` marks the virtual radio that simulated traffic arrives on, so the
 UI can make it obvious the numbers are not real RF.
@@ -117,13 +138,19 @@ POST /api/config
 ## POST /api/config/save
 
 Writes the live configuration to `/config.json`. Empty body. `200` on success,
-`5xx` with a message if the filesystem write failed.
+`5xx` with a message if the filesystem write failed, and `429` if the last save
+was under two seconds ago. Flash has a finite number of erase cycles and a Save
+button has an infinite number of clicks.
+
+The write goes to a temporary file and is renamed into place, so an interrupted
+save leaves either the old config or the new one, never a truncated one.
 
 ## POST /api/config/reset
 
-Restores compile-time defaults and saves them. Empty body. The node keeps
-running on the new config; it does not reboot itself, because the caller may
-want to set a few fields before the radio comes back up on a different group.
+Restores compile-time defaults and saves them. Empty body, `200` with the body
+`reset`. The node keeps running on the new config and does not reboot itself,
+because the caller may want to set a few fields before the radio comes back up
+on a different group. `reboot_required` goes true.
 
 ## GET /api/frames
 
@@ -151,7 +178,9 @@ so rather than pretending the list is complete.
 
 ## Simulated traffic
 
-Only present when `sim.enabled` is true in the config. The simulator injects
+`GET /api/sim` always answers, so the UI can discover whether the simulator is
+on. Adding peers requires `sim.enabled`; removing them does not. The simulator
+injects
 frames into a virtual radio, through the same decrypt and decode path real RF
 takes, so everything downstream (peer table, Follow, MSP radar output) cannot
 tell the difference. That is the point: it exercises the real code, not a mock
@@ -159,16 +188,26 @@ of it.
 
 ### GET /api/sim
 
+Always answers, even with the simulator off: it is how the UI learns whether it
+is on. Note that `lat` and `lon` here are decimal degrees, unlike everywhere
+else in this API, because they are the values a human typed into the form rather
+than anything that came off the wire.
+
 ```json
 { "enabled": true, "peers": [ { "uid": "5eed0001", "name": "SIM1",
-  "mode": "hex", "lat": 370000000, "lon": -1220000000, "alt_m": 120,
-  "speed_ms": 15, "course_deg": 90, "radius_m": 150, "running": true } ] }
+  "mode": "hex", "lat": 37.0, "lon": -122.0, "alt_m": 120,
+  "speed_ms": 15, "course_deg": 90, "radius_m": 150,
+  "elapsed_ms": 42000, "running": true } ] }
 ```
 
 ### POST /api/sim/peer
 
-Creates or updates one simulated peer. `uid` is optional on create and
-generated if absent.
+Creates or replaces one simulated peer, and restarts its path from the moment of
+the call. This is a replace, not a merge: any key you omit takes its default, so
+send the whole peer. `uid` is optional and is generated if absent.
+
+Requires `sim.enabled` to already be true, otherwise `409`. At most four
+simulated peers exist at once; a fifth is `409`. `200` with the body `ok`.
 
 ```json
 { "uid": "5eed0001", "name": "SIM1", "mode": "hex", "lat": 37.0,
@@ -186,8 +225,8 @@ generated if absent.
   one, and therefore the useful one: heading changes in steps, altitude ramps,
   and the loop closes, so a follower has to cope with all three.
 
-`lat` and `lon` here are decimal degrees, not 1e7 integers, because they are
-typed by a human into a form.
+`lat` and `lon` here are decimal degrees, not 1e7 integers, for the same reason
+as the GET above.
 
 ### DELETE /api/sim/peer?uid=...
 

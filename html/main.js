@@ -3,7 +3,7 @@ import { h, render, useRef, useState, useEffect, html, Router } from './bundle.j
 import LoadingSpinner, {
   Icons, tipColors, Button, Colored, Stat, Setting, Notification, Banner, Card, Note,
   SectionTitle, ConfigActions, PeerTable, RadarScope, RadioCard, FrameLogView, Sparkline,
-  Th, Td, present, num, age, uptime, latLon, speedMs, courseDeg, DASH,
+  Th, Td, peerPartial, present, num, uptime, latLon, speedMs, courseDeg, DASH,
 } from './components.js';
 import FollowPage from './follow.js';
 
@@ -162,9 +162,8 @@ function Dashboard({ status }) {
   // "Heard on one radio but not the others" is the single most useful thing a
   // multi-radio node can tell you, so it gets counted up here and not just
   // coloured in the table.
-  const enabled = radios.filter(r => r.enabled);
-  const partial = enabled.length > 1
-    ? peers.filter(p => (p.radios || []).length < enabled.length).length : 0;
+  const realRadios = radios.filter(r => r.enabled && !r.sim);
+  const partial = peers.filter(p => peerPartial(p, radios)).length;
 
   return html`
 <div class="p-2">
@@ -186,7 +185,7 @@ function Dashboard({ status }) {
       tipIcon=${partial ? Icons.warn : null} tipColors=${tipColors.yellow}
       subText=${partial
         ? html`${partial} of them are not being heard on every enabled radio`
-        : html`heard on ${enabled.map(r => r.name).join(' + ') || 'no enabled radio'}`} />
+        : html`heard on ${realRadios.map(r => r.name).join(' + ') || 'no enabled radio'}`} />
     <${Stat} title="Encryption" icon=${Icons.shield}
       text=${cryptoOpen ? 'Off' : (crypto.mode || DASH).toUpperCase()}
       tipText=${cryptoOpen ? 'open' : badCrypto ? badCrypto + ' rejected' : 'ok'}
@@ -215,6 +214,53 @@ function Dashboard({ status }) {
 // How many rows of frame history to keep client-side. The device ring is 32
 // entries; this is the scrollback the UI accumulates across polls on top of it.
 const FRAME_SCROLLBACK = 250;
+
+// Rolling history for the radio cards. Sampled off the status the App already
+// polls rather than polling anything itself, so it costs the device nothing and
+// stops the moment this page unmounts. It lives only as long as the tab is open,
+// which is all a tuning view needs.
+const HIST_N = 120; // ~2 min at the 1 s status cadence
+
+function HistoryCard({ status }) {
+  const [hist, setHist] = useState({ rx: [], peers: [], beacon: {} });
+  const prev = useRef(null);
+  useEffect(() => {
+    if (!status) return;
+    const now = Date.now();
+    const totalRx = (status.radios || []).reduce((a, r) => a + (r.rx_ok || 0), 0);
+    let rate = null;
+    if (prev.current) {
+      const dt = (now - prev.current.t) / 1000;
+      if (dt < 0.25) return;  // same sample arriving twice; nothing new to plot
+      rate = Math.max(0, (totalRx - prev.current.rx) / dt);
+    }
+    prev.current = { t: now, rx: totalRx };
+    const push = (arr, v) => {
+      const a = (arr || []).concat(v);
+      return a.length > HIST_N ? a.slice(-HIST_N) : a;
+    };
+    setHist(h => {
+      const beacon = {};
+      (status.radios || []).forEach(r => { beacon[r.index] = push(h.beacon[r.index], r.beacon_interval_ms); });
+      return { rx: push(h.rx, rate), peers: push(h.peers, (status.peers || []).length), beacon };
+    });
+  }, [status]);
+
+  const radios = (status && status.radios) || [];
+  return html`
+<${Card} title="History" icon=${Icons.bolt}
+  right=${html`<span class="text-xs text-slate-400">last ~2 min<//>`}>
+  <${Sparkline} series=${hist.rx} label="Accepted frames" unit="/s" digits=1 color="stroke-blue-500" />
+  <${Sparkline} series=${hist.peers} label="Peers" color="stroke-slate-300" />
+  ${radios.filter(r => r.enabled).map(r => html`
+    <${Sparkline} key=${r.index} series=${hist.beacon[r.index]} label=${r.name + ' beacon interval'} unit="ms" color="stroke-blue-500" />`)}
+  <p class="text-xs text-gray-400">
+    The beacon interval is the rate controller reacting to the peer count. It should climb as aircraft join and
+    fall again as they leave; a LoRa interval that pins to the ceiling means the channel is as full as the
+    target load allows.
+  <//>
+<//>`;
+}
 
 function Radios({ status }) {
   const [log, setLog] = useState({ frames: [], missed: 0, total: null, capacity: null });
@@ -273,7 +319,8 @@ function Radios({ status }) {
     ${radios.map(r => html`<${RadioCard} key=${r.index} radio=${r} />`)}
     ${!radios.length && html`<p class="text-sm text-slate-400">No radios reported.<//>`}
   <//>
-  <div class="p-4 sm:p-2 mx-auto">
+  <div class="p-4 sm:p-2 mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div class="lg:col-span-2">
     <${Card} title="Frame log" icon=${Icons.list} cls="overflow-hidden"
       right=${html`
       <div class="flex items-center gap-3">
@@ -286,6 +333,8 @@ function Radios({ status }) {
       <${FrameLogView} frames=${withRel} radios=${radios} missed=${log.missed}
         capacity=${log.capacity} total=${log.total} error=${logError} />
     <//>
+    <//>
+    <${HistoryCard} status=${status} />
   <//>
 <//>`;
 }
@@ -377,7 +426,6 @@ function Settings() {
     <${Setting} title="Join password" value=${wifi.psk} setfn=${mk('wifi', 'psk')} disabled=${wifi.ap}
       tip="Password for that network. Reads back as dots once set; posting the dots back leaves it alone." />
 
-    <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved} />
   <//>
 
   <div class="flex flex-col gap-4">
@@ -419,6 +467,12 @@ function Settings() {
         <${Button} title="Reset to defaults" icon=${Icons.warn} onclick=${factoryReset}
           colors="bg-red-600 hover:bg-red-500 disabled:bg-red-400" />
       <//>
+    <//>
+  <//>
+
+  <div class="lg:col-span-2">
+    <${Card}>
+      <${ConfigActions} onApply=${apply} onSave=${save} unsaved=${unsaved} />
     <//>
   <//>
 <//>`;
@@ -699,7 +753,7 @@ const App = function () {
   const simCount = (status && status.sim && status.sim.peers) || 0;
 
   return html`
-<div class="min-h-screen bg-slate-100 dark:bg-slate-900">
+<div class="min-h-screen page-bg">
   <${Sidebar} url=${url} show=${showSidebar} status=${status} />
   <${Header} status=${status} online=${online} showSidebar=${showSidebar} setShowSidebar=${setShowSidebar} />
   <div class="${showSidebar && 'pl-72'} transition-all duration-300 transform">

@@ -45,6 +45,13 @@ const CONDITION_CODES = {
 
 const STATUS_GVAR_VALUES = { 0: 'IDLE', 1: 'ACQUIRING', 2: 'LOCKED', 3: 'HOLDING' };
 
+// /api/status omits a GVAR value it has never published. That covers both "the
+// slot is switched off" and "the controller has not run a cycle yet", which are
+// very different things to be looking at - and the config right next to it is
+// what tells them apart.
+const gvarAbsentLabel = (cfg, key) =>
+  (cfg && cfg[key] === -1 ? 'disabled' : 'not published yet');
+
 // GVAR / RC pickers. -1 is a real, meaningful value in both - it means the
 // feature writes nothing at all - so it gets a name rather than a number.
 const gvarOptions = [[-1, 'Disabled']].concat([0, 1, 2, 3, 4, 5, 6, 7].map(i => [i, 'GVAR ' + i]));
@@ -108,14 +115,14 @@ const Tip = ({ text }) => (text ? html`
 
 const SlotSelect = ({ value, options, setfn }) => html`
 <select onchange=${ev => setfn(ev.target.value)}
-  class="w-full rounded font-normal border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 py-0.5 px-1 text-gray-600 dark:text-slate-200 focus:outline-none text-sm">
+  class="w-full rounded font-normal border border-gray-300 dark:border-slate-600 field-bg py-0.5 px-1 text-gray-600 dark:text-slate-200 focus:outline-none text-sm">
   ${options.map(o => html`<option key=${o[0]} value=${o[0]} selected=${o[0] === value}>${o[1]}<//>`)}
 <//>`;
 
 const GapInput = ({ value, setfn, disabled }) => html`
 <div class="flex w-full items-center rounded border border-gray-300 dark:border-slate-600 shadow-sm">
   <input type="number" value=${value} disabled=${disabled} oninput=${ev => setfn(ev.target.value)}
-    class="font-normal text-sm rounded w-full flex-1 py-0.5 px-2 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-slate-800 disabled:text-gray-500" />
+    class="font-normal text-sm rounded w-full flex-1 py-0.5 px-2 field-bg text-gray-700 dark:text-slate-200 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-slate-800 disabled:text-gray-500" />
   <span class="inline-flex font-normal py-1 border-l border-gray-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 items-center px-2 text-gray-500 dark:text-slate-400 text-xs">m<//>
 <//>`;
 
@@ -158,7 +165,7 @@ const StatRow = ({ label, value, tip }) => html`
   <span class="text-sm font-mono text-slate-800 dark:text-slate-100">${value}<//>
 <//>`;
 
-function FollowStatusPanel({ status }) {
+function FollowStatusPanel({ status, cfg }) {
   const f = (status && status.follow) || null;
   if (!f) {
     return html`<${Card} title="Live" icon=${Icons.scan}>
@@ -228,13 +235,17 @@ function FollowStatusPanel({ status }) {
 
   <${SectionTitle} title="Reported to the FC" />
   <${StatRow} label="Status GVAR"
-    value=${present(f.status_gvar) ? `${f.status_gvar} (${STATUS_GVAR_VALUES[f.status_gvar] || '?'})` : 'disabled'}
-    tip="Absent means that GVAR slot is switched off, which is not the same as it reading 0 - 0 is IDLE." />
+    value=${present(f.status_gvar)
+      ? `${f.status_gvar} (${STATUS_GVAR_VALUES[f.status_gvar] || '?'})`
+      : gvarAbsentLabel(cfg, 'statusGvarIndex')}
+    tip="The API omits this while no value has been published, which is not the same as it reading 0 - 0 is a real value meaning IDLE." />
   <${StatRow} label="Condition GVAR"
     value=${present(f.condition_gvar)
       ? `${f.condition_gvar} (${(CONDITION_CODES[f.condition_gvar] || ['?'])[0]})`
-      : 'disabled'}
-    tip=${present(f.condition_gvar) ? (CONDITION_CODES[f.condition_gvar] || ['', ''])[1] : 'That GVAR slot is switched off.'} />
+      : gvarAbsentLabel(cfg, 'conditionFlagsGvarIndex')}
+    tip=${present(f.condition_gvar)
+      ? (CONDITION_CODES[f.condition_gvar] || ['', ''])[1]
+      : 'No value published yet. 0 (none) is a real value, so this is not it.'} />
   <${StatRow} label="Autothrottle"
     value=${f.autothrottle_armed ? (f.autothrottle_engaged ? 'engaged' : 'armed') : 'not armed'} />
   ${f.autothrottle_engaged && html`
@@ -323,7 +334,7 @@ export default function FollowPage({ status }) {
           <div class="flex w-full items-center rounded border ${uidBad ? 'border-red-500' : 'border-gray-300 dark:border-slate-600'} shadow-sm">
             <input type="text" value=${uidText} placeholder="(nearest peer)" spellcheck="false"
               oninput=${ev => setUidText(ev.target.value.trim())}
-              class="font-normal font-mono text-sm rounded w-full flex-1 py-0.5 px-2 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 focus:outline-none" />
+              class="font-normal font-mono text-sm rounded w-full flex-1 py-0.5 px-2 field-bg text-gray-700 dark:text-slate-200 focus:outline-none" />
           <//>
           ${peers.length > 0 && html`
           <div class="flex flex-wrap gap-1 mt-1">
@@ -384,7 +395,7 @@ export default function FollowPage({ status }) {
   <//>
 
   <div class="flex flex-col gap-4">
-    <${FollowStatusPanel} status=${status} />
+    <${FollowStatusPanel} status=${status} cfg=${cfg} />
 
     <${Card} title="GVAR reporting" icon=${Icons.list}>
       <p class="text-xs text-gray-400 mb-3">

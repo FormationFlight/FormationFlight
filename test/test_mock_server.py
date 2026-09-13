@@ -537,14 +537,29 @@ class FramesShapeTest(ApiTestCase):
     def test_since_returns_only_what_the_client_missed(self):
         first = self.get_json("/api/frames")
         total = first["total"]
-        # Everything up to `total` has been seen, so nothing older comes back.
+        # Everything up to `total` has been seen, so only what arrived since
+        # then comes back -- never more than the counter has advanced by.
         again = self.get_json(f"/api/frames?since={total}")
-        self.assertTrue(all(f["ms"] >= 0 for f in again["frames"]))
-        self.assertLessEqual(len(again["frames"]),
-                             max(0, again["total"] - total))
-        # And a since of 0 is the whole ring.
+        self.assertLessEqual(len(again["frames"]), max(0, again["total"] - total))
+        # A since of 0 is the whole ring.
         self.assertEqual(len(self.get_json("/api/frames?since=0")["frames"]),
                          len(self.get_json("/api/frames")["frames"]))
+
+    def test_since_paging_is_exact(self):
+        """Driven directly so the clock can be moved: after N more frames, a
+        client that asks for what it missed gets exactly those N."""
+        node = MockNode()
+        node._t0 -= 5.0
+        node.advance()
+        before = node.frames_json()
+        self.assertGreater(before["total"], 0)
+        node._t0 -= 1.0
+        node.advance()
+        after = node.frames_json(since=before["total"])
+        self.assertEqual(len(after["frames"]),
+                         after["total"] - before["total"])
+        # Asking again with nothing new in between returns nothing.
+        self.assertEqual(node.frames_json(since=after["total"])["frames"], [])
 
     def test_since_must_be_an_integer(self):
         status, body, _ = self.request("GET", "/api/frames?since=soon")
@@ -776,19 +791,27 @@ class SystemApiTest(ApiTestCase):
         self.assertEqual(status, 200)
         self.assertTrue(body)
 
-    def test_update_reports_the_image_size(self):
-        payload = (b"------x\r\nContent-Disposition: form-data; name=\"firmware\"; "
-                   b"filename=\"fw.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"
-                   + b"\xe9" * 512 + b"\r\n------x--\r\n")
+    @staticmethod
+    def firmware_upload(filename):
+        return (b"------x\r\nContent-Disposition: form-data; name=\"firmware\"; "
+                b"filename=\"" + filename.encode() + b"\"\r\n"
+                b"Content-Type: application/octet-stream\r\n\r\n"
+                + b"\xe9" * 512 + b"\r\n------x--\r\n")
+
+    def test_update_accepts_a_bin(self):
         status, body, headers = self.request(
-            "POST", "/update", payload, ctype="multipart/form-data; boundary=----x")
+            "POST", "/update", self.firmware_upload("fw.bin"),
+            ctype="multipart/form-data; boundary=----x")
         self.assertEqual(status, 200, body)
         self.assertTrue(headers["Content-Type"].startswith("text/plain"))
-        self.assertIn("Success", body)
+        self.assertEqual(body, "update complete, rebooting")
 
-    def test_empty_update_is_400(self):
-        status, body, _ = self.request("POST", "/update", b"")
+    def test_update_refuses_anything_but_a_firmware_image(self):
+        status, body, _ = self.request(
+            "POST", "/update", self.firmware_upload("holiday.jpg"),
+            ctype="multipart/form-data; boundary=----x")
         self.assertEqual(status, 400)
+        self.assertEqual(body, "must upload .bin or .bin.gz")
 
     def test_unknown_api_path_is_404_text(self):
         status, body, headers = self.request("GET", "/api/nope")
@@ -850,6 +873,10 @@ class LiveModelTest(unittest.TestCase):
         self.assertTrue(1 <= follow["target"]["heading_deg"] <= 360)
         self.assertEqual(set(follow["live_offset"]), {"long_m", "lat_m", "vert_m"})
         self.assertEqual(follow["live_offset"]["long_m"], -15.0)
+        # These two are only meaningful alongside a target, so the firmware only
+        # emits them when it has one.
+        self.assertIn("autothrottle_engaged", follow)
+        self.assertIn("target_speed_cms", follow)
 
     def test_gvar_values_appear_only_once_their_slot_is_enabled(self):
         node = self.aged_node(config_patch={
@@ -909,7 +936,7 @@ class LiveModelTest(unittest.TestCase):
         merged, err = merge_config({"sim": {"enabled": True}}, node.config)
         self.assertIsNone(err, err)
         node.config = merged
-        peer, perr = node.upsert_sim_peer(
+        peer, perr, _code = node.upsert_sim_peer(
             {"uid": "5eed0009", "name": "SIMLOG", "mode": "line", "lat": 37.0,
              "lon": -122.0, "speed_ms": 18, "course_deg": 45}, 0)
         self.assertIsNone(perr, perr)
@@ -924,7 +951,8 @@ class LiveModelTest(unittest.TestCase):
         node.config["sim"]["enabled"] = True
         for mode in ("static", "line", "circle", "hex"):
             with self.subTest(mode=mode):
-                peer, err = node.upsert_sim_peer(
+                node.clear_sim_peers()
+                peer, err, _code = node.upsert_sim_peer(
                     {"name": mode.upper()[:6], "mode": mode, "lat": 37.0, "lon": -122.0,
                      "speed_ms": 20, "course_deg": 30, "radius_m": 100}, 0)
                 self.assertIsNone(err, err)
@@ -941,7 +969,7 @@ class LiveModelTest(unittest.TestCase):
     def test_the_hex_path_closes_and_climbs(self):
         node = MockNode()
         node.config["sim"]["enabled"] = True
-        peer, err = node.upsert_sim_peer(
+        peer, err, _code = node.upsert_sim_peer(
             {"name": "HEX", "mode": "hex", "lat": 37.0, "lon": -122.0,
              "speed_ms": 60, "radius_m": 120, "alt_m": 100}, 0)
         self.assertIsNone(err, err)
@@ -952,8 +980,10 @@ class LiveModelTest(unittest.TestCase):
         self.assertAlmostEqual(start[0], close[0], places=6)
         self.assertAlmostEqual(start[1], close[1], places=6)
         # Peak altitude at the half-way vertex, back to the base at the close.
-        self.assertGreater(peer.position(lap_s / 2)[2], start[2])
-        self.assertAlmostEqual(close[2], start[2], places=3)
+        # ff::kSimHexClimbM is 80 m, and SimPeerState::alt_m is whole metres.
+        self.assertEqual(start[2], 100)
+        self.assertEqual(peer.position(lap_s / 2)[2], 180)
+        self.assertEqual(close[2], 100)
 
     def test_reboot_restores_the_saved_config_and_restarts_the_clock(self):
         node = self.aged_node()
@@ -992,6 +1022,42 @@ class LiveModelTest(unittest.TestCase):
         self.assertIsNone(err, err)
         node.config = merged
         self.assertEqual(node.node_name(), "BRAVO")
+
+    def test_locked_uid_is_always_present_and_zero_when_idle(self):
+        """FollowStatus is serialised whole, so locked_uid/locked_name are always
+        there; an unlocked node reports the zero UID and an empty name rather
+        than omitting the keys."""
+        node = MockNode()
+        node.advance()
+        follow = node.follow_json(node.uptime_ms())
+        self.assertEqual(follow["state"], "IDLE")
+        self.assertEqual(follow["locked_uid"], "00000000")
+        self.assertEqual(follow["locked_name"], "")
+        self.assertNotIn("target", follow)
+        self.assertNotIn("live_offset", follow)
+        self.assertNotIn("autothrottle_engaged", follow)
+
+    def test_crypto_counters_vanish_with_the_cipher(self):
+        """No cipher, no cipher counters -- the firmware emits `mode` alone."""
+        node = self.aged_node()
+        merged, err = merge_config({"security": {"passphrase": "none"}}, node.config)
+        self.assertIsNone(err, err)
+        node.config = merged
+        self.assertEqual(node.status_json(node.uptime_ms())["crypto"], {"mode": "none"})
+
+    def test_a_sim_peers_path_starts_when_it_is_created(self):
+        node = self.aged_node(config_patch={"sim": {"enabled": True}})
+        now = node.uptime_ms()
+        peer, err, _code = node.upsert_sim_peer(
+            {"uid": "5eed00aa", "mode": "line", "lat": 37.0, "lon": -122.0,
+             "speed_ms": 20, "course_deg": 90}, now)
+        self.assertIsNone(err, err)
+        # Elapsed time runs from the moment of the call, not from node boot, so
+        # a peer added after an hour of uptime still starts at its origin.
+        self.assertEqual(peer.elapsed_ms(now), 0)
+        lat, lon, _alt, _spd, _crs = peer.state(now)
+        self.assertAlmostEqual(lat, 37.0, places=9)
+        self.assertAlmostEqual(lon, -122.0, places=9)
 
     def test_listen_only_and_sim_flags_reach_the_status_document(self):
         node = self.aged_node(config_patch={"node": {"listen_only": True},

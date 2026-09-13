@@ -200,7 +200,7 @@ export function TextValue({ value, setfn, disabled, placeholder, type, addonRigh
   ${addonLeft && html`<span class="inline-flex font-normal truncate py-1 border-r border-gray-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 items-center px-2 text-gray-500 dark:text-slate-400 text-xs">${addonLeft}<//>`}
   <input type=${type || 'text'} disabled=${disabled}
     oninput=${ev => f(ev.target.value)} ...${attr}
-    class="font-normal text-sm rounded w-full flex-1 py-0.5 px-2 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-200 placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-slate-800 disabled:text-gray-500" placeholder=${placeholder} value=${value} />
+    class="font-normal text-sm rounded w-full flex-1 py-0.5 px-2 field-bg text-gray-700 dark:text-slate-200 placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-slate-800 disabled:text-gray-500" placeholder=${placeholder} value=${value} />
   ${addonRight && html`<span class="inline-flex font-normal truncate py-1 border-l border-gray-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-700 items-center px-2 text-gray-500 dark:text-slate-400 text-xs">${addonRight}<//>`}
 <//>`;
 }
@@ -212,7 +212,7 @@ export function SelectValue({ value, setfn, options, disabled }) {
   const toInt = x => (x == parseInt(x) ? parseInt(x) : x);
   return html`
 <select onchange=${ev => setfn(toInt(ev.target.value))} disabled=${disabled}
-  class="w-full rounded font-normal border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-900 py-0.5 px-1 text-gray-600 dark:text-slate-200 focus:outline-none text-sm disabled:cursor-not-allowed">
+  class="w-full rounded font-normal border border-gray-300 dark:border-slate-600 field-bg py-0.5 px-1 text-gray-600 dark:text-slate-200 focus:outline-none text-sm disabled:cursor-not-allowed">
   ${options.map(v => html`<option key=${v[0]} value=${v[0]} selected=${v[0] == value}>${v[1]}<//>`)}
 <//>`;
 }
@@ -240,7 +240,7 @@ export function SpinnerValue({ value, setfn, min, max, step, disabled, labelFn }
   return html`
 <div class="flex w-full items-stretch rounded border border-gray-300 dark:border-slate-600 shadow-sm overflow-hidden bg-slate-100 dark:bg-slate-700">
   <button type="button" onclick=${() => setfn(clamp(value - s))} disabled=${disabled || value <= lo} class="${btn} border-r border-gray-300 dark:border-slate-600">−<//>
-  <div class="flex-1 flex items-center justify-center text-sm bg-white dark:bg-slate-900 select-none ${disabled ? 'text-gray-400' : 'text-gray-700 dark:text-slate-200'}">${label !== undefined ? label : value}<//>
+  <div class="flex-1 flex items-center justify-center text-sm field-bg select-none ${disabled ? 'text-gray-400' : 'text-gray-700 dark:text-slate-200'}">${label !== undefined ? label : value}<//>
   <button type="button" onclick=${() => setfn(clamp(value + s))} disabled=${disabled || value >= hi} class="${btn} border-l border-gray-300 dark:border-slate-600">+<//>
 <//>`;
 }
@@ -356,10 +356,10 @@ export function ConfigActions({ onApply, onSave, disabled, blockedReason, unsave
 }
 
 export const Th = ({ title, cls, tip }) => html`
-<th scope="col" title=${tip} class="sticky top-0 z-10 border-b border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 bg-opacity-75 py-1.5 px-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 backdrop-blur backdrop-filter ${cls}">${title}</th>`;
+<th scope="col" title=${tip} class="sticky top-0 z-10 border-b border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 bg-opacity-75 py-1.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 backdrop-blur backdrop-filter ${cls}">${title}</th>`;
 
 export const Td = ({ text, cls, title, onclick, children }) => html`
-<td title=${title} onclick=${onclick} class="whitespace-nowrap border-b border-slate-200 dark:border-slate-700 py-1.5 px-3 text-sm text-slate-900 dark:text-slate-100 ${cls}">${text}${children}</td>`;
+<td title=${title} onclick=${onclick} class="whitespace-nowrap border-b border-slate-200 dark:border-slate-700 py-1.5 px-2 text-sm text-slate-900 dark:text-slate-100 ${cls}">${text}${children}</td>`;
 
 export default function LoadingSpinner() {
   return html`
@@ -416,24 +416,49 @@ export function Sparkline({ series, label, unit = '', digits = 0, color = 'strok
 // ---- Radios ------------------------------------------------------------------
 
 /**
- * Which radios a peer has ever been heard on, as one chip per radio the node is
- * actually running. A chip that is present-but-dim is the whole point: "heard on
- * ESP-NOW, silent on LoRa" is the diagnostic a multi-radio node exists to give
- * you, and it only reads at a glance if the missing radio still occupies space.
+ * Which radios this node is running, and which of them a given peer has been
+ * heard on.
+ *
+ * A chip that is present-but-hollow is the whole point: "heard on ESP-NOW,
+ * silent on LoRa" is the diagnostic a multi-radio node exists to give you, and
+ * it only reads at a glance if the missing radio still occupies its space in
+ * the row instead of vanishing.
+ *
+ * The virtual simulator radio is the exception. No real aircraft is ever heard
+ * on it and no simulated one is ever heard anywhere else, so it only appears
+ * for the peers it actually carries - otherwise every row would wear a
+ * permanent, meaningless "not on SIM".
  */
 export function RadioChips({ radios, heardOn }) {
   const heard = heardOn || [];
+  const shown = (radios || []).filter(r => r.enabled && (!r.sim || heard.indexOf(r.index) >= 0));
   return html`
 <span class="inline-flex gap-1">
-  ${(radios || []).map(r => {
+  ${shown.map(r => {
     const on = heard.indexOf(r.index) >= 0;
     const cls = on
       ? (r.sim ? 'bg-violet-100 text-violet-900 dark:bg-violet-900 dark:text-violet-100' : tipColors.green)
-      : 'bg-slate-100 text-slate-400 dark:bg-slate-700 dark:text-slate-500 radio-chip-off';
-    return html`<span key=${r.index} title=${on ? `heard on ${r.name}` : `NOT heard on ${r.name}`}
+      : 'text-slate-400 dark:text-slate-500 radio-chip-off';
+    return html`<span key=${r.index} title=${on ? 'heard on ' + r.name : 'NOT heard on ' + r.name}
       class="inline-block rounded px-1.5 py-0.5 text-xs font-medium ${cls}">${r.name}<//>`;
   })}
 <//>`;
+}
+
+/**
+ * True when a peer is missing from a radio it ought to be audible on.
+ * Simulated peers are excluded: they only ever arrive on the virtual radio, so
+ * counting them as "not heard on LoRa" would be noise, not a finding.
+ */
+export function peerPartial(peer, radios) {
+  const real = (radios || []).filter(r => r.enabled && !r.sim);
+  const heard = peer.radios || [];
+  const simOnly = heard.length > 0 && heard.every(i => {
+    const r = (radios || []).filter(x => x.index === i)[0];
+    return r && r.sim;
+  });
+  if (simOnly || real.length < 2) return false;
+  return real.some(r => heard.indexOf(r.index) < 0);
 }
 
 /** One radio's counters. The rejection counters are the interesting half. */
@@ -522,16 +547,18 @@ export function FrameLogView({ frames, radios, missed, capacity, total, error })
     </thead>
     <tbody>
       ${error && html`
-      <tr><td colspan="7" class="border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-sm text-red-600">${error}</td></tr>`}
+      <tr><td colspan="7" class="border-b border-slate-200 dark:border-slate-700 px-2 py-2 text-sm text-red-600">${error}</td></tr>`}
       ${!error && missed > 0 && html`
-      <tr><td colspan="7" class="border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-sm text-yellow-900 dark:text-yellow-100 bg-yellow-100 dark:bg-yellow-800">
+      <tr><td colspan="7" class="border-b border-slate-200 dark:border-slate-700 px-2 py-2 text-sm text-yellow-900 dark:text-yellow-100 bg-yellow-100 dark:bg-yellow-800">
         ${missed} ${missed === 1 ? 'frame' : 'frames'} missed - the ${capacity}-entry log wrapped between polls, so they were overwritten before the UI asked for them.
       </td></tr>`}
       ${(frames || []).map(f => {
         const res = FRAME_RESULTS[f.result] || [f.result, tipColors.gray, ''];
         return html`
         <tr key=${f.seq}>
-          <${Td} cls="font-mono text-slate-400" text=${present(f.rel_ms) ? '-' + age(f.rel_ms) : num(f.ms, 0, ' ms')} title=${'device ms ' + f.ms} />
+          <${Td} cls="font-mono text-slate-400"
+            text=${!present(f.rel_ms) ? num(f.ms, 0, ' ms') : f.rel_ms === 0 ? 'newest' : '-' + age(f.rel_ms)}
+            title=${'device uptime ' + f.ms + ' ms'} />
           <${Td} text=${radioName(f.radio)} />
           <${Td}><${Colored} text=${res[0]} colors=${res[1]} title=${res[2]} /><//>
           <${Td} cls="font-mono" text=${f.uid === '00000000' ? DASH : f.uid} />
@@ -553,7 +580,6 @@ export function FrameLogView({ frames, radios, missed, capacity, total, error })
 
 export function PeerTable({ peers, radios, selfLocation, lockedUid }) {
   const list = peers || [];
-  const enabled = (radios || []).filter(r => r.enabled);
   return html`
 <div class="overflow-auto" style="max-height:70vh">
   <table class="min-w-full border-separate border-spacing-0">
@@ -574,7 +600,7 @@ export function PeerTable({ peers, radios, selfLocation, lockedUid }) {
     <tbody>
       ${list.map(p => {
         const locked = lockedUid && p.uid === lockedUid;
-        const partial = enabled.length > 1 && (p.radios || []).length < enabled.length;
+        const partial = peerPartial(p, radios);
         return html`
         <tr key=${p.uid} class=${locked ? 'bg-blue-50 dark:bg-slate-700' : ''}>
           <${Td} cls="font-mono" text=${p.uid} />
@@ -622,7 +648,6 @@ export function RadarScope({ peers, radios, location, lockedUid }) {
   const range = RADAR_RANGES[rangeIdx];
   const R = 170, CX = 200, CY = 200;
   const haveLoc = location && location.valid;
-  const enabled = (radios || []).filter(r => r.enabled);
 
   const blips = [];
   let outOfRange = 0;
@@ -658,7 +683,7 @@ export function RadarScope({ peers, radios, location, lockedUid }) {
         <//>
       <//>
       ${blips.map(({ p, px, py }) => {
-        const partial = enabled.length > 1 && (p.radios || []).length < enabled.length;
+        const partial = peerPartial(p, radios);
         const locked = lockedUid && p.uid === lockedUid;
         const fill = locked ? 'fill-blue-600' : partial ? 'fill-yellow-500' : 'fill-slate-700 dark:fill-slate-200';
         const lines = [p.name || p.uid];
