@@ -146,7 +146,8 @@ class DefaultConfigTest(unittest.TestCase):
         self.assertEqual(cfg["node"], {"name": "", "listen_only": False})
         self.assertEqual(cfg["security"], {"passphrase": ""})
         self.assertEqual(cfg["rate"], {"target_load": 0.15, "min_interval_ms": 100,
-                                       "max_interval_ms": 1000, "jitter_frac": 0.25})
+                                       "max_interval_ms": 1000, "jitter_frac": 0.25,
+                                       "duty_cycle_pct": 0})
         self.assertEqual(cfg["peers"], {"timeout_ms": 6000, "announce_interval_ms": 2000})
         self.assertEqual(cfg["msp"], {"radar_interval_ms": 100})
         self.assertEqual(cfg["gnss"], {"rate_hz": 10})
@@ -243,6 +244,18 @@ class ConfigValidateTest(unittest.TestCase):
         self.check(lambda c: c["radios"].update(lora_power_dbm=-1), msg)
         self.check(lambda c: c["radios"].update(lora_power_dbm=31), msg)
         self.check(lambda c: c["radios"].update(lora_power_dbm=30), None)
+
+    def test_duty_cycle_pct(self):
+        """A legal limit, not a preference: the rate controller treats it as a
+        hard floor on the beacon interval, so it has to survive validation."""
+        for value, ok in ((0, True), (1, True), (10, True), (100, True), (101, False)):
+            cfg = default_config()
+            cfg["rate"]["duty_cycle_pct"] = value
+            err = validate_config(cfg)
+            if ok:
+                self.assertIsNone(err, f"duty_cycle_pct={value} should be accepted")
+            else:
+                self.assertEqual(err, "rate.duty_cycle_pct must be 0 (no limit) or 1-100")
 
     def test_wifi_channel(self):
         """ESP-NOW shares the WiFi radio, so this is the channel the whole mesh

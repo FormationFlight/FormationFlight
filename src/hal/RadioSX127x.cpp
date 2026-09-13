@@ -9,12 +9,51 @@
 
 namespace ff {
 
+// Compile-time band-edge check. The channel, bandwidth included, must sit wholly
+// inside its allocation. This exists because the 2.4 GHz default once had half
+// its channel below 2400 MHz: the kind of mistake that should never survive a
+// build, and that nothing else here would have caught.
+namespace {
+constexpr double kCentreHz = static_cast<double>(LORA_FREQUENCY);
+constexpr double kHalfBwHz = LORA_BW_KHZ * 1000.0 / 2.0;
+#if LORA_BAND == 433
+constexpr double kBandLowHz = 433.05e6;
+constexpr double kBandHighHz = 434.79e6;
+#elif LORA_BAND == 868
+// The 500 mW / 10% sub-band, which is the only EU one that can carry a useful
+// beacon rate. Deliberately NOT the whole 863-870 allocation: the sub-band
+// boundaries are where the power and duty limits change.
+constexpr double kBandLowHz = 869.40e6;
+constexpr double kBandHighHz = 869.65e6;
+#elif LORA_BAND == 915
+constexpr double kBandLowHz = 902.0e6;
+constexpr double kBandHighHz = 928.0e6;
+#else
+#error "unknown LORA_BAND for the sub-GHz radio"
+#endif
+static_assert(kCentreHz - kHalfBwHz >= kBandLowHz,
+              "LoRa channel extends below the band edge; check LORA_FREQUENCY and LORA_BW_KHZ");
+static_assert(kCentreHz + kHalfBwHz <= kBandHighHz,
+              "LoRa channel extends above the band edge; check LORA_FREQUENCY and LORA_BW_KHZ");
+}  // namespace
+
 namespace {
 
-// "M3" sub-GHz profile, matching the legacy SX127x driver.
-constexpr float kBandwidthKHz = 500.0f;
-constexpr uint8_t kSpreadingFactor = 7;
-constexpr uint8_t kCodingRate = 5;   // 4/5
+// Modulation comes from the band definition in platformio.ini, because the
+// legal channel width is a property of the band, not of the chip. See the
+// comments there for why each one is what it is.
+#ifndef LORA_BW_KHZ
+#define LORA_BW_KHZ 500.0
+#endif
+#ifndef LORA_SF
+#define LORA_SF 7
+#endif
+#ifndef LORA_CR
+#define LORA_CR 5
+#endif
+constexpr float kBandwidthKHz = static_cast<float>(LORA_BW_KHZ);
+constexpr uint8_t kSpreadingFactor = LORA_SF;
+constexpr uint8_t kCodingRate = LORA_CR;
 constexpr uint8_t kSyncWord = 0x17;
 constexpr uint16_t kPreambleSymbols = 8;
 constexpr uint8_t kLnaGain = 0;      // automatic

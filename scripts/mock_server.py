@@ -220,6 +220,9 @@ def default_config():
             "min_interval_ms": 100,
             "max_interval_ms": 1000,
             "jitter_frac": 0.25,
+            # Regional duty-cycle ceiling, 0 = none. Seeded per band at build
+            # time on real firmware (LORA_DUTY_PCT); 0 on the host build.
+            "duty_cycle_pct": 0,
         },
         "peers": {"timeout_ms": 6000, "announce_interval_ms": 2000},
         "msp": {"radar_interval_ms": 100},
@@ -428,6 +431,9 @@ def validate_config(cfg):
         return "rate.min_interval_ms must be > 0"
     if rate.get("max_interval_ms", 0) < rate.get("min_interval_ms", 0):
         return "rate.max_interval_ms must be >= rate.min_interval_ms"
+    duty = rate.get("duty_cycle_pct", 0)
+    if duty > 100:
+        return "rate.duty_cycle_pct must be 0 (no limit) or 1-100"
     if peers.get("timeout_ms", 0) == 0:
         return "peers.timeout_ms must be > 0"
     if peers.get("announce_interval_ms", 0) == 0:
@@ -489,6 +495,7 @@ def merge_config(incoming, cfg):
         _merge_scalar(s, "min_interval_ms", nxt["rate"], "i", 32, False)
         _merge_scalar(s, "max_interval_ms", nxt["rate"], "i", 32, False)
         _merge_scalar(s, "jitter_frac", nxt["rate"], "f")
+        _merge_scalar(s, "duty_cycle_pct", nxt["rate"], "i", 8, False)
     s = section("peers")
     if s is not None:
         _merge_scalar(s, "timeout_ms", nxt["peers"], "i", 32, False)

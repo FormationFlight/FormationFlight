@@ -10,12 +10,43 @@
 
 namespace ff {
 
+// Compile-time band-edge check. The channel, bandwidth included, must sit wholly
+// inside 2400-2483.5 MHz. This exists because the default here was once
+// 2400.000 MHz, which put half the channel below the band edge.
+namespace {
+constexpr double kCentreHz = static_cast<double>(LORA_FREQUENCY);
+constexpr double kHalfBwHz = LORA_BW_KHZ * 1000.0 / 2.0;
+constexpr double kBandLowHz = 2400.0e6;
+constexpr double kBandHighHz = 2483.5e6;
+static_assert(kCentreHz - kHalfBwHz >= kBandLowHz,
+              "LoRa channel extends below 2400 MHz; check LORA_FREQUENCY and LORA_BW_KHZ");
+static_assert(kCentreHz + kHalfBwHz <= kBandHighHz,
+              "LoRa channel extends above 2483.5 MHz; check LORA_FREQUENCY and LORA_BW_KHZ");
+// A fixed-channel system in the US needs a 6 dB bandwidth of at least 500 kHz
+// (FCC 15.247(a)(2)). ExpressLRS uses 406.25 kHz legally because it hops;
+// nothing in v2 hops, so that exemption is not available here.
+static_assert(LORA_BW_KHZ >= 500.0,
+              "a fixed-channel 2.4 GHz system needs at least 500 kHz of bandwidth");
+}  // namespace
+
 namespace {
 
-// "M3" modulation, matching the legacy 2.4 GHz profile.
-constexpr float kBandwidthKHz = 406.25f;
-constexpr uint8_t kSpreadingFactor = 5;
-constexpr uint8_t kCodingRate = 6;    // 4/6
+// Modulation comes from the band definition in platformio.ini, because the
+// legal channel width is a property of the band, not of the chip. See the
+// comments there, in particular why a fixed-channel system needs at least
+// 500 kHz where a hopping one like ExpressLRS does not.
+#ifndef LORA_BW_KHZ
+#define LORA_BW_KHZ 812.5
+#endif
+#ifndef LORA_SF
+#define LORA_SF 5
+#endif
+#ifndef LORA_CR
+#define LORA_CR 6
+#endif
+constexpr float kBandwidthKHz = static_cast<float>(LORA_BW_KHZ);
+constexpr uint8_t kSpreadingFactor = LORA_SF;
+constexpr uint8_t kCodingRate = LORA_CR;
 constexpr uint8_t kSyncWord = 0x17;
 constexpr uint16_t kPreambleSymbols = 12;
 

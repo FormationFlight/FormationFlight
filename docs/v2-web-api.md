@@ -147,6 +147,13 @@ The full configuration, exactly as `lib/ff_core/config.h` defines it. Secrets
 when set and `""` when not. Posting that placeholder back means "leave it
 alone", so the UI can round-trip the document it was given.
 
+`rate.duty_cycle_pct` is the regional transmit duty-cycle ceiling, 0 for none.
+It is seeded per band at build time and is a hard floor on the beacon interval,
+outranking both `min_interval_ms` and `max_interval_ms`: it is a legal limit
+rather than a tuning preference, so it is not something a config is allowed to
+clamp away. On EU 868 at roughly 72 ms of airtime and 10% duty it works out at a
+beacon every 720 ms no matter what else is set.
+
 `wifi.channel` (1-13) sets the AP's channel and therefore ESP-NOW's. Every node
 that should hear every other over ESP-NOW must agree on it. 1, 6 and 11 are the
 non-overlapping choices.

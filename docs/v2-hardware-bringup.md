@@ -68,6 +68,51 @@ real decode, the real AES-CCM authentication and the real replay check.
 A simulated peer that never appears means the receive path is broken
 independently of RF, which is a much easier fault to chase than an RF one.
 
+## 4b. Check the channel you are actually on
+
+The LoRa channel defaults were repicked; the old ones were wrong in ways worth
+knowing about if you have older notes or hardware programmed from them.
+
+| Band | Centre | BW | SF | CR | Airtime | Sensitivity | Duty floor |
+|---|---|---|---|---|---|---|---|
+| 433 | 434.400 MHz | 250 kHz | 7 | 4/5 | 36 ms | -121.5 dBm | 360 ms |
+| 868 | 869.525 MHz | 125 kHz | 7 | 4/5 | 72 ms | -124.5 dBm | 719 ms |
+| 915 | 920.000 MHz | 500 kHz | 8 | 4/7 | 43 ms | -121.0 dBm | none |
+| 2400 | 2476.000 MHz | 812.5 kHz | 8 | 4/7 | 27 ms | -118.4 dBm | none |
+
+Sensitivity is the calculated demodulation floor, `-174 + 10log10(BW) + NF +
+SNR_limit`, with a 6 dB noise figure (6.5 at 2.4 GHz). It is a model, not a
+measurement, and worth checking against a real receiver once there is one.
+
+Spreading factor is picked per band against its duty-cycle ceiling rather than
+uniformly. Where there is no ceiling the airtime is cheap and worth spending on
+range; where there is one, every extra millisecond directly slows the beacon,
+and those bands are already the most sensitive because their channels are
+narrower.
+
+Three consequences to expect on the bench rather than be surprised by:
+
+- **2.4 GHz used to be the weak link by a factor of six.** At SF5 it managed
+  about 2.7 km of free-space range against 17 to 52 km for the sub-GHz bands:
+  8.6 dB of that is just the extra path loss over 915 MHz, and the rest was
+  SF5 being 7.5 dB less sensitive than SF8. It is now in the same sensitivity
+  class as the others. Expect the LoRa beacon to be noticeably slower than it
+  was, which is the trade: ESP-NOW carries the fast updates when you are close,
+  and LoRa is the layer that should still be there when you are not.
+
+- **EU 868 cannot beacon faster than about 1.4 Hz.** The 869.40-869.65 sub-band
+  permits 10% duty, and 72 ms of airtime per frame is what that buys. The rate
+  controller enforces it as a floor, so setting `rate.min_interval_ms` to 100
+  will not make it go faster, and that is deliberate. LoRa is the long-range
+  medium; ESP-NOW carries the fast updates.
+- **2.4 GHz LoRa moved to 2476 MHz, well away from ESP-NOW.** The old default
+  sat on top of WiFi channel 1, a couple of centimetres from its own antenna.
+  If you change `wifi.channel` to 11 or 13, check for interference again,
+  because you will have moved WiFi back toward the LoRa channel.
+
+A build will now refuse to compile if a channel falls outside its band, so you
+cannot reintroduce the old values by accident.
+
 ## 5. Two nodes, one medium
 
 Flash a second board. **Set the same group passphrase on both**, or they will

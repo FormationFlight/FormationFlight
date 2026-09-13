@@ -158,6 +158,76 @@ void test_airtime_parameterized_jitter() {
     TEST_ASSERT_UINT32_WITHIN(2, base * 3 / 4, rc.nextDelayMs(5, 0.0f, 20.0));
 }
 
+// ---- Duty-cycle ceiling ------------------------------------------------------
+//
+// EU 868 permits 10% duty in the sub-band v2 uses and 1% in most of the others,
+// and that is a legal limit rather than a tuning preference. It is enforced in
+// the rate controller so a config that would transmit illegally is refused by
+// the firmware, instead of being left to whoever fills in min_interval_ms.
+
+void test_no_duty_limit_changes_nothing() {
+    RateConfig cfg;
+    cfg.duty_cycle_pct = 0;
+    RateController rc(cfg);
+    TEST_ASSERT_EQUAL_UINT32(0, rc.dutyFloorMs(72.0));
+    // Alone, 14 ms airtime: base 93 ms, clamped up to the 100 ms floor.
+    TEST_ASSERT_EQUAL_UINT32(100, rc.baseIntervalMs(0, 14.0));
+}
+
+void test_duty_floor_is_airtime_over_duty() {
+    RateConfig cfg;
+    cfg.duty_cycle_pct = 10;
+    RateController rc(cfg);
+    // 72 ms of airtime at 10% means one frame per 720 ms.
+    TEST_ASSERT_EQUAL_UINT32(720, rc.dutyFloorMs(72.0));
+    // And at 1%, ten times that.
+    cfg.duty_cycle_pct = 1;
+    RateController strict(cfg);
+    TEST_ASSERT_EQUAL_UINT32(7200, strict.dutyFloorMs(72.0));
+}
+
+// The whole point: the ceiling wins over a min_interval_ms that would be too
+// fast for it.
+void test_duty_ceiling_overrides_the_configured_minimum() {
+    RateConfig cfg;
+    cfg.duty_cycle_pct = 10;
+    cfg.min_interval_ms = 100;  // what an unaware config would ask for
+    RateController rc(cfg);
+    TEST_ASSERT_EQUAL_UINT32(720, rc.baseIntervalMs(0, 72.0));
+}
+
+// It also wins over max_interval_ms. Clamping a legal limit away would be
+// exactly the wrong direction to round.
+void test_duty_ceiling_overrides_the_configured_maximum() {
+    RateConfig cfg;
+    cfg.duty_cycle_pct = 1;
+    cfg.min_interval_ms = 100;
+    cfg.max_interval_ms = 1000;
+    RateController rc(cfg);
+    TEST_ASSERT_EQUAL_UINT32(7200, rc.baseIntervalMs(0, 72.0));
+}
+
+// With peers, the peer-count pacing and the ceiling are both floors; whichever
+// is slower wins.
+void test_duty_ceiling_and_peer_pacing_take_the_slower() {
+    RateConfig cfg;
+    cfg.duty_cycle_pct = 10;
+    cfg.max_interval_ms = 60000;
+    RateController rc(cfg);
+    // 20 peers at 72 ms and 15% load: 21 * 72 / 0.15 = 10080 ms, well past the
+    // 720 ms duty floor, so ALOHA's own pacing is what applies.
+    TEST_ASSERT_EQUAL_UINT32(10080, rc.baseIntervalMs(20, 72.0));
+    // Alone, the duty floor is the binding one.
+    TEST_ASSERT_EQUAL_UINT32(720, rc.baseIntervalMs(0, 72.0));
+}
+
+void test_duty_floor_ignores_a_zero_airtime() {
+    RateConfig cfg;
+    cfg.duty_cycle_pct = 10;
+    RateController rc(cfg);
+    TEST_ASSERT_EQUAL_UINT32(0, rc.dutyFloorMs(0.0));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_airtime_matches_known_reference);
@@ -171,5 +241,11 @@ int main(int, char**) {
     RUN_TEST(test_interval_holds_target_load_in_midrange);
     RUN_TEST(test_crowded_clamps_to_max_interval);
     RUN_TEST(test_jitter_bounds);
+    RUN_TEST(test_no_duty_limit_changes_nothing);
+    RUN_TEST(test_duty_floor_is_airtime_over_duty);
+    RUN_TEST(test_duty_ceiling_overrides_the_configured_minimum);
+    RUN_TEST(test_duty_ceiling_overrides_the_configured_maximum);
+    RUN_TEST(test_duty_ceiling_and_peer_pacing_take_the_slower);
+    RUN_TEST(test_duty_floor_ignores_a_zero_airtime);
     return UNITY_END();
 }

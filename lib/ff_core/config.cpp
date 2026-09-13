@@ -114,6 +114,7 @@ void configToJson(const Settings& cfg, JsonObject out, bool redact_secrets) {
     rate["min_interval_ms"] = cfg.rate.min_interval_ms;
     rate["max_interval_ms"] = cfg.rate.max_interval_ms;
     rate["jitter_frac"] = cfg.rate.jitter_frac;
+    rate["duty_cycle_pct"] = cfg.rate.duty_cycle_pct;
 
     JsonObject peers = out.createNestedObject("peers");
     peers["timeout_ms"] = cfg.peer_timeout_ms;
@@ -163,6 +164,10 @@ bool configValidate(const Settings& cfg, const char** err) {
     }
     if (cfg.rate.max_interval_ms < cfg.rate.min_interval_ms) {
         *err = "rate.max_interval_ms must be >= rate.min_interval_ms";
+        return false;
+    }
+    if (cfg.rate.duty_cycle_pct > 100) {
+        *err = "rate.duty_cycle_pct must be 0 (no limit) or 1-100";
         return false;
     }
     if (cfg.peer_timeout_ms == 0) {
@@ -232,6 +237,7 @@ bool configMergeJson(JsonObjectConst in, Settings& cfg, const char** err) {
         mergeVal(rate, "min_interval_ms", next.rate.min_interval_ms);
         mergeVal(rate, "max_interval_ms", next.rate.max_interval_ms);
         mergeVal(rate, "jitter_frac", next.rate.jitter_frac);
+        mergeVal(rate, "duty_cycle_pct", next.rate.duty_cycle_pct);
     }
     if (in.containsKey("peers")) {
         JsonObjectConst peers = in["peers"];
