@@ -137,6 +137,62 @@
     }
 }
 
+.tooltip-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.25rem;
+}
+
+.tooltip-icon {
+    color: #9ca3af;
+    cursor: help;
+}
+
+.tooltip-wrap:hover .tooltip-icon,
+.tooltip-wrap:focus-within .tooltip-icon {
+    color: #6b7280;
+}
+
+.tooltip-bubble {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 240px;
+    background-color: #1f2937;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12px;
+    line-height: 1.35;
+    font-weight: 400;
+    text-transform: none;
+    z-index: 30;
+    transition: opacity .15s ease-in-out;
+    pointer-events: none;
+}
+
+.tooltip-bubble::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #1f2937 transparent transparent transparent;
+}
+
+.tooltip-wrap:hover .tooltip-bubble,
+.tooltip-wrap:focus-within .tooltip-bubble {
+    visibility: visible;
+    opacity: 1;
+}
+
 .logo {
     filter: invert(47%) sepia(5%) saturate(1962%) hue-rotate(176deg) brightness(93%) contrast(85%);
     transition: all .5s ease-in-out;

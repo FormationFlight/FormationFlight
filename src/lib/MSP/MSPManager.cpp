@@ -25,6 +25,24 @@ void MSPManager::begin(Stream &stream)
     ready = true;
 }
 
+// Returns the FC's active-mode bitmap (MSP_STATUS + MSP_BOXIDS), cached briefly
+// so getState()/isGCSNavActive() calls within the same cycle share one poll
+// instead of each triggering their own pair of MSP round trips.
+uint32_t MSPManager::getActiveModesCached()
+{
+    static uint32_t modes = 0;
+    static unsigned long cached = 0;
+
+    if (millis() - cached < 100)
+    {
+        return modes;
+    }
+
+    msp->getActiveModes(&modes);
+    cached = millis();
+    return modes;
+}
+
 // Returns the flight controller's state - 0 for disarmed, 1 for armed.
 uint8_t MSPManager::getState()
 {
@@ -32,9 +50,29 @@ uint8_t MSPManager::getState()
     {
         return 0;
     }
-    uint32_t modes;
-    msp->getActiveModes(&modes);
-    return bitRead(modes, 0);
+    return bitRead(getActiveModesCached(), 0);
+}
+
+// Returns whether GCS NAV is currently active on the FC (follow-mode trigger, §5[C] option 2).
+bool MSPManager::isGCSNavActive()
+{
+    if (!ready || !hostIsFlightController(this->getFCVariant()))
+    {
+        return false;
+    }
+    return bitRead(getActiveModesCached(), MSP_MODE_GCSNAV);
+}
+
+// Returns whether INAV's HEADING HOLD ("MAG") box is active on the FC — see
+// sendSetHead()'s comment (MSPManager.h) for why this gates whether a
+// commanded heading actually reaches the yaw-rate PID while in NAV POSHOLD_3D.
+bool MSPManager::isHeadingHoldActive()
+{
+    if (!ready || !hostIsFlightController(this->getFCVariant()))
+    {
+        return false;
+    }
+    return bitRead(getActiveModesCached(), MSP_MODE_MAG);
 }
 
 // Requests the name of the flight controller over MSP without caching
@@ -86,6 +124,28 @@ MSPHost MSPManager::getFCVariant()
     return HOST_NONE;
 }
 
+// Returns the connected FC's mixer platform type (MSP2_INAV_MIXER), cached
+// once we have a valid response. Unlike getFCVariant(), this has no
+// sys.phase-based give-up: its only caller (FollowManager::loop()) never
+// runs until sys.phase > MODE_OTA_SYNC, so a "stop trying past MODE_HOST_SCAN"
+// bypass would fire on the very first call, before a request is ever sent,
+// and platformType would stay stuck at INAV_PLATFORM_UNKNOWN forever.
+// Returns INAV_PLATFORM_UNKNOWN until a reply actually lands, so "never
+// answered" is distinguishable from a real INAV_PLATFORM_MULTIROTOR (0) reply.
+InavPlatformType MSPManager::getPlatformType()
+{
+    static msp_mixer_config_t mixer{.platformType = INAV_PLATFORM_UNKNOWN};
+    static bool cached = false;
+    if (!cached && ready && getFCVariant() == HOST_INAV)
+    {
+        if (msp->request2(MSP2_INAV_MIXER, &mixer, sizeof(mixer)))
+        {
+            cached = true;
+        }
+    }
+    return (InavPlatformType)mixer.platformType; // INAV_PLATFORM_UNKNOWN if never populated
+}
+
 // Return whether the host provided is a flight controller, ergo understands GPS & analog values
 bool MSPManager::hostIsFlightController(MSPHost host)
 {
@@ -129,6 +189,70 @@ msp_analog_t MSPManager::getAnalogValues()
     }
     cached = millis();
     return analog;
+}
+
+// Returns the FC's home/baro-relative altitude estimate in centimeters (MSP_ALTITUDE), cached
+// briefly since the follow module polls this every cycle at FOLLOW_EMIT_HZ.
+int32_t MSPManager::local_altitude_cm()
+{
+    static msp_altitude_t altitude = {};
+    static unsigned long cached = 0;
+
+    if (!hostIsFlightController(this->getFCVariant()))
+    {
+        memset(&altitude, 0, sizeof(altitude));
+        return 0;
+    }
+
+    if (millis() - cached < 100)
+    {
+        return altitude.estimatedActualPosition;
+    }
+
+    if (!msp->request(MSP_ALTITUDE, &altitude, sizeof(altitude)))
+    {
+        memset(&altitude, 0, sizeof(altitude));
+        return 0;
+    }
+    cached = millis();
+    return altitude.estimatedActualPosition;
+}
+
+// Cached MSP_RC poll (~100ms, matching local_altitude_cm()'s cadence) so
+// FollowManager::loop() at FOLLOW_EMIT_HZ always sees a fresh-enough read.
+// Deliberately does NOT memset-on-failure the way
+// local_altitude_cm()/getAnalogValues() do — a dropped MSP_RC frame must
+// not read as "channel near zero," so a failed request just leaves the
+// last successfully parsed struct in place. Polling only ever happens
+// because a caller asked for a specific channel, so a pilot with no axis
+// RC-assigned costs zero extra MSP traffic without this function needing
+// its own enable flag.
+bool MSPManager::getRcChannelUs(uint8_t channel1Based, uint16_t *outUs)
+{
+    static msp_rc_t rc = {};
+    static unsigned long cached = 0;
+
+    if (channel1Based < 1 || channel1Based > MSP_MAX_SUPPORTED_CHANNELS)
+    {
+        return false;
+    }
+    if (!hostIsFlightController(this->getFCVariant()))
+    {
+        return false;
+    }
+
+    if (millis() - cached >= 100)
+    {
+        if (msp->request(MSP_RC, &rc, sizeof(rc)))
+        {
+            cached = millis();
+        }
+        // Poll miss: `rc` is left exactly as it was (MSP::recv() only
+        // touches the buffer on a checksum-valid response, MSP.cpp:104-144).
+    }
+
+    *outUs = rc.channelValue[channel1Based - 1];
+    return true;
 }
 
 // Sends a MSP request for the GPS position of the FC; will be all-zero if the request failed
@@ -226,6 +350,64 @@ void MSPManager::sendRadar(const peer_t *peer)
     peerUpdatesSent++;
 }
 
+// MSP_SET_WP (#209) - INAV follow-me special waypoint #255.
+// Requires NAV POSHOLD + GCS NAV active on the follower FC.
+// p1 doubles as heading for this special waypoint only - for
+// ordinary mission waypoints (1-60) it means cruise speed instead; the two
+// are not the same field just because they share a byte offset.
+// NOTE: as of INAV 9.x, the heading is currently inert for a follower in NAV
+// POSHOLD_3D — NAV_STATE_POSHOLD_3D_IN_PROGRESS lacks NAV_REQUIRE_MAGHOLD, so
+// INAV's yaw-rate PID never actually reads the desiredState.yaw this sets
+// (see sendSetHead()'s comment for the real, currently-working path and the
+// full firmware-source trail). Sent anyway rather than hardcoded to 0: it's
+// free (same message, no extra MSP traffic), and if INAV ever extends
+// POSHOLD_3D to honor it, FF already sends the right value with no code
+// change needed on our side.
+void MSPManager::sendFollowWaypoint(int32_t lat_1e7, int32_t lon_1e7, int32_t alt_cm, int16_t headingDeg)
+{
+    msp_set_wp_t wp{};
+    wp.waypointNumber = 255;
+    wp.action = MSP_NAV_STATUS_WAYPOINT_ACTION_WAYPOINT; // must be 1
+    wp.lat = lat_1e7;
+    wp.lon = lon_1e7;
+    wp.alt = alt_cm;         // home-relative, p3 bit0 = 0 below
+    wp.p1 = headingDeg; wp.p2 = 0; wp.p3 = 0;
+    wp.flag = 0;
+    msp->command(MSP_SET_WP, &wp, sizeof(wp));
+}
+
+// MSP_SET_HEAD (#211) - explicit heading-hold target.
+// One-way, best-effort, no ACK wait, mirrors sendGvar()'s fire-and-forget
+// style. Callers must gate on isHeadingHoldActive() themselves — INAV
+// accepts this unconditionally but the yaw-rate PID only consumes the target
+// it writes when the HEADING HOLD box is active (see MSPManager.h).
+void MSPManager::sendSetHead(int16_t headingDeg)
+{
+    msp_set_head_t head{};
+    head.magHoldHeading = headingDeg;
+    msp->command(MSP_SET_HEAD, &head, sizeof(head));
+}
+
+void MSPManager::sendGvar(uint8_t index, int32_t value)
+{
+    if (!ready || getFCVariant() != HOST_INAV)
+    {
+        return;
+    }
+    // getFCVersion() is already cached for the connection's lifetime
+    // (used today by Display.cpp's FC-version readout) — this adds no
+    // extra MSP traffic to check support.
+    if (getFCVersion().versionMajor < 9)
+    {
+        return;
+    }
+
+    msp_set_gvar_t g{};
+    g.index = index;
+    g.value = value;
+    msp->command2(MSP2_INAV_SET_GVAR, &g, sizeof(g), 0); // fire-and-forget, mirrors sendRadar()
+}
+
 // Schedules the next transmission loop at the given timestamp
 void MSPManager::scheduleNextAt(unsigned long timestamp)
 {
@@ -237,11 +419,6 @@ void MSPManager::loop()
 {
     if (sys.phase > MODE_OTA_SYNC && millis() >= nextSendTime)
     {
-        if (hostIsFlightController(getFCVariant()))
-        {
-            // We used to get state & analog values here; necessary?
-        }
-
         // Send MSP radar positions to the FC
         StatsManager::getSingleton()->startTimer();
 

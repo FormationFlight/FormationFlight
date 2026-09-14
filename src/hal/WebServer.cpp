@@ -1,0 +1,943 @@
+#include "WebServer.h"
+
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <AsyncJson.h>
+
+#if defined(PLATFORM_ESP8266)
+#include <ESP8266WiFi.h>
+#include <Updater.h>
+#else
+#include <Update.h>
+#include <WiFi.h>
+#endif
+
+#include <cstdio>
+#include <cstring>
+
+#include "geo.h"
+#include "log.h"
+#include "webcontent.h"
+
+namespace ff {
+
+WebServer* WebServer::instance_ = nullptr;
+
+namespace {
+
+constexpr size_t kStatusJsonCapacity = 6144;
+constexpr size_t kConfigJsonCapacity = 4096;
+constexpr size_t kFramesJsonCapacity = 4096;
+
+// UIDs go out as 8-char hex strings, never as JSON numbers: a 32-bit value
+// round-tripping through a double is fine today and a very confusing bug the
+// day someone widens it.
+void uidToHex(uint32_t uid, char out[9]) { std::snprintf(out, 9, "%08x", uid); }
+
+uint32_t hexToUid(const char* s) {
+    if (s == nullptr) {
+        return 0;
+    }
+    return static_cast<uint32_t>(std::strtoul(s, nullptr, 16));
+}
+
+const char* frameResultName(FrameResult r) {
+    switch (r) {
+        case FrameResult::Tx:
+            return "tx";
+        case FrameResult::Ok:
+            return "ok";
+        case FrameResult::Self:
+            return "self";
+        case FrameResult::CryptoFail:
+            return "crypto_fail";
+        case FrameResult::ReplayFail:
+            return "replay_fail";
+        case FrameResult::DecodeFail:
+            return "decode_fail";
+        case FrameResult::Oversize:
+            return "oversize";
+    }
+    return "unknown";
+}
+
+const char* simModeName(SimMode m) {
+    switch (m) {
+        case SimMode::Static:
+            return "static";
+        case SimMode::Line:
+            return "line";
+        case SimMode::Circle:
+            return "circle";
+        case SimMode::Hex:
+            return "hex";
+    }
+    return "static";
+}
+
+bool simModeFromName(const char* s, SimMode& out) {
+    if (s == nullptr) {
+        return false;
+    }
+    if (std::strcmp(s, "static") == 0) {
+        out = SimMode::Static;
+    } else if (std::strcmp(s, "line") == 0) {
+        out = SimMode::Line;
+    } else if (std::strcmp(s, "circle") == 0) {
+        out = SimMode::Circle;
+    } else if (std::strcmp(s, "hex") == 0) {
+        out = SimMode::Hex;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+void sendJson(AsyncWebServerRequest* request, JsonDocument& doc, int code = 200) {
+    AsyncResponseStream* response = request->beginResponseStream("application/json");
+    response->setCode(code);
+    serializeJson(doc, *response);
+    request->send(response);
+}
+
+double deg1e7(int32_t v) { return static_cast<double>(v) / 1e7; }
+
+// Why the node last restarted. The single most useful thing to know when a
+// board has been misbehaving, and invisible everywhere else.
+//
+// ESP32 only. The ESP8266 core answers the same question with
+// ESP.getResetReason(), which fillSystem() calls directly, so there is no
+// 8266 branch here to get out of step with it.
+#if !defined(PLATFORM_ESP8266)
+const char* resetReasonName() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:   return "power on";
+        case ESP_RST_EXT:       return "external reset";
+        case ESP_RST_SW:        return "software restart";
+        case ESP_RST_PANIC:     return "panic or exception";
+        case ESP_RST_INT_WDT:   return "interrupt watchdog";
+        case ESP_RST_TASK_WDT:  return "task watchdog";
+        case ESP_RST_WDT:       return "other watchdog";
+        case ESP_RST_DEEPSLEEP: return "deep sleep wake";
+        case ESP_RST_BROWNOUT:  return "brownout";
+        case ESP_RST_SDIO:      return "sdio";
+        default:                return "unknown";
+    }
+}
+#endif
+
+void fillSystem(JsonObject sys) {
+    sys["cpu_mhz"] = ESP.getCpuFreqMHz();
+    sys["free_heap"] = ESP.getFreeHeap();
+    sys["sketch_size"] = ESP.getSketchSize();
+    sys["free_sketch_space"] = ESP.getFreeSketchSpace();
+#if defined(PLATFORM_ESP8266)
+    sys["reset_reason"] = ESP.getResetReason();
+    // Fragmentation matters more than free heap on the 8266: a web request can
+    // fail for want of one contiguous block while plenty of heap is "free".
+    sys["heap_fragmentation_pct"] = ESP.getHeapFragmentation();
+    sys["largest_free_block"] = ESP.getMaxFreeBlockSize();
+    sys["flash_size"] = ESP.getFlashChipRealSize();
+#else
+    sys["reset_reason"] = resetReasonName();
+    sys["min_free_heap"] = ESP.getMinFreeHeap();
+    sys["largest_free_block"] = ESP.getMaxAllocHeap();
+    sys["flash_size"] = ESP.getFlashChipSize();
+#endif
+}
+
+}  // namespace
+
+// The Arduino cores spell this differently on each platform. Returns by value:
+// the ESP8266 core hands back a String temporary, and taking c_str() off it
+// leaves a pointer to freed memory as soon as the expression ends.
+String updateErrorText() {
+#if defined(PLATFORM_ESP8266)
+    return Update.getErrorString();
+#else
+    return String(Update.errorString());
+#endif
+}
+
+uint8_t wifiBringUp(const Settings& cfg, uint32_t uid) {
+    char ap_ssid[40];
+    // The AP name carries the UID so several nodes on a bench can be told apart
+    // without connecting to each in turn.
+    std::snprintf(ap_ssid, sizeof(ap_ssid), "FormationFlight-%08x",
+                  static_cast<unsigned>(uid));
+
+    const bool join = !cfg.wifi.ap && cfg.wifi.ssid[0] != '\0';
+
+    // AP+STA when joining, never plain STA: ESP-NOW lives on the AP interface,
+    // and dropping it takes the 2.4 GHz link down with it.
+    WiFi.mode(join ? WIFI_AP_STA : WIFI_AP);
+
+    const char* psk = cfg.wifi.ap_psk[0] != '\0' ? cfg.wifi.ap_psk : nullptr;
+    WiFi.softAP(ap_ssid, psk, cfg.wifi.channel);
+
+    if (join) {
+        WiFi.begin(cfg.wifi.ssid, cfg.wifi.psk);
+        // Deliberately does not block: a node whose home network is out of range
+        // must still boot, beacon and fly. The association completes in the
+        // background, or it does not, and either way the radio work runs.
+    }
+    return wifiChannel();
+}
+
+uint8_t wifiChannel() {
+#if defined(PLATFORM_ESP8266)
+    return static_cast<uint8_t>(wifi_get_channel());
+#else
+    return static_cast<uint8_t>(WiFi.channel());
+#endif
+}
+
+void WebServer::begin(const WebDeps& deps) {
+    instance_ = this;
+    deps_ = deps;
+    // WiFi is already up: main() brings it up before the radios, because ESP-NOW
+    // binds to the interface this would otherwise reconfigure.
+    server_ = new AsyncWebServer(80);
+    registerRoutes();
+    server_->begin();
+}
+
+void WebServer::loop(uint32_t now_ms) {
+    if (reboot_at_ms_ != 0 && static_cast<int32_t>(now_ms - reboot_at_ms_) >= 0) {
+        ESP.restart();
+    }
+}
+
+// ---- Handlers ----------------------------------------------------------------
+
+namespace {
+
+}  // namespace
+
+namespace {
+// Accumulated across two tasks on ESP32 (the async server writes, the loop
+// reads). Both are 32-bit aligned scalars, so a read never sees half a value;
+// the worst case is a read landing one request early, which costs a few hundred
+// microseconds of accuracy on a counter measured in seconds.
+volatile uint32_t g_web_busy_us = 0;
+volatile uint32_t g_web_requests = 0;
+}  // namespace
+
+uint32_t webBusyUs() { return g_web_busy_us; }
+uint32_t webRequests() { return g_web_requests; }
+
+WebBusyScope::WebBusyScope() : start_us_(micros()) {}
+WebBusyScope::~WebBusyScope() {
+    g_web_busy_us += micros() - start_us_;
+    g_web_requests++;
+}
+
+namespace {
+
+void fillStatus(WebDeps& d, JsonObject root) {
+    char hex[9];
+
+    JsonObject node = root.createNestedObject("node");
+    uidToHex(d.uid, hex);
+    node["uid"] = hex;
+    node["name"] = d.cfg->node.name;
+    node["version"] = d.fw_version;
+    node["uptime_ms"] = millis();
+    node["free_heap"] = ESP.getFreeHeap();
+    node["listen_only"] = d.cfg->node.listen_only;
+
+    NodeLocation self{};
+    if (d.location != nullptr) {
+        self = d.location->getLocation();
+    }
+    JsonObject loc = root.createNestedObject("location");
+    loc["valid"] = self.valid;
+#ifdef GNSS_ENABLED
+    loc["source"] = "gnss";
+#else
+    loc["source"] = "msp";
+#endif
+    loc["lat"] = self.lat;
+    loc["lon"] = self.lon;
+    loc["alt_m"] = self.alt_m;
+    loc["speed_cms"] = self.speed_cms;
+    loc["course_ddeg"] = self.course_ddeg;
+    loc["armed"] = self.armed;
+    loc["sats"] = self.sats;
+    loc["fix_type"] = self.fix_type;
+    if (self.hdop != 0) {
+        loc["hdop"] = self.hdop / 100.0;
+    }
+
+    JsonArray radios = root.createNestedArray("radios");
+    const uint32_t now = millis();
+    for (size_t i = 0; i < d.node->radioCount(); i++) {
+        const RadioStats& rs = d.node->radioStats(i);
+        RadioDriver* drv = d.hub->at(i);
+        JsonObject r = radios.createNestedObject();
+        r["index"] = i;
+        r["name"] = drv != nullptr ? drv->name() : "?";
+        r["enabled"] = drv != nullptr && drv->enabled();
+        r["sim"] = drv != nullptr && std::strcmp(drv->name(), "SIM") == 0;
+        r["tx"] = rs.tx;
+        r["rx_ok"] = rs.rx_ok;
+        r["rx_crypto_fail"] = rs.rx_crypto_fail;
+        r["rx_replay"] = rs.rx_replay;
+        r["rx_decode_fail"] = rs.rx_decode_fail;
+        r["rx_self"] = rs.rx_self;
+        r["last_rssi"] = rs.last_rssi;
+        r["last_rx_age_ms"] = rs.last_rx_ms == 0 ? 0 : (now - rs.last_rx_ms);
+        r["beacon_interval_ms"] = rs.beacon_interval_ms;
+        r["airtime_ms"] = rs.airtime_ms;
+        r["peers"] = d.node->activePeerCountOn(i, now);
+        // Frames lost inside the driver rather than on the air. Invisible in
+        // every other counter, and the first sign a node is over its budget.
+        r["rx_dropped"] = drv != nullptr ? drv->rxDropped() : 0;
+        r["tx_dropped"] = drv != nullptr ? drv->txDropped() : 0;
+        // Deferrals are the benign half of what used to be counted as drops,
+        // and timeouts are the malignant half. Separating them is the only way
+        // to tell a node whose beacon and announce schedules overlapped from
+        // one whose transmit-done interrupts are going missing.
+        r["tx_deferred"] = drv != nullptr ? drv->txDeferred() : 0;
+        r["tx_timeouts"] = drv != nullptr ? drv->txTimeouts() : 0;
+        r["transmits"] = drv != nullptr && drv->transmits();
+        // Read back from the driver, not from the build flags: confirming the
+        // radio really is where the target intended is the first thing worth
+        // checking on a node that is not hearing anyone.
+        if (drv != nullptr) {
+            const RadioDriver::Info ri = drv->info();
+            if (ri.frequency_hz != 0) {
+                JsonObject m = r.createNestedObject("modulation");
+                m["frequency_hz"] = ri.frequency_hz;
+                m["bandwidth_khz"] = ri.bandwidth_khz;
+                m["spreading_factor"] = ri.spreading_factor;
+                m["coding_rate"] = ri.coding_rate;
+                m["power_dbm"] = ri.power_dbm;
+            }
+            if (ri.has_snr) {
+                r["last_snr_db"] = ri.last_snr_db;
+            }
+        }
+    }
+
+    JsonArray peers = root.createNestedArray("peers");
+    const PeerTable& table = d.node->peers();
+    for (size_t i = 0; i < table.capacity(); i++) {
+        const Peer* p = table.at(i);
+        if (p == nullptr) {
+            continue;
+        }
+        JsonObject o = peers.createNestedObject();
+        uidToHex(p->uid, hex);
+        o["uid"] = hex;
+        o["name"] = p->name;
+        o["lat"] = p->lat;
+        o["lon"] = p->lon;
+        o["alt_m"] = p->alt_m;
+        o["speed_cms"] = p->speed_cms;
+        o["course_ddeg"] = p->course_ddeg;
+        o["flags"] = p->flags;
+        o["rssi"] = p->rssi;
+        o["age_ms"] = now - p->last_update_ms;
+        o["packets"] = p->packets_received;
+        JsonArray on = o.createNestedArray("radios");
+        for (size_t r = 0; r < kMaxRadios; r++) {
+            if (p->radios_seen & (1u << r)) {
+                on.add(r);
+            }
+        }
+        // Range and bearing are only meaningful with our own fix; omit rather
+        // than send a distance measured from latitude zero.
+        if (self.valid) {
+            o["distance_m"] = geo::distanceM(deg1e7(self.lat), deg1e7(self.lon), deg1e7(p->lat),
+                                             deg1e7(p->lon));
+            o["bearing_deg"] = geo::bearingDeg(deg1e7(self.lat), deg1e7(self.lon),
+                                               deg1e7(p->lat), deg1e7(p->lon));
+            o["rel_alt_m"] = p->alt_m - self.alt_m;
+        }
+    }
+
+    JsonObject crypto = root.createNestedObject("crypto");
+    if (d.crypto != nullptr) {
+        crypto["mode"] = "ccm";
+        crypto["bad_tag"] = d.crypto->badTagCount();
+        crypto["replay"] = d.crypto->replayCount();
+        crypto["tx_counter"] = d.crypto->txCounter();
+    } else {
+        crypto["mode"] = "none";
+    }
+
+    const NodeStats& st = d.node->stats();
+    JsonObject stats = root.createNestedObject("stats");
+    stats["beacons_sent"] = st.beacons_sent;
+    stats["announces_sent"] = st.announces_sent;
+    stats["rx_ok"] = st.rx_ok;
+    stats["rx_rejected"] = st.rx_rejected;
+    stats["rx_self"] = st.rx_self;
+
+    JsonObject fc = root.createNestedObject("fc");
+    if (d.fc != nullptr) {
+        fc["connected"] = d.fc->connected();
+        fc["variant"] = d.fc->variant();
+        char ver[16];
+        const FcVersion v = d.fc->version();
+        std::snprintf(ver, sizeof(ver), "%u.%u.%u", v.major, v.minor, v.patch);
+        fc["version"] = ver;
+        fc["platform"] = static_cast<int>(d.fc->platformType());
+        fc["armed"] = d.fc->armed();
+        fc["gcs_nav"] = d.fc->gcsNavActive();
+        fc["heading_hold"] = d.fc->headingHoldActive();
+    } else {
+        fc["connected"] = false;
+    }
+
+    if (d.follow != nullptr) {
+        const FollowStatus fs = d.follow->status(now);
+        JsonObject f = root.createNestedObject("follow");
+        f["state"] = followLockStateName(fs.state);
+        f["gate_active"] = fs.gateActive;
+        uidToHex(fs.lockedUid, hex);
+        f["locked_uid"] = hex;
+        f["locked_name"] = fs.lockedName;
+        f["platform"] = static_cast<int>(fs.platformType);
+        f["autothrottle_armed"] = fs.autothrottleArmed;
+        f["rc_slot_frozen"] = fs.rcSlotFrozen;
+        f["prearm_failed"] = fs.rcPreArmCheckFailed;
+        if (fs.haveLastTarget) {
+            JsonObject t = f.createNestedObject("target");
+            t["lat"] = fs.lastTarget.lat_1e7;
+            t["lon"] = fs.lastTarget.lon_1e7;
+            t["alt_cm"] = fs.lastTargetAltCm;
+            t["heading_deg"] = fs.lastTargetHeadingDeg;
+            t["age_ms"] = fs.lastTargetAgeMs;
+            JsonObject lo = f.createNestedObject("live_offset");
+            lo["long_m"] = fs.liveOffset.longitudinal_m;
+            lo["lat_m"] = fs.liveOffset.lateral_m;
+            lo["vert_m"] = fs.liveOffset.vertical_m;
+            f["autothrottle_engaged"] = fs.autothrottleEngaged;
+            f["target_speed_cms"] = fs.targetSpeedCmS;
+        }
+        if (fs.haveStatusGvarValue) {
+            f["status_gvar"] = fs.statusGvarValue;
+        }
+        if (fs.haveConditionFlagsGvarValue) {
+            f["condition_gvar"] = fs.conditionFlagsGvarValue;
+        }
+        if (fs.havePreArmCandidateOffset) {
+            JsonObject po = f.createNestedObject("prearm_offset");
+            po["long_m"] = fs.preArmCandidateOffset.longitudinal_m;
+            po["lat_m"] = fs.preArmCandidateOffset.lateral_m;
+            po["vert_m"] = fs.preArmCandidateOffset.vertical_m;
+        }
+    }
+
+    JsonObject sim = root.createNestedObject("sim");
+    sim["enabled"] = d.cfg->sim.enabled;
+    sim["peers"] = d.sim != nullptr ? d.sim->peerCount() : 0;
+
+    // Only present on a board with a PMIC. A T-Beam reporting no power object
+    // means its AXP192 did not answer, which also means its GPS has no power.
+    if (d.power != nullptr && d.power->present()) {
+        const BoardPower::Reading p = d.power->read();
+        JsonObject power = root.createNestedObject("power");
+        power["battery_v"] = p.battery_v;
+        power["supply_v"] = p.supply_v;
+        power["charge_ma"] = p.charge_ma;
+        power["discharge_ma"] = p.discharge_ma;
+        power["pmic_temp_c"] = p.pmic_temp_c;
+        power["battery_present"] = p.battery_present;
+        power["charging"] = p.charging;
+        power["usb_present"] = p.usb_present;
+        if (p.battery_pct >= 0) {
+            power["battery_pct"] = p.battery_pct;
+        }
+    }
+
+    JsonObject wifi = root.createNestedObject("wifi");
+    wifi["mode"] = d.cfg->wifi.ap ? "ap" : "ap_sta";
+    // The channel ESP-NOW is actually on. Two nodes on different channels cannot
+    // hear each other over ESP-NOW however healthy both look, and joining an
+    // external network hands the choice to the router, so this is worth showing.
+    wifi["channel"] = wifiChannel();
+    wifi["configured_channel"] = d.cfg->wifi.channel;
+    wifi["ap_clients"] = WiFi.softAPgetStationNum();
+    if (!d.cfg->wifi.ap) {
+        wifi["sta_connected"] = WiFi.status() == WL_CONNECTED;
+        wifi["sta_rssi"] = WiFi.RSSI();
+    }
+
+    fillSystem(root.createNestedObject("system"));
+
+    if (d.loop_stats != nullptr) {
+        JsonObject lp = root.createNestedObject("loop");
+        // Reported rather than merely deducted: the time is real, it is just
+        // not the loop's fault.
+        lp["web_busy_ms"] = static_cast<uint32_t>(d.loop_stats->excludedUs() / 1000);
+        lp["web_requests"] = webRequests();
+        lp["last_us"] = d.loop_stats->lastUs();
+        lp["min_us"] = d.loop_stats->minUs();
+        lp["max_us"] = d.loop_stats->maxUs();
+        lp["mean_us"] = d.loop_stats->meanUs();
+        lp["rate_hz"] = d.loop_stats->rateHz();
+        lp["samples"] = d.loop_stats->samples();
+        // A loop longer than the fastest beacon interval can miss a
+        // transmission outright. The mean hides these completely.
+        lp["overruns"] = d.loop_stats->overruns();
+        lp["overrun_threshold_us"] = d.loop_stats->overrunThresholdUs();
+    }
+
+    JsonObject lg = root.createNestedObject("log");
+    lg["total"] = logRing().total();
+    lg["warnings"] = logRing().warnings();
+    lg["errors"] = logRing().errors();
+
+    root["reboot_required"] = WebServer::instance()->rebootRequired();
+    root["config_corrupt"] = d.store != nullptr && d.store->lastLoadCorrupt();
+}
+
+}  // namespace
+
+void WebServer::registerRoutes() {
+    AsyncWebServer* s = server_;
+    // staticfilehandler.inc, generated by scripts/build_html.py from html/,
+    // registers its routes against a variable called `server`.
+    AsyncWebServer* server = server_;
+
+    s->on("/api/status", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        DynamicJsonDocument doc(kStatusJsonCapacity);
+        JsonObject root = doc.to<JsonObject>();
+        fillStatus(WebServer::instance()->deps(), root);
+        sendJson(request, doc);
+    });
+
+    s->on("/api/config", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        DynamicJsonDocument doc(kConfigJsonCapacity);
+        JsonObject root = doc.to<JsonObject>();
+        configToJson(*WebServer::instance()->deps().cfg, root, /*redact_secrets=*/true);
+        sendJson(request, doc);
+    });
+
+    // Partial config update. The merge and every validation rule live in
+    // ff_core/config.cpp, shared with the host tests, so this handler is only
+    // plumbing.
+    AsyncCallbackJsonWebHandler* configPost = new AsyncCallbackJsonWebHandler(
+        "/api/config", [](AsyncWebServerRequest* request, JsonVariant& json) {
+            WebBusyScope busy;
+            WebDeps& d = WebServer::instance()->deps();
+            if (!json.is<JsonObject>()) {
+                request->send(400, "text/plain", "body must be a JSON object");
+                return;
+            }
+            const char* err = nullptr;
+            if (!configMergeJson(json.as<JsonObjectConst>(), *d.cfg, &err)) {
+                request->send(400, "text/plain", err != nullptr ? err : "invalid config");
+                return;
+            }
+            if (d.on_config_applied != nullptr) {
+                d.on_config_applied(*d.cfg);
+            }
+            DynamicJsonDocument doc(kConfigJsonCapacity);
+            JsonObject root = doc.to<JsonObject>();
+            configToJson(*d.cfg, root, /*redact_secrets=*/true);
+            sendJson(request, doc);
+        });
+    s->addHandler(configPost);
+
+    s->on("/api/config/save", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebServer* w = WebServer::instance();
+        WebDeps& d = w->deps();
+        if (!w->saveAllowed(millis())) {
+            request->send(429, "text/plain", "saved too recently, try again shortly");
+            return;
+        }
+        const char* err = nullptr;
+        if (d.store == nullptr || !d.store->save(*d.cfg, &err)) {
+            request->send(500, "text/plain", err != nullptr ? err : "no filesystem");
+            return;
+        }
+        w->markSaved(millis());
+        request->send(200, "text/plain", "saved");
+    });
+
+    s->on("/api/config/reset", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        *d.cfg = Settings{};
+        if (d.store != nullptr) {
+            d.store->save(*d.cfg, nullptr);
+        }
+        if (d.on_config_applied != nullptr) {
+            d.on_config_applied(*d.cfg);
+        }
+        // Radio and WiFi settings only take effect at boot, and a factory reset
+        // almost certainly changed some.
+        WebServer::instance()->setRebootRequired();
+        request->send(200, "text/plain", "reset");
+    });
+
+    s->on("/api/frames", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        const FrameLog& log = d.node->frameLog();
+        uint32_t since = 0;
+        if (request->hasParam("since")) {
+            since = static_cast<uint32_t>(request->getParam("since")->value().toInt());
+        }
+
+        DynamicJsonDocument doc(kFramesJsonCapacity);
+        JsonObject root = doc.to<JsonObject>();
+        root["total"] = log.total();
+        root["capacity"] = log.capacity();
+        JsonArray arr = root.createNestedArray("frames");
+        // Entry i counts back from the newest; its sequence number is
+        // total - 1 - i. Stop as soon as we reach what the client already has.
+        char hex[9];
+        for (size_t i = 0; i < log.size(); i++) {
+            const uint32_t seq = log.total() - 1 - static_cast<uint32_t>(i);
+            if (since != 0 && seq < since) {
+                break;
+            }
+            const FrameLogEntry& e = log.at(i);
+            JsonObject o = arr.createNestedObject();
+            o["ms"] = e.ms;
+            o["radio"] = e.radio;
+            uidToHex(e.uid, hex);
+            o["uid"] = hex;
+            o["type"] = e.type;
+            o["len"] = e.len;
+            o["rssi"] = e.rssi;
+            o["result"] = frameResultName(e.result);
+            if (doc.overflowed()) {
+                break;
+            }
+        }
+        sendJson(request, doc);
+    });
+
+    // The in-RAM log. On an ESP8266 target this is the ONLY safe log: the
+    // console UART is the MSP UART, so printing a diagnostic there injects
+    // bytes into the flight controller's serial link.
+    s->on("/api/log", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        const LogRing& lg = logRing();
+        uint32_t since = 0;
+        if (request->hasParam("since")) {
+            since = static_cast<uint32_t>(request->getParam("since")->value().toInt());
+        }
+        DynamicJsonDocument doc(kFramesJsonCapacity);
+        JsonObject root = doc.to<JsonObject>();
+        root["total"] = lg.total();
+        root["capacity"] = lg.capacity();
+        root["warnings"] = lg.warnings();
+        root["errors"] = lg.errors();
+        JsonArray arr = root.createNestedArray("entries");
+        for (size_t i = 0; i < lg.size(); i++) {
+            const uint32_t seq = lg.total() - 1 - static_cast<uint32_t>(i);
+            if (since != 0 && seq < since) {
+                break;
+            }
+            const LogEntry& e = lg.at(i);
+            JsonObject o = arr.createNestedObject();
+            o["ms"] = e.ms;
+            o["level"] = logLevelName(e.level);
+            o["text"] = e.text;
+            if (doc.overflowed()) {
+                break;
+            }
+        }
+        sendJson(request, doc);
+    });
+
+    // What the GPS module is saying, as opposed to whether we understood it.
+    //
+    // A receiver with a fix and a receiver that is not wired up look identical
+    // in /api/status: no fix, zero satellites. The byte count separates those
+    // two on its own, and the raw tap settles everything else - a module can be
+    // working perfectly and still be unintelligible to us, and no count of
+    // frames we parsed successfully can show that, because it reads zero either
+    // way.
+    s->on("/api/gnss", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        DynamicJsonDocument doc(4096);
+        JsonObject root = doc.to<JsonObject>();
+        if (d.gnss == nullptr) {
+            root["present"] = false;
+            sendJson(request, doc);
+            return;
+        }
+        root["present"] = true;
+        const GnssLinkStats st = d.gnss->gnssStats(millis());
+        root["bytes"] = st.bytes;
+        root["ubx_frames"] = st.ubx_frames;
+        root["nav_pvt"] = st.nav_pvt;
+        root["nmea"] = st.nmea;
+        root["sweeps"] = st.sweeps;
+        root["baud"] = st.baud;
+        root["configured"] = st.configured;
+        root["last_byte_age_ms"] = st.last_byte_age_ms;
+        root["last_pvt_age_ms"] = st.last_pvt_age_ms;
+
+        JsonArray seen = root.createNestedArray("seen");
+        char idbuf[16];
+        for (size_t i = 0; i < kGnssSeenTypes; i++) {
+            if (st.seen[i].count == 0) {
+                continue;
+            }
+            JsonObject o = seen.createNestedObject();
+            std::snprintf(idbuf, sizeof(idbuf), "%02x:%02x", st.seen[i].cls, st.seen[i].id);
+            o["msg"] = idbuf;
+            o["count"] = st.seen[i].count;
+        }
+
+        uint8_t raw[192];
+        const size_t n = d.gnss->gnssSniff(raw, sizeof(raw));
+        // Hex, because the interesting cases are a module speaking a protocol
+        // we did not ask for, and that is only recognisable byte by byte.
+        String hex;
+        hex.reserve(n * 2 + 1);
+        static const char kHex[] = "0123456789abcdef";
+        for (size_t i = 0; i < n; i++) {
+            hex += kHex[raw[i] >> 4];
+            hex += kHex[raw[i] & 0x0F];
+        }
+        root["raw_hex"] = hex;
+        sendJson(request, doc);
+    });
+
+    // Clears the min/max/mean window. The stall count and the accumulated web
+    // time deliberately survive, because "this node has stalled at some point
+    // since boot" does not stop being true when someone presses a button.
+    //
+    // It earns its place on a board that has just booted: WiFi coming up and
+    // the first association produce a worst-case figure that never recurs, and
+    // without a way to clear it that one number sits at the top of the page for
+    // the rest of the session looking like a recurring fault.
+    s->on("/api/loop/reset", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        if (d.loop_stats == nullptr) {
+            request->send(404, "text/plain", "no loop stats on this build");
+            return;
+        }
+        d.loop_stats->reset();
+        request->send(200, "text/plain", "reset");
+    });
+
+    s->on("/api/log", HTTP_DELETE, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        logRing().clear();
+        request->send(200, "text/plain", "cleared");
+    });
+
+    // ---- Simulated traffic ----------------------------------------------------
+
+    s->on("/api/sim", HTTP_GET, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        DynamicJsonDocument doc(2048);
+        JsonObject root = doc.to<JsonObject>();
+        root["enabled"] = d.cfg->sim.enabled;
+        JsonArray arr = root.createNestedArray("peers");
+        if (d.sim != nullptr) {
+            const uint32_t now = millis();
+            char hex[9];
+            for (size_t i = 0; i < d.sim->peerCount(); i++) {
+                const SimPeerConfig* c = d.sim->peerAt(i);
+                JsonObject o = arr.createNestedObject();
+                uidToHex(c->uid, hex);
+                o["uid"] = hex;
+                o["name"] = c->name;
+                o["mode"] = simModeName(c->mode);
+                o["lat"] = c->lat;
+                o["lon"] = c->lon;
+                o["alt_m"] = c->alt_m;
+                o["speed_ms"] = c->speed_ms;
+                o["course_deg"] = c->course_deg;
+                o["radius_m"] = c->radius_m;
+                o["elapsed_ms"] = d.sim->peerElapsedMs(i, now);
+                o["running"] = d.cfg->sim.enabled;
+            }
+        }
+        sendJson(request, doc);
+    });
+
+    AsyncCallbackJsonWebHandler* simPost = new AsyncCallbackJsonWebHandler(
+        "/api/sim/peer", [](AsyncWebServerRequest* request, JsonVariant& json) {
+            WebBusyScope busy;
+            WebDeps& d = WebServer::instance()->deps();
+            if (d.sim == nullptr) {
+                request->send(409, "text/plain", "simulator not available on this build");
+                return;
+            }
+            if (!d.cfg->sim.enabled) {
+                request->send(409, "text/plain", "set sim.enabled before adding peers");
+                return;
+            }
+            JsonObjectConst o = json.as<JsonObjectConst>();
+
+            SimPeerConfig c;
+            c.uid = hexToUid(o["uid"] | "");
+            if (c.uid == 0) {
+                // Generated UIDs are marked so a simulated peer is recognisable
+                // as one even in a raw packet capture.
+                c.uid = 0x5EED0000u | static_cast<uint32_t>(d.sim->peerCount() + 1);
+            }
+            std::strncpy(c.name, o["name"] | "SIM", kMaxNameLen);
+            c.name[kMaxNameLen] = '\0';
+            if (!simModeFromName(o["mode"] | "static", c.mode)) {
+                request->send(400, "text/plain", "mode must be static, line, circle or hex");
+                return;
+            }
+            c.lat = o["lat"] | 0.0;
+            c.lon = o["lon"] | 0.0;
+            c.alt_m = static_cast<int16_t>(o["alt_m"] | 100);
+            c.speed_ms = o["speed_ms"] | 0.0;
+            c.course_deg = o["course_deg"] | 0.0;
+            c.radius_m = o["radius_m"] | 100.0;
+
+            if (c.speed_ms < 0.0 || c.speed_ms > 200.0) {
+                request->send(400, "text/plain", "speed_ms must be 0-200");
+                return;
+            }
+            if ((c.mode == SimMode::Circle || c.mode == SimMode::Hex) && c.radius_m <= 0.0) {
+                request->send(400, "text/plain", "radius_m must be > 0 for circle and hex");
+                return;
+            }
+            if (!d.sim->setPeer(c, millis())) {
+                request->send(409, "text/plain", "simulated peer table full");
+                return;
+            }
+            request->send(200, "text/plain", "ok");
+        });
+    s->addHandler(simPost);
+
+    s->on("/api/sim/peer", HTTP_DELETE, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        if (d.sim == nullptr || !request->hasParam("uid")) {
+            request->send(400, "text/plain", "uid required");
+            return;
+        }
+        const uint32_t uid = hexToUid(request->getParam("uid")->value().c_str());
+        const bool removed = d.sim->removePeer(uid);
+        request->send(removed ? 200 : 404, "text/plain", removed ? "removed" : "no such peer");
+    });
+
+    s->on("/api/sim/clear", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        WebDeps& d = WebServer::instance()->deps();
+        if (d.sim != nullptr) {
+            d.sim->clear();
+        }
+        request->send(200, "text/plain", "cleared");
+    });
+
+    s->on("/api/system/reboot", HTTP_POST, [](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        // Reboot after the response has had time to go out; rebooting inside the
+        // handler drops the connection and the UI reports a failure.
+        WebServer::instance()->requestReboot(millis() + 500);
+        request->send(200, "text/plain", "rebooting");
+    });
+
+    s->on("/update", HTTP_POST, handleFileUploadResponse, handleFileUploadData);
+
+    s->onNotFound([](AsyncWebServerRequest* request) {
+        WebBusyScope busy;
+        if (request->method() == HTTP_OPTIONS) {
+            request->send(200);  // CORS preflight, for UI development off-device
+        } else {
+            request->send(404, "text/plain", "Not found");
+        }
+    });
+
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
+
+#include "staticfilehandler.inc"
+}
+
+// ---- Firmware upload ---------------------------------------------------------
+
+// ---- Firmware upload ---------------------------------------------------------
+//
+// ESPAsyncWebServer streams the body to handleFileUploadData in chunks and then
+// calls handleFileUploadResponse once, so the outcome has to be carried between
+// them on the server object.
+
+void handleFileUploadData(AsyncWebServerRequest* request, const String& filename, size_t index,
+                          uint8_t* data, size_t len, bool final) {
+    WebServer* w = WebServer::instance();
+
+    if (index == 0) {
+        // A new upload. Clear whatever the previous one left behind, or a retry
+        // after a failure reports the old error and never even starts.
+        w->otaStatus() = 0;
+        w->otaMessage() = "";
+    }
+    if (w->otaStatus() != 0) {
+        return;  // already failed; swallow the rest of the body
+    }
+
+#if defined(PLATFORM_ESP8266)
+    const bool named_ok = filename.endsWith(".bin") || filename.endsWith(".bin.gz");
+    const char* want = "must upload .bin or .bin.gz";
+#else
+    const bool named_ok = filename.endsWith(".bin");
+    const char* want = "must upload .bin";
+#endif
+    if (!named_ok) {
+        // Checked before a single byte reaches flash: uploading the wrong file
+        // and finding out after the erase is a brick, not an error message.
+        w->failOta(400, want);
+        return;
+    }
+
+    if (index == 0) {
+        if (Update.isRunning()) {
+            Update.end(false);
+        }
+#if defined(PLATFORM_ESP8266)
+        Update.runAsync(true);
+#endif
+        if (!Update.begin(request->contentLength(), U_FLASH)) {
+            w->failOta(500, updateErrorText());
+            return;
+        }
+        w->setOtaActive();
+        FF_LOGW("OTA started: %u bytes, radios parked until it finishes",
+                static_cast<unsigned>(request->contentLength()));
+    }
+
+    if (Update.write(data, len) != len) {
+        w->failOta(500, updateErrorText());
+        return;
+    }
+
+    if (final) {
+        if (!Update.end(true)) {
+            w->failOta(500, updateErrorText());
+            return;
+        }
+        w->otaMessage() = "update complete, rebooting";
+        w->otaStatus() = 200;
+        FF_LOGI("OTA complete, rebooting");
+    }
+}
+
+void handleFileUploadResponse(AsyncWebServerRequest* request) {
+    WebServer* w = WebServer::instance();
+    const uint16_t code = w->otaStatus() != 0 ? w->otaStatus() : 500;
+    const String msg = w->otaMessage().length() > 0 ? w->otaMessage() : String("upload failed");
+    request->send(code, "text/plain", msg);
+    if (code == 200) {
+        w->requestReboot(millis() + 500);
+    }
+}
+
+}  // namespace ff
