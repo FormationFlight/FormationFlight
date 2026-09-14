@@ -1041,7 +1041,7 @@ export function LoopCard({ loop, onReset }) {
       <${Colored} text=${over ? over + ' stall' + (over === 1 ? '' : 's') : 'healthy'}
         colors=${over ? tipColors.red : tipColors.green}
         title=${present(threshold) && threshold > 0
-          ? 'Iterations of the node's own work that took at least ' + microseconds(threshold) + ', a quarter of the peer timeout. Losing one beacon is not counted: the beacon stream is redundant and peers hold a node for six seconds. This is a stall long enough to be a real fraction of the way to being dropped by everyone.'
+          ? 'Loop iterations, with web time deducted, that took at least ' + microseconds(threshold) + ', a quarter of the peer timeout. Losing one beacon is not counted: the beacon stream is redundant and peers hold a node for six seconds. This is a stall long enough to be a real fraction of the way to being dropped by everyone.'
           : 'Stall counting is off on this build.'} />
       ${onReset && html`<button type="button" onclick=${onReset}
         class="px-2 py-0.5 text-xs font-medium rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"

@@ -137,11 +137,50 @@ def process_folder(folder_path, isRecursive=False):
 
     return c_code, handler_code
 
+# Refuse to pack a script that will not parse.
+#
+# Every file under html/ ends up baked into the firmware image and served from
+# flash, and the UI is one ES module graph: a syntax error in any of its files
+# takes the whole page down, with nothing to see but a blank tab. A stray
+# apostrophe inside a tooltip string did exactly that and was flashed onto two
+# boards before anyone noticed, because the check being run was `node --check`
+# on a bare .js path, which Node treats as CommonJS and quietly does not parse
+# once it meets `import`. Parsing as a module is the only check that means
+# anything for these files.
+#
+# Skipped, with a warning, when there is no node on the PATH: the packer has to
+# keep working on a machine that only has PlatformIO.
+import shutil
+import subprocess
+
+def check_js_syntax(folder):
+    node = shutil.which("node")
+    if node is None:
+        print("warning: node not on PATH, skipping JavaScript syntax check")
+        return
+    failed = False
+    for root, _, names in os.walk(folder):
+        for name in sorted(names):
+            if not name.endswith(".js"):
+                continue
+            path = os.path.join(root, name)
+            with open(path, "rb") as f:
+                result = subprocess.run([node, "--input-type=module", "--check"],
+                                        stdin=f, capture_output=True, text=True)
+            if result.returncode != 0:
+                failed = True
+                print(f"JavaScript syntax error in {path}:")
+                print(result.stderr.strip())
+    if failed:
+        print("Refusing to pack html/: fix the errors above.")
+        exit(1)
+
 folder_path = 'html'
 if not os.path.isdir(folder_path):
     print("Error: The provided path is not a valid directory.")
     exit(1)
 
+check_js_syntax(folder_path)
 c_code, handler_code = process_folder(folder_path)
 
 if c_code and handler_code:
