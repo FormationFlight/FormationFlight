@@ -1,0 +1,154 @@
+{
+  "_comment": "spec docs/spec/2026-09-03-FollowTestSuite.md §3.6/§4.15, resolution note in that doc's §7. Single source of truth for ff::followValidateConfig()/FollowController::applyConfig() (C++), mock_server.py's validate_follow_config() (Python), and html/follow-logic.js's validateConfig() (JS). `overrides` is applied on top of `baseline` below. `expectValid` is one shared expectation, enforced identically by all three validators -- the three previously disagreed on ~12 of these ~17 rules (see each case's `note` and the spec's §7 for what used to diverge and how it was fixed) but now share the same rule set. No case has changed for the v2 web API: the fields below are still one flat block, now carried as the `follow` object of the config document (docs/v2-web-api.md), and the only renamed key is the v1 spelling `targetPeer`, which is deliberately kept here and remapped onto v2's `follow.targetUid` by each validator's fixture loader (test_cross_mirror_fixture.cpp's configFromJson(), test_mock_server.py's follow_from_fixture()).",
+
+  "baseline": {
+    "ofsLongM": -15.0, "ofsLatM": 0.0, "ofsVertM": 10.0,
+    "targetPeer": 0, "emitHz": 4, "peerTimeoutMs": 1500,
+    "minSepM": 8.0, "minVSepM": 13.0, "maxTargetDistM": 50.0, "minAltM": 3.0,
+    "minCourseSpeed": 2.0,
+    "headingDeg": 0.0,
+    "statusGvarIndex": -1, "conditionFlagsGvarIndex": -1,
+    "rcLongChannel": -1, "rcLatChannel": -1, "rcVertChannel": -1,
+    "targetSpeedGvarIndex": -1, "autothrottleEngageGvarIndex": -1,
+    "autothrottleEnableRcChannel": -1,
+    "autothrottleEnableMinThresholdUs": 1700, "autothrottleEnableMaxThresholdUs": 2100,
+    "speedCorrectionAccelCmS2": 0, "minTargetSpeedMps": 0.0, "maxTargetSpeedMps": 0.0
+  },
+
+  "cases": [
+    {
+      "name": "baseline_is_valid",
+      "overrides": {},
+      "expectValid": true
+    },
+
+    {
+      "name": "emitHz_zero_fails",
+      "overrides": { "emitHz": 0 },
+      "expectValid": false,
+      "note": "shared rule -- all three implemented this identically from the start"
+    },
+    {
+      "name": "peerTimeoutMs_zero_fails",
+      "overrides": { "peerTimeoutMs": 0 },
+      "expectValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minSepM_negative_fails",
+      "overrides": { "minSepM": -1 },
+      "expectValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minVSepM_negative_fails",
+      "overrides": { "minVSepM": -1 },
+      "expectValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minAltM_negative_fails",
+      "overrides": { "minAltM": -1 },
+      "expectValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "maxTargetDistM_zero_fails",
+      "overrides": { "maxTargetDistM": 0 },
+      "expectValid": false,
+      "note": "shared rule"
+    },
+    {
+      "name": "minCourseSpeed_negative_fails",
+      "overrides": { "minCourseSpeed": -1 },
+      "expectValid": false,
+      "note": "shared rule"
+    },
+
+    {
+      "name": "geometry_insane_fails",
+      "overrides": { "ofsLongM": -2, "ofsLatM": 0, "ofsVertM": 0 },
+      "expectValid": false,
+      "note": "Previously mock_server.py's validate_config() had no offsetGeometrySane() equivalent at all, so this passed Python validation while failing C++/JS. Fixed by adding the same minSepM/minVSepM geometry check to validate_config()."
+    },
+    {
+      "name": "target_peer_large_uid_is_valid",
+      "overrides": { "targetPeer": 305419896 },
+      "expectValid": true,
+      "note": "v2 firmware identifies peers by 32-bit UID, so targetPeer has no upper bound; the v1 NODES_MAX (6) range rule was removed from all three validators together."
+    },
+    {
+      "name": "status_gvar_index_out_of_range_fails",
+      "overrides": { "statusGvarIndex": 8 },
+      "expectValid": false,
+      "note": "Previously follow-logic.js's validateConfig() never range-checked GVAR index fields (-1 or 0-7), only their uniqueness. Fixed by adding the same range check as C++/Python to validateConfig()."
+    },
+    {
+      "name": "rc_long_channel_out_of_range_fails",
+      "overrides": { "rcLongChannel": 17 },
+      "expectValid": false,
+      "note": "Previously follow-logic.js never range-checked RC channel fields (-1 or 1-16), only their uniqueness. Fixed by adding the same range check as C++/Python to validateConfig()."
+    },
+    {
+      "name": "max_target_speed_not_greater_than_min_fails",
+      "overrides": { "autothrottleEnableRcChannel": 6, "minTargetSpeedMps": 10, "maxTargetSpeedMps": 10 },
+      "expectValid": false,
+      "note": "Previously follow-logic.js never checked maxTargetSpeedMps > minTargetSpeedMps >= 0 at all. Fixed by adding the same check as C++/Python to validateConfig(). Arm channel must be set here or the check is skipped entirely (see the armed/disarmed cases below)."
+    },
+    {
+      "name": "target_speed_zero_defaults_valid_when_disarmed",
+      "overrides": {},
+      "expectValid": true,
+      "note": "Same as baseline_is_valid -- the compiled-in 0/0 target-speed defaults are only invalid once the pilot arms autothrottle (autothrottleEnableRcChannel != -1); with the arm channel left Disabled (-1, the baseline default) they don't matter at all."
+    },
+    {
+      "name": "target_speed_zero_defaults_fail_when_armed",
+      "overrides": { "autothrottleEnableRcChannel": 6 },
+      "expectValid": false,
+      "note": "Setting an arm channel means the pilot intends to use autothrottle, so the 0/0 target-speed defaults (an invalid range on their own) must now be explicitly overridden with values sane for this airframe."
+    },
+    {
+      "name": "min_target_speed_zero_fails_when_armed",
+      "overrides": { "autothrottleEnableRcChannel": 6, "minTargetSpeedMps": 0, "maxTargetSpeedMps": 10 },
+      "expectValid": false,
+      "note": "minTargetSpeedMps must be explicitly > 0 when armed, not just left at its 0 default while only maxTargetSpeedMps is edited -- min is the feature's only stall-safety floor."
+    },
+    {
+      "name": "target_speed_explicit_values_valid_when_armed",
+      "overrides": { "autothrottleEnableRcChannel": 6, "minTargetSpeedMps": 5, "maxTargetSpeedMps": 30 },
+      "expectValid": true,
+      "note": "Both values explicitly set for this airframe and the arm channel assigned -- the intended, fully-configured state."
+    },
+    {
+      "name": "speed_correction_accel_negative_fails",
+      "overrides": { "speedCorrectionAccelCmS2": -1 },
+      "expectValid": false,
+      "note": "Previously follow-logic.js never checked speedCorrectionAccelCmS2 >= 0. Fixed by adding the same check as C++/Python to validateConfig()."
+    },
+
+    {
+      "name": "gvar_indices_not_unique_fails",
+      "overrides": { "statusGvarIndex": 1, "conditionFlagsGvarIndex": 1 },
+      "expectValid": false,
+      "note": "Previously JS-only (a raw POST bypassing the UI could set overlapping GVAR indices and the firmware would accept it). Fixed by adding the same uniqueness check to applyConfig() and validate_config()."
+    },
+    {
+      "name": "rc_channels_not_unique_fails",
+      "overrides": { "rcLongChannel": 5, "rcLatChannel": 5 },
+      "expectValid": false,
+      "note": "Previously JS-only. Fixed by adding the same uniqueness check to applyConfig() and validate_config()."
+    },
+    {
+      "name": "autothrottle_channel_overlaps_rc_axis_fails",
+      "overrides": { "rcLongChannel": 5, "autothrottleEnableRcChannel": 5 },
+      "expectValid": false,
+      "note": "Previously JS-only. Fixed by adding the same overlap check to applyConfig() and validate_config()."
+    },
+    {
+      "name": "autothrottle_threshold_order_fails",
+      "overrides": { "autothrottleEnableMinThresholdUs": 2100, "autothrottleEnableMaxThresholdUs": 1700 },
+      "expectValid": false,
+      "note": "Previously JS-only, deliberately not duplicated server-side per mock_server.py's old comment. Fixed by adding the same ordering check to applyConfig() and validate_config()."
+    }
+  ]
+}

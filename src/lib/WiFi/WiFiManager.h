@@ -30,3 +30,4 @@ void handleSystemStatus(AsyncWebServerRequest *request);
 void handleFileUploadData(AsyncWebServerRequest *request, const String &filename, size_t index, uint8_t *data, size_t len, bool final);
 void handleFileUploadResponse(AsyncWebServerRequest *request);
 void handleSystemStatus(AsyncWebServerRequest *request);
+void handleFollowManagerConfigPost(AsyncWebServerRequest *request);

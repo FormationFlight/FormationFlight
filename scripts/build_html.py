@@ -93,6 +93,11 @@ def generate_handler(file_path, file_array_name, encoding):
     mime_type = get_mime_type(file_path)
     handler_base = '''
     server->on("{file_path}", HTTP_GET, [](AsyncWebServerRequest *request) {{
+        // Counted like every other handler. Serving the UI's own scripts is the
+        // single largest burst of work this server does, and leaving it out
+        // would charge it to the main loop on any platform where the server
+        // preempts the sketch. See webBusyUs() in WebServer.h.
+        ff::WebBusyScope busy;
         AsyncWebServerResponse *response = request->beginResponse_P(200, "{mime_type}", (uint8_t *){file_array_name}, sizeof({file_array_name}));
         response->addHeader("Content-Encoding", "{encoding}");
         request->send(response);
@@ -132,20 +137,59 @@ def process_folder(folder_path, isRecursive=False):
 
     return c_code, handler_code
 
+# Refuse to pack a script that will not parse.
+#
+# Every file under html/ ends up baked into the firmware image and served from
+# flash, and the UI is one ES module graph: a syntax error in any of its files
+# takes the whole page down, with nothing to see but a blank tab. A stray
+# apostrophe inside a tooltip string did exactly that and was flashed onto two
+# boards before anyone noticed, because the check being run was `node --check`
+# on a bare .js path, which Node treats as CommonJS and quietly does not parse
+# once it meets `import`. Parsing as a module is the only check that means
+# anything for these files.
+#
+# Skipped, with a warning, when there is no node on the PATH: the packer has to
+# keep working on a machine that only has PlatformIO.
+import shutil
+import subprocess
+
+def check_js_syntax(folder):
+    node = shutil.which("node")
+    if node is None:
+        print("warning: node not on PATH, skipping JavaScript syntax check")
+        return
+    failed = False
+    for root, _, names in os.walk(folder):
+        for name in sorted(names):
+            if not name.endswith(".js"):
+                continue
+            path = os.path.join(root, name)
+            with open(path, "rb") as f:
+                result = subprocess.run([node, "--input-type=module", "--check"],
+                                        stdin=f, capture_output=True, text=True)
+            if result.returncode != 0:
+                failed = True
+                print(f"JavaScript syntax error in {path}:")
+                print(result.stderr.strip())
+    if failed:
+        print("Refusing to pack html/: fix the errors above.")
+        exit(1)
+
 folder_path = 'html'
 if not os.path.isdir(folder_path):
     print("Error: The provided path is not a valid directory.")
     exit(1)
 
+check_js_syntax(folder_path)
 c_code, handler_code = process_folder(folder_path)
 
 if c_code and handler_code:
-    with open("src/lib/WiFi/webcontent.h", "w") as output_file:
+    with open("src/hal/webcontent.h", "w") as output_file:
         output_file.write(c_code)
     print(f"HTML content from {num_files} files, {total_pre_size} bytes minified & compressed to {total_size} bytes, written to webcontent.h")
     #print(f"{br_bytes_saved} bytes saved through brotli")
 
-    with open("src/lib/WiFi/staticfilehandler.inc", "w") as output_file:
+    with open("src/hal/staticfilehandler.inc", "w") as output_file:
         output_file.write(handler_code)
     print(f"HTML handlers for {num_files} files written to staticfilehandler.inc")
 else:

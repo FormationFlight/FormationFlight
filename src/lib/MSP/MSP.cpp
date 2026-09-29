@@ -155,24 +155,29 @@ bool MSP::recv2(uint16_t * messageID, void * payload, uint8_t maxSize, uint8_t *
 
   while (1) {
 
-    // read header
-    while (_stream->available() < 6)
+    // read header: $,X,>,flag,funcLo,funcHi,sizeLo,sizeHi — 8 bytes, mirroring
+    // send2()'s layout (MSP.cpp). The previous version of this function only
+    // read 1 byte each for the 2-byte function-ID and size fields, so it never
+    // matched any messageID above 0xFF (e.g. MSP2_INAV_MIXER's 0x2010) and
+    // left the unread high bytes to desync the next frame's header read.
+    while (_stream->available() < 8)
       if (millis() - t0 >= _timeout)
         return false;
-    char header[4];
-    _stream->readBytes((char*)header, 4);
+    uint8_t header[8];
+    _stream->readBytes((char*)header, 8);
 
     // check header
     if (header[0] == '$' && header[1] == 'X' && header[2] == '>') {
 
-      // read message ID (type)
-      *messageID = _stream->read();
+      uint8_t crcCalc = 0;
+      for (uint8_t i = 3; i < 8; ++i)
+        crcCalc = crc8_dvb_s2(crcCalc, header[i]);
 
-
-    // header ok, read payload size
-      *recvSize = _stream->read();
-
-
+      *messageID = (uint16_t)header[4] | ((uint16_t)header[5] << 8);
+      // send2() caps size to 255 ("out of V2 specs" per its own comment), so
+      // header[7] (the size field's high byte) is always 0 here — it's still
+      // folded into the CRC above, just not widened into *recvSize.
+      *recvSize = header[6];
 
       // read payload
       uint8_t * payloadPtr = (uint8_t*)payload;
@@ -182,6 +187,7 @@ bool MSP::recv2(uint16_t * messageID, void * payload, uint8_t maxSize, uint8_t *
           return false;
         if (_stream->available() > 0) {
           uint8_t b = _stream->read();
+          crcCalc = crc8_dvb_s2(crcCalc, b);
 
           if (idx < maxSize)
             *(payloadPtr++) = b;
@@ -192,11 +198,15 @@ bool MSP::recv2(uint16_t * messageID, void * payload, uint8_t maxSize, uint8_t *
       for (; idx < maxSize; ++idx)
         *(payloadPtr++) = 0;
 
-
-
-      return true;
-
-
+      // read and verify the trailing CRC byte
+      while (_stream->available() == 0)
+        if (millis() - t0 >= _timeout)
+          return false;
+      uint8_t crc = _stream->read();
+      if (crc == crcCalc) {
+        return true;
+      }
+      // bad CRC: discard this frame and keep scanning for the next header
 
     }
   }
@@ -239,6 +249,12 @@ bool MSP::request(uint8_t messageID, void * payload, uint8_t maxSize, uint8_t * 
   return waitFor(messageID, payload, maxSize, recvSize);
 }
 
+
+bool MSP::request2(uint16_t messageID, void * payload, uint8_t maxSize, uint8_t * recvSize)
+{
+  send2(messageID, NULL, 0);
+  return waitFor2(messageID, payload, maxSize, recvSize);
+}
 
 // send message and wait for ack
 bool MSP::command(uint8_t messageID, void * payload, uint8_t size, bool waitACK)
