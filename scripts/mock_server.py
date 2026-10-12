@@ -244,7 +244,7 @@ def default_config():
             "duty_cycle_pct": 0,
         },
         "peers": {"timeout_ms": 6000, "announce_interval_ms": 2000},
-        "msp": {"radar_interval_ms": 100},
+        "msp": {"radar_interval_ms": 100, "radar_peer_name": False},
         "gnss": {"rate_hz": 10},
         "radios": {"espnow_enabled": True, "lora_enabled": True, "lora_power_dbm": 0},
         "wifi": {"ap": True, "ssid": "", "psk": "", "ap_psk": "", "channel": 1},
@@ -522,6 +522,7 @@ def merge_config(incoming, cfg):
     s = section("msp")
     if s is not None:
         _merge_scalar(s, "radar_interval_ms", nxt["msp"], "i", 32, False)
+        _merge_scalar(s, "radar_peer_name", nxt["msp"], "b")
     s = section("gnss")
     if s is not None:
         _merge_scalar(s, "rate_hz", nxt["gnss"], "i", 16, False)

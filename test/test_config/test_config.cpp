@@ -117,6 +117,7 @@ static void assertSettingsEqual(const Settings& a, const Settings& b) {
     expectSame("peers.timeout_ms", a.peer_timeout_ms, b.peer_timeout_ms);
     expectSame("peers.announce_interval_ms", a.announce_interval_ms, b.announce_interval_ms);
     expectSame("msp.radar_interval_ms", a.msp_radar_interval_ms, b.msp_radar_interval_ms);
+    expectSame("msp.radar_peer_name", a.msp_radar_peer_name, b.msp_radar_peer_name);
     expectSame("gnss.rate_hz", a.gnss_rate_hz, b.gnss_rate_hz);
 
     expectSame("radios.espnow_enabled", a.radios.espnow_enabled, b.radios.espnow_enabled);
@@ -150,6 +151,7 @@ static Settings makePopulatedConfig() {
     cfg.peer_timeout_ms = 7000;
     cfg.announce_interval_ms = 2500;
     cfg.msp_radar_interval_ms = 120;
+    cfg.msp_radar_peer_name = true;
     cfg.gnss_rate_hz = 5;
 
     cfg.radios.espnow_enabled = false;
@@ -259,6 +261,9 @@ void test_json_has_the_documented_shape() {
     TEST_ASSERT_TRUE(root["wifi"].containsKey("psk"));
     TEST_ASSERT_TRUE(root["wifi"].containsKey("ap_psk"));
     TEST_ASSERT_TRUE(root["peers"].containsKey("timeout_ms"));
+    TEST_ASSERT_TRUE(root["msp"].containsKey("radar_interval_ms"));
+    TEST_ASSERT_TRUE(root["msp"].containsKey("radar_peer_name"));
+    TEST_ASSERT_FALSE(root["msp"]["radar_peer_name"].as<bool>());  // off by default
     TEST_ASSERT_TRUE(root["follow"].containsKey("ofsLongM"));
     TEST_ASSERT_EQUAL_STRING("POINT_LEADER", root["follow"]["headingMode"].as<const char*>());
 }
@@ -309,6 +314,8 @@ void test_a_partial_post_into_each_section_leaves_the_rest_alone() {
         {R"({"peers":{"timeout_ms":9000}})", [](Settings& c) { c.peer_timeout_ms = 9000; }},
         {R"({"msp":{"radar_interval_ms":250}})",
          [](Settings& c) { c.msp_radar_interval_ms = 250; }},
+        {R"({"msp":{"radar_peer_name":false}})",
+         [](Settings& c) { c.msp_radar_peer_name = false; }},
         {R"({"gnss":{"rate_hz":8}})", [](Settings& c) { c.gnss_rate_hz = 8; }},
         {R"({"radios":{"lora_power_dbm":20}})",
          [](Settings& c) { c.radios.lora_power_dbm = 20; }},

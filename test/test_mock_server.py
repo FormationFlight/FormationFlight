@@ -198,7 +198,7 @@ class DefaultConfigTest(unittest.TestCase):
                                        "max_interval_ms": 1000, "jitter_frac": 0.25,
                                        "duty_cycle_pct": 0})
         self.assertEqual(cfg["peers"], {"timeout_ms": 6000, "announce_interval_ms": 2000})
-        self.assertEqual(cfg["msp"], {"radar_interval_ms": 100})
+        self.assertEqual(cfg["msp"], {"radar_interval_ms": 100, "radar_peer_name": False})
         self.assertEqual(cfg["gnss"], {"rate_hz": 10})
         self.assertEqual(cfg["radios"], {"espnow_enabled": True, "lora_enabled": True,
                                          "lora_power_dbm": 0})

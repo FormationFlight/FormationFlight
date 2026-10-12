@@ -97,6 +97,11 @@ struct Settings {
     uint32_t peer_timeout_ms = 6000;
     uint32_t announce_interval_ms = 2000;
     uint32_t msp_radar_interval_ms = 100;
+    // Append the peer's name to each MSP2_COMMON_SET_RADAR_POS frame so the
+    // flight controller can show it on the OSD. Needs an FC firmware that reads
+    // the extension; stock INAV only parses the fixed 19 bytes and ignores the
+    // rest, so this is safe to turn on but does nothing there.
+    bool msp_radar_peer_name = false;
     uint16_t gnss_rate_hz = 10;
     RadioSettings radios;
     WifiSettings wifi;

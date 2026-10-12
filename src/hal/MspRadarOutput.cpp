@@ -13,9 +13,9 @@ void MspRadarOutput::sendRadarPosition(uint8_t slot_id, const Peer& peer) {
     if (stream_ == nullptr) {
         return;
     }
-    uint8_t buf[kMspRadarFrameSize];
+    uint8_t buf[kMspRadarFrameMaxSize];
     size_t n = buildMspSetRadarPos(slot_id, peer, millis(), peer_timeout_ms_, buf,
-                                   sizeof(buf));
+                                   sizeof(buf), send_peer_name_);
     if (n == 0) {
         return;
     }

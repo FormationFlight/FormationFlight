@@ -1,5 +1,7 @@
 #include <unity.h>
 
+#include <cstring>
+
 #include "msp_radar.h"
 
 using namespace ff;
@@ -96,6 +98,77 @@ void test_buffer_too_small_returns_zero() {
     TEST_ASSERT_EQUAL_UINT32(0, buildMspSetRadarPos(1, p, 0, 6000, buf, sizeof(buf)));
 }
 
+// ---- Peer-name extension ---------------------------------------------------
+
+static Peer makeNamedPeer(const char* name) {
+    Peer p = makePeer(451715460, 57223870, 120, 500, 900, POSITION_FLAG_ARMED, 1000);
+    std::strncpy(p.name, name, kMaxNameLen);
+    p.name[kMaxNameLen] = '\0';
+    return p;
+}
+
+void test_name_extension_is_off_by_default() {
+    Peer p = makeNamedPeer("CHASE");
+    uint8_t buf[kMspRadarFrameMaxSize];
+    size_t n = buildMspSetRadarPos(1, p, 1000, 6000, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_UINT32(kMspRadarFrameSize, n);
+    TEST_ASSERT_EQUAL_UINT8(19, buf[6]);
+}
+
+void test_name_extension_appends_length_and_name() {
+    Peer p = makeNamedPeer("CHASE");
+    uint8_t buf[kMspRadarFrameMaxSize];
+    size_t n = buildMspSetRadarPos(1, p, 1000, 6000, buf, sizeof(buf), /*with_name=*/true);
+    // 19 fixed + 1 length + 5 name.
+    TEST_ASSERT_EQUAL_UINT32(kMspRadarFrameSize + 1 + 5, n);
+    TEST_ASSERT_EQUAL_UINT8(25, buf[6]);
+    TEST_ASSERT_EQUAL_UINT8(0, buf[7]);
+    const uint8_t* pl = buf + 8;
+    // The fixed part is untouched, so an FC that only reads 19 bytes sees the
+    // same thing it always did.
+    TEST_ASSERT_EQUAL_UINT8(1, pl[0]);
+    TEST_ASSERT_EQUAL_UINT8(1, pl[1]);
+    TEST_ASSERT_EQUAL_UINT8(5, pl[19]);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY("CHASE", pl + 20, 5);
+    // CRC is the last byte, right after the name.
+    uint8_t crc = 0;
+    for (size_t i = 3; i < n - 1; i++) {
+        crc = refCrc8(crc, buf[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT8(crc, buf[n - 1]);
+}
+
+void test_name_extension_carries_the_longest_name() {
+    Peer p = makeNamedPeer("ABCDEFGHIJKLMNO");  // exactly kMaxNameLen
+    TEST_ASSERT_EQUAL_UINT32(kMaxNameLen, std::strlen(p.name));
+    uint8_t buf[kMspRadarFrameMaxSize];
+    size_t n = buildMspSetRadarPos(1, p, 1000, 6000, buf, sizeof(buf), true);
+    TEST_ASSERT_EQUAL_UINT32(kMspRadarFrameMaxSize, n);
+    TEST_ASSERT_EQUAL_UINT8(19 + 1 + kMaxNameLen, buf[6]);
+    TEST_ASSERT_EQUAL_UINT8(kMaxNameLen, buf[8 + 19]);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY("ABCDEFGHIJKLMNO", buf + 8 + 20, kMaxNameLen);
+}
+
+// A peer whose announce has not arrived yet has no name. Sending an empty
+// extension would blank whatever the FC is showing; the legacy frame leaves it.
+void test_name_extension_is_omitted_for_an_unnamed_peer() {
+    Peer p = makeNamedPeer("");
+    uint8_t buf[kMspRadarFrameMaxSize];
+    size_t n = buildMspSetRadarPos(1, p, 1000, 6000, buf, sizeof(buf), true);
+    TEST_ASSERT_EQUAL_UINT32(kMspRadarFrameSize, n);
+    TEST_ASSERT_EQUAL_UINT8(19, buf[6]);
+}
+
+void test_name_extension_needs_the_larger_buffer() {
+    Peer p = makeNamedPeer("CHASE");
+    uint8_t buf[kMspRadarFrameSize];  // enough for the legacy frame only
+    TEST_ASSERT_EQUAL_UINT32(0, buildMspSetRadarPos(1, p, 1000, 6000, buf, sizeof(buf), true));
+    // ... but exactly the right size is accepted.
+    uint8_t exact[kMspRadarFrameSize + 1 + 5];
+    TEST_ASSERT_EQUAL_UINT32(sizeof(exact),
+                             buildMspSetRadarPos(1, p, 1000, 6000, exact, sizeof(exact), true));
+}
+
 // ---- LQ estimate ----------------------------------------------------------
 
 void test_lq_fresh_peer_is_max() {
@@ -125,6 +198,11 @@ int main(int, char**) {
     RUN_TEST(test_disarmed_flag);
     RUN_TEST(test_checksum_is_valid);
     RUN_TEST(test_buffer_too_small_returns_zero);
+    RUN_TEST(test_name_extension_is_off_by_default);
+    RUN_TEST(test_name_extension_appends_length_and_name);
+    RUN_TEST(test_name_extension_carries_the_longest_name);
+    RUN_TEST(test_name_extension_is_omitted_for_an_unnamed_peer);
+    RUN_TEST(test_name_extension_needs_the_larger_buffer);
     RUN_TEST(test_lq_fresh_peer_is_max);
     RUN_TEST(test_lq_decreases_with_age);
     RUN_TEST(test_lq_zero_once_timed_out);

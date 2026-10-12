@@ -484,6 +484,8 @@ function Settings() {
         tip="How often the announce packet carrying this node's name and capabilities goes out. Position beacons are separate and far more frequent; this only needs to be often enough for a newly-arrived peer to learn the name." />
       <${Setting} title="MSP radar interval" value=${cfg.msp.radar_interval_ms} setfn=${mk('msp', 'radar_interval_ms')} type="number" addonRight="ms"
         tip="How often peer positions are pushed to the flight controller as MSP radar targets, which is what puts them on the OSD." />
+      <${Setting} title="Send peer name to FC" value=${cfg.msp.radar_peer_name} setfn=${mk('msp', 'radar_peer_name')} type="switch"
+        tip="Appends each peer's name to its MSP radar message so a flight controller that understands the extension can show it on the OSD. Stock INAV ignores the extra bytes, so this is harmless there, but it only does something with firmware built to read it." />
       <${Setting} title="GNSS rate" value=${cfg.gnss.rate_hz} setfn=${mk('gnss', 'rate_hz')} type="number" addonRight="Hz"
         tip="Update rate requested from a directly attached GNSS receiver, 1-25 Hz. Irrelevant when position comes from the flight controller over MSP." />
     <//>

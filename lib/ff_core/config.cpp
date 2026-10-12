@@ -122,6 +122,7 @@ void configToJson(const Settings& cfg, JsonObject out, bool redact_secrets) {
 
     JsonObject msp = out.createNestedObject("msp");
     msp["radar_interval_ms"] = cfg.msp_radar_interval_ms;
+    msp["radar_peer_name"] = cfg.msp_radar_peer_name;
 
     JsonObject gnss = out.createNestedObject("gnss");
     gnss["rate_hz"] = cfg.gnss_rate_hz;
@@ -245,7 +246,9 @@ bool configMergeJson(JsonObjectConst in, Settings& cfg, const char** err) {
         mergeVal(peers, "announce_interval_ms", next.announce_interval_ms);
     }
     if (in.containsKey("msp")) {
-        mergeVal(in["msp"].as<JsonObjectConst>(), "radar_interval_ms", next.msp_radar_interval_ms);
+        JsonObjectConst msp = in["msp"];
+        mergeVal(msp, "radar_interval_ms", next.msp_radar_interval_ms);
+        mergeVal(msp, "radar_peer_name", next.msp_radar_peer_name);
     }
     if (in.containsKey("gnss")) {
         mergeVal(in["gnss"].as<JsonObjectConst>(), "rate_hz", next.gnss_rate_hz);
