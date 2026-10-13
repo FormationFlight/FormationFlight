@@ -19,8 +19,10 @@
 #include "follow.h"
 #include "hal/BoardPower.h"
 #include "log.h"
+#include "lora_band.h"
 #include "loop_stats.h"
 #include "hal/ConfigStore.h"
+#include "hal/HardwareConfig.h"
 #include "hal/MspFcLink.h"
 #include "hal/MspRadarOutput.h"
 #include "hal/PassthroughCrypto.h"
@@ -30,11 +32,9 @@
 #include "node.h"
 #include "radio_hub.h"
 
-#ifdef LORA_FAMILY_SX128X
-#include "hal/RadioSX128x.h"
-#endif
-#ifdef LORA_FAMILY_SX127X
-#include "hal/RadioSX127x.h"
+#if defined(LORA_FAMILY_SX127X) || defined(LORA_FAMILY_SX128X) || defined(LORA_FAMILY_LR1121)
+#define HAS_LORA_RADIO
+#include "hal/RadioLoRa.h"
 #endif
 #ifdef GNSS_ENABLED
 #include "hal/DirectGpsLocationSource.h"
@@ -50,15 +50,20 @@ ff::Settings g_settings;
 ff::ConfigStore g_store;
 ff::BoardPower g_power;
 ff::LoopStats g_loop;
+// The pin map: compiled in by a legacy target, or read from the ELRS layout
+// appended to a unified image. See hal/HardwareConfig.h.
+ff::HardwareLayout g_hw;
 
 ff::RadioHub g_hub;
 ff::RadioEspNow g_espnow;
-#ifdef LORA_FAMILY_SX128X
-ff::RadioSX128x g_lora;
+#ifdef HAS_LORA_RADIO
+ff::RadioLoRa g_lora;
 #endif
-#ifdef LORA_FAMILY_SX127X
-ff::RadioSX127x g_lora;
-#endif
+// The band LoRa is actually running on, 0 for none; and the ones this board
+// could be switched to, for the web UI.
+ff::LoraBand g_lora_band;
+uint16_t g_lora_bands[ff::kLoraBandCount] = {0};
+size_t g_lora_band_count = 0;
 ff::SimRadio g_sim;
 
 // The frame cipher, and the plaintext escape hatch for bench work. Which one is
@@ -96,6 +101,9 @@ struct BootState {
     char passphrase[ff::kMaxPassphraseLen + 1] = {0};
     bool espnow_constructed = false;
     bool lora_constructed = false;
+    // radios.lora_band as it was at boot. The band is fixed for the life of
+    // the Node: its airtime, and so every beacon interval, is costed from it.
+    uint16_t lora_band_setting = 0;
 };
 BootState g_boot;
 
@@ -123,9 +131,14 @@ void applyLiveConfig(const ff::Settings& cfg) {
     if (cfg.radios.espnow_enabled && !g_boot.espnow_constructed) {
         g_web.setRebootRequired();
     }
-#if defined(LORA_FAMILY_SX128X) || defined(LORA_FAMILY_SX127X)
+#ifdef HAS_LORA_RADIO
+    // Power is live: the driver holds it until any frame on the air is out.
+    g_lora.setPower(cfg.radios.lora_power_dbm);
     g_lora.setEnabled(cfg.radios.lora_enabled && g_boot.lora_constructed);
     if (cfg.radios.lora_enabled && !g_boot.lora_constructed) {
+        g_web.setRebootRequired();
+    }
+    if (cfg.radios.lora_band != g_boot.lora_band_setting) {
         g_web.setRebootRequired();
     }
 #endif
@@ -164,6 +177,57 @@ void consoleSink(const ff::LogEntry& e) {
 }
 #endif
 
+// The MSP UART, on whichever pins the layout gives.
+//
+// ESP32 family: Serial1, unless the pins are UART0's own (GPIO3/1 on the
+// ESP32, 20/21 on the C3, 44/43 on the S3). Every ELRS receiver wires its FC
+// UART there, and two UARTs muxed onto one pair of pins is not a link. So on
+// those boards MSP takes Serial and the console gives way, which is what it
+// already does on every ESP8266 target.
+//
+// ESP8266: always UART0. GPIO3/1 as wired, or GPIO13/15 via Serial.swap().
+Stream& beginMspUart() {
+    const int rx = g_hw.serial_rx;
+    const int tx = g_hw.serial_tx;
+#if defined(PLATFORM_ESP32)
+#if defined(PLATFORM_ESP32_C3)
+    constexpr int kUart0Rx = 20, kUart0Tx = 21;
+#elif defined(PLATFORM_ESP32_S3)
+    constexpr int kUart0Rx = 44, kUart0Tx = 43;
+#else
+    constexpr int kUart0Rx = 3, kUart0Tx = 1;
+#endif
+    const bool uart0_pins = rx == kUart0Rx || tx == kUart0Tx;
+    const bool no_pins = rx == ff::kPinNone || tx == ff::kPinNone;
+    if (!uart0_pins && !no_pins) {
+        Serial1.begin(115200, SERIAL_8N1, rx, tx);
+        return Serial1;
+    }
+    if (no_pins) {
+        FF_LOGE("no MSP UART in the hardware layout: using UART0's default pins");
+    } else {
+        FF_LOGI("MSP is on UART0 (GPIO%d/%d): USB console off from here on", rx, tx);
+    }
+    ff::logRing().setSink(nullptr);
+    Serial.flush();
+    Serial.end();
+    if (no_pins) {
+        Serial.begin(115200);
+    } else {
+        Serial.begin(115200, SERIAL_8N1, rx, tx);
+    }
+    return Serial;
+#else
+    Serial.begin(115200);
+    if (rx == 13 && tx == 15) {
+        Serial.swap();
+    } else if (!(rx == 3 && tx == 1) && rx != ff::kPinNone) {
+        FF_LOGE("MSP UART on GPIO%d/%d is not possible on an ESP8266: using GPIO3/1", rx, tx);
+    }
+    return Serial;
+#endif
+}
+
 void setup() {
     g_uid = deviceUid();
     randomSeed(micros() ^ g_uid);
@@ -201,6 +265,30 @@ void setup() {
         FF_LOGW("no filesystem: running compile-time defaults");
     } else {
         FF_LOGI("config loaded");
+    }
+
+    // The pin map, before anything that needs a pin. On a unified build this
+    // is the only place the board is described at all.
+    ff::loadHardwareLayout(g_hw);
+    if (g_hw.source == ff::LayoutSource::None) {
+        // A unified image flashed without `elrs_targets.py configure`. It still
+        // boots, so it can be fixed over WiFi with a /hardware.json, but it has
+        // no radio and no MSP, and should say so loudly.
+        FF_LOGE("no hardware layout: flash a configured image, or upload /hardware.json");
+    } else {
+        FF_LOGI("hardware: %s (layout from %s)",
+                g_hw.product_name[0] != '\0' ? g_hw.product_name : "unnamed",
+                ff::layoutSourceName(g_hw.source));
+    }
+
+    // A first boot after the web installer: it can flash the node name and
+    // group passphrase into the image, the way ELRS flashes a bind phrase, so
+    // a new node joins its group without a trip through the web UI. Only ever
+    // on the first boot; after that config.json is the truth.
+    if (g_store.lastLoadFresh() &&
+        ff::configSeedFlashed(g_settings, g_hw.flashed_name, g_hw.flashed_passphrase)) {
+        g_store.save(g_settings, nullptr);
+        FF_LOGI("first boot: name and group passphrase taken from the installer");
     }
 
     // Pick the cipher. An explicit "none" is the bench escape hatch; anything
@@ -248,17 +336,49 @@ void setup() {
         FF_LOGW("ESP-NOW disabled by config");
     }
 
-#if defined(LORA_FAMILY_SX128X) || defined(LORA_FAMILY_SX127X)
-    if (g_settings.radios.lora_enabled) {
+#ifdef HAS_LORA_RADIO
+    // A unified image only ever runs on ExpressLRS hardware, layout or not.
+#ifdef UNIFIED_TARGET
+    const bool elrs_hw = true;
+#else
+    const bool elrs_hw = g_hw.elrsHardware();
+#endif
+    for (uint16_t band : ff::kLoraBands) {
+        if (ff::boardSupportsBand(ff::kBuildLoraChip, elrs_hw, band)) {
+            g_lora_bands[g_lora_band_count++] = band;
+        }
+    }
+    g_boot.lora_band_setting = g_settings.radios.lora_band;
+    const uint16_t band = ff::resolveLoraBand(ff::kBuildLoraChip, elrs_hw,
+                                              g_settings.radios.lora_band, g_hw.default_band);
+    if (g_settings.radios.lora_band != 0 && band != g_settings.radios.lora_band) {
+        // Most likely 433 asked of ExpressLRS hardware, whose matching network
+        // is built for twice that. Refused rather than transmitted into.
+        FF_LOGE("radios.lora_band %u is not a band this board can run",
+                static_cast<unsigned>(g_settings.radios.lora_band));
+    }
+    if (band != 0) {
+        ff::loraBandPreset(band, g_lora_band);
+    }
+
+    if (g_settings.radios.lora_enabled && !g_lora_band.valid()) {
+        // Not a fault, and not a guess either: on a board that can run more
+        // than one band, the one it was not told is illegal somewhere.
+        FF_LOGE("LoRa off: no band chosen. Set radios.lora_band in the web UI");
+    } else if (g_settings.radios.lora_enabled) {
         // A LoRa module that did not answer over SPI is the failure most likely
         // to be mistaken for a range problem: the node runs, beacons on
         // ESP-NOW, and looks entirely healthy from the dashboard.
-        if (g_lora.begin()) {
-            FF_LOGI("LoRa up: %lu Hz, BW %d kHz, SF%d, CR 4/%d",
+        if (g_lora.begin(g_hw, g_lora_band, g_settings.radios.lora_power_dbm)) {
+            FF_LOGI("LoRa up: %s, %lu Hz, BW %d kHz, SF%d, CR 4/%d, %d dBm",
+                    g_lora.name(),
                     static_cast<unsigned long>(g_lora.info().frequency_hz),
                     static_cast<int>(g_lora.info().bandwidth_khz),
                     static_cast<int>(g_lora.info().spreading_factor),
-                    static_cast<int>(g_lora.info().coding_rate));
+                    static_cast<int>(g_lora.info().coding_rate),
+                    static_cast<int>(g_lora.info().power_dbm));
+        } else if (g_hw.radioCount(ff::kBuildLoraChip) == 0) {
+            FF_LOGE("LoRa: the hardware layout has no radio pins for this build's chip");
         } else {
             FF_LOGE("LoRa radio did not initialise: nothing goes out on it");
         }
@@ -286,6 +406,9 @@ void setup() {
     }
     cfg.capabilities = ff::CAP_HAS_GPS | ff::CAP_HAS_MSP_FC;
     cfg.rate = g_settings.rate;
+    // The band's legal duty cycle, or the setting if that is stricter.
+    cfg.rate.duty_cycle_pct =
+        ff::stricterDutyCycle(cfg.rate.duty_cycle_pct, g_lora_band.duty_cycle_pct);
     cfg.peer_timeout_ms = g_settings.peer_timeout_ms;
     cfg.announce_interval_ms = g_settings.announce_interval_ms;
     cfg.msp_radar_interval_ms = g_settings.msp_radar_interval_ms;
@@ -296,13 +419,7 @@ void setup() {
 #endif
 
     // MSP UART: always brought up (see g_msp_radar_output above).
-#if defined(PLATFORM_ESP32)
-    Serial1.begin(115200, SERIAL_8N1, SERIAL_PIN_RX, SERIAL_PIN_TX);
-    Stream& mspStream = Serial1;
-#else
-    Serial.begin(115200);
-    Stream& mspStream = Serial;
-#endif
+    Stream& mspStream = beginMspUart();
     g_msp_radar_output.begin(mspStream, cfg.peer_timeout_ms);
     g_fc.begin(mspStream);
 
@@ -315,9 +432,9 @@ void setup() {
     ff::IGnssLink* gnss_link = nullptr;
 #endif
 
-#ifdef IO_LED_PIN
-    pinMode(IO_LED_PIN, OUTPUT);
-#endif
+    if (g_hw.led != ff::kPinNone) {
+        pinMode(g_hw.led, OUTPUT);
+    }
 
     ff::NodeDeps deps;
     deps.radios = &g_hub;
@@ -371,6 +488,10 @@ void setup() {
     web.uid = g_uid;
     web.wifi_channel = g_wifi_channel;
     web.power = &g_power;
+    web.hardware = &g_hw;
+    web.lora_band = g_lora_band.band;
+    web.lora_bands = g_lora_bands;
+    web.lora_band_count = g_lora_band_count;
     web.loop_stats = &g_loop;
     web.on_config_applied = applyLiveConfig;
     g_web.begin(web);

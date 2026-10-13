@@ -15,10 +15,13 @@ in the group.
 ## 1. Flash the firmware
 
 Pick the PlatformIO environment matching your board and radio, then build and
-upload over USB:
+upload over USB. For an ExpressLRS receiver, find the board and its environment
+with `python scripts/elrs_targets.py list`, then name the board, and the LoRa
+band to boot on, when you build. The band can be changed later in the web UI;
+every node in the group has to be on the same one:
 
 ```bash
-pio run -e expresslrs_rx_2400_via_UART -t upload
+ELRS_TARGET=happymodel.rx_900.es900 ELRS_BAND=915 pio run -e Unified_ESP8285_900_via_UART -t upload
 ```
 
 The environment names live in `targets/*.ini`. See

@@ -246,7 +246,8 @@ def default_config():
         "peers": {"timeout_ms": 6000, "announce_interval_ms": 2000},
         "msp": {"radar_interval_ms": 100},
         "gnss": {"rate_hz": 10},
-        "radios": {"espnow_enabled": True, "lora_enabled": True, "lora_power_dbm": 0},
+        "radios": {"espnow_enabled": True, "lora_enabled": True, "lora_power_dbm": 0,
+                   "lora_band": 0},
         "wifi": {"ap": True, "ssid": "", "psk": "", "ap_psk": "", "channel": 1},
         "sim": {"enabled": False},
         "follow": default_follow_config(),
@@ -468,6 +469,8 @@ def validate_config(cfg):
         return "at least one radio must be enabled"
     if radios.get("lora_power_dbm", 0) < 0 or radios.get("lora_power_dbm", 0) > 30:
         return "radios.lora_power_dbm must be 0 (target default) or 1-30"
+    if radios.get("lora_band", 0) not in (0, 433, 868, 915, 2400):
+        return "radios.lora_band must be 0 (flashed default), 433, 868, 915 or 2400"
     # The AP's channel, and therefore ESP-NOW's: the two share one radio. 14 is
     # Japan-only and the ESP refuses it, so the range stops at 13.
     if wifi.get("channel", 1) < 1 or wifi.get("channel", 1) > 13:
@@ -530,6 +533,7 @@ def merge_config(incoming, cfg):
         _merge_scalar(s, "espnow_enabled", nxt["radios"], "b")
         _merge_scalar(s, "lora_enabled", nxt["radios"], "b")
         _merge_scalar(s, "lora_power_dbm", nxt["radios"], "i", 16, True)
+        _merge_scalar(s, "lora_band", nxt["radios"], "i", 16, False)
     s = section("wifi")
     if s is not None:
         _merge_scalar(s, "ap", nxt["wifi"], "b")
@@ -772,12 +776,13 @@ RADIO_ESPNOW, RADIO_LORA, RADIO_SIM = 0, 1, 2
 RADIO_NAMES = {RADIO_ESPNOW: "ESPNOW", RADIO_LORA: "LORA", RADIO_SIM: "SIM"}
 RADIO_AIRTIME_MS = {RADIO_ESPNOW: 0.4, RADIO_LORA: 61.2, RADIO_SIM: 0.0}
 
-# ff::RadioDriver::Info (radio_hub.h), as RadioSX127x::info() fills it in: read
-# back from the driver, not from the config, which is why `power_dbm` is the
-# LORA_POWER build flag rather than radios.lora_power_dbm. A node can therefore
-# report a transmit power the config never mentions, and that is the point --
-# confirming the radio really is where the target intended is the first thing
-# worth checking on a node that is not hearing anyone.
+# ff::RadioDriver::Info (radio_hub.h), as RadioLoRa::info() fills it in: read
+# back from the driver, not from the config. `power_dbm` is what the driver
+# settled on for radios.lora_power_dbm: the board's power level at or below the
+# request (10 mW for 0), capped by the band, and reported as that
+# level's nominal output. So asking for 15 dBm reads back 14 (25 mW), and that
+# is the point -- confirming the radio really is where it was asked to be is the
+# first thing worth checking on a node that is not hearing anyone.
 #
 # These are the 915 numbers this project ships (platformio.ini, env_common_915):
 # SF8 and 4/7 rather than SF7 and 4/5, because 902-928 is full of
@@ -787,8 +792,40 @@ LORA_MODULATION = {
     "bandwidth_khz": 500.0,      # LORA_BW_KHZ
     "spreading_factor": 8,       # LORA_SF
     "coding_rate": 7,            # LORA_CR, a denominator: 7 means 4/7
-    "power_dbm": 10,             # LORA_POWER
+    "power_dbm": 10,             # replaced per request by lora_output_dbm()
 }
+# The mock board's ELRS power levels: RX/Generic 900.json, levels 0-2 (10, 25,
+# 50 mW). See choosePower() in lib/ff_core/hw_layout.cpp.
+LORA_LEVEL_DBM = (10, 14, 17)
+LORA_DEFAULT_DBM = 10    # kDefaultLoraDbm: FormationFlight's 10 mW, not ELRS' level
+LORA_BAND_MAX_DBM = 30   # the 915 preset's max_dbm (lib/ff_core/lora_band.cpp)
+
+# The mock board is an ExpressLRS 900 receiver (an ES900RX) flashed with
+# `elrs_targets.py configure --band 915`: an SX127x behind a front end matched
+# for 868/915, so those are the only bands it offers -- never 433 -- and 915 is
+# what it boots on until radios.lora_band says otherwise. resolveLoraBand().
+MOCK_BOARD = "HappyModel ES900 RX"
+LORA_BANDS = [868, 915]
+LORA_FLASHED_BAND = 915
+
+
+def resolve_lora_band(configured):
+    if configured in LORA_BANDS:
+        return configured
+    return LORA_FLASHED_BAND
+
+
+def lora_output_dbm(requested):
+    target = requested or LORA_DEFAULT_DBM
+    level = 0
+    for i, dbm in enumerate(LORA_LEVEL_DBM):
+        if dbm <= target:
+            level = i
+    while level > 0 and LORA_LEVEL_DBM[level] > LORA_BAND_MAX_DBM:
+        level -= 1
+    return LORA_LEVEL_DBM[level]
+
+
 # Only the LoRa drivers report SNR (Info::has_snr), and only once they have
 # actually received a frame. ESP-NOW and the simulated radio never do.
 LORA_SNR_DB = 9.5
@@ -1107,6 +1144,8 @@ class MockNode:
         self.locked_uid = 0
         self.locked_name = ""
         self.reboot_required = False
+        self.boot_lora_band_setting = self.config["radios"].get("lora_band", 0)
+        self.boot_lora_band = resolve_lora_band(self.boot_lora_band_setting)
         self.ever_saved = False
         self.last_save_ms = 0
 
@@ -1908,7 +1947,9 @@ class MockNode:
             # describe. ESP-NOW's Info is all zeros and the simulated radio
             # never touched an antenna, so neither sends the object at all.
             if index == RADIO_LORA:
-                radio["modulation"] = dict(LORA_MODULATION)
+                radio["modulation"] = dict(
+                    LORA_MODULATION,
+                    power_dbm=lora_output_dbm(cfg["radios"].get("lora_power_dbm", 0)))
                 # has_snr goes true on the first frame the driver receives, so
                 # a LoRa radio that has not heard anything yet omits it.
                 if rs["last_rx_ms"]:
@@ -1991,6 +2032,12 @@ class MockNode:
                 "uptime_ms": now_ms,
                 "free_heap": self.free_heap(now_ms),
                 "listen_only": bool(cfg["node"].get("listen_only")),
+                "board": MOCK_BOARD,
+                "layout": "firmware",
+                # Fixed at boot, like the firmware: a changed setting shows up
+                # as reboot_required, not here.
+                "lora_band": self.boot_lora_band,
+                "lora_bands": list(LORA_BANDS),
             },
             "location": location,
             "radios": radios,
@@ -2284,6 +2331,10 @@ def make_handler(node, config_path=None, quiet=True):
                         self._text(verr, 400)
                         return
                     node.config = merged
+                    # The band is fixed for the life of the Node; changing it
+                    # takes a reboot, as on the firmware.
+                    if merged["radios"].get("lora_band", 0) != node.boot_lora_band_setting:
+                        node.reboot_required = True
                     self._json(redact_config(node.config))
                 return
 

@@ -37,7 +37,9 @@ Everything the dashboard shows. Roughly 2 KB with a full peer table.
 {
   "node": {
     "uid": "1a2b3c4d", "name": "A1B", "version": "v2.0.0-12-gabc1234",
-    "uptime_ms": 91234, "free_heap": 24160, "listen_only": false
+    "uptime_ms": 91234, "free_heap": 24160, "listen_only": false,
+    "board": "HappyModel ES900 RX", "layout": "firmware",
+    "lora_band": 915, "lora_bands": [868, 915]
   },
   "location": {
     "valid": true, "source": "msp", "lat": 370000000, "lon": -1220000000,
@@ -217,10 +219,32 @@ radio is: it injects frames and never keys an antenna.
 the config, and that is the whole point of it. On a node that is not hearing
 anyone, confirming the radio really is on the frequency and modulation the
 target intended is the first thing worth checking and the hardest thing to see
-any other way. Note that `power_dbm` is the driver's configured transmit power
-(the `LORA_POWER` build flag), which is not the same field as
-`radios.lora_power_dbm` in the config and can legitimately differ from it.
-`coding_rate` is the denominator: `7` means 4/7. `bandwidth_khz` is a float.
+any other way. `power_dbm` is what the driver settled on for
+`radios.lora_power_dbm`: on ExpressLRS hardware, the board's power level at or
+below the request (10 mW for 0), capped by the band, reported as
+that level's nominal output. So it can legitimately differ from the config:
+asking for 15 dBm on a board with 25 and 50 mW levels reads back 14. On a PA
+board it is the output, not what the radio chip itself is set to.
+`coding_rate` is the denominator: `7` means 4/7. At 2.4 GHz it is `8`, with long interleaving. `bandwidth_khz` is a float.
+
+### Board
+
+`node.board` is the product name the node booted as, and `node.layout` where its
+pin map came from: `firmware` (the ExpressLRS layout appended to a unified
+image), `hardware.json` (an override on LittleFS, which wins over the image),
+`compiled` (a legacy target with its pins in the build) or `none`. `none` means
+a unified image flashed without its layout: it has no radio and no MSP, and the
+fix is to flash a configured image. See
+[`explainers/building-the-firmware.md`](explainers/building-the-firmware.md).
+
+`node.lora_band` is the band LoRa is running on, and `node.lora_bands` the bands
+this board can be switched to with `radios.lora_band`. Both are fixed at boot:
+a changed `radios.lora_band` shows up as `reboot_required`, not here.
+ExpressLRS hardware never lists 433; its RF front end is matched for 868/915 or
+2.4 GHz. `lora_band` 0 with LoRa enabled means a board that can run several
+bands was flashed without one, and LoRa stays off until one is chosen. A
+`radios.lora_band` the board cannot run is refused at boot (and logged), and
+the node falls back to the band it was flashed for.
 
 ### Fix quality
 

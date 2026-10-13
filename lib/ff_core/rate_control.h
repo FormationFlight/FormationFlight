@@ -23,11 +23,6 @@
 
 namespace ff {
 
-// Regional duty-cycle ceiling as a percentage, 0 for none. Set per band in
-// platformio.ini; EU 868 is the one that really bites.
-#ifndef LORA_DUTY_PCT
-#define LORA_DUTY_PCT 0
-#endif
 
 struct RateConfig {
     // Target aggregate channel utilisation. Pure-ALOHA throughput peaks near
@@ -47,7 +42,11 @@ struct RateConfig {
     // getting it wrong is transmitting illegally while everything looks fine.
     // The resulting floor is airtime * 100 / duty: at 72 ms per frame and 10%,
     // that is a beacon every 720 ms no matter what min_interval_ms says.
-    uint8_t duty_cycle_pct = LORA_DUTY_PCT;
+    //
+    // Each band carries its own ceiling (LoraBand::duty_cycle_pct) and the
+    // firmware runs at the stricter of that and this, so this is only ever a
+    // way to be stricter than the law.
+    uint8_t duty_cycle_pct = 0;
 };
 
 class RateController {

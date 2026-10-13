@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include "lora_band.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -130,6 +132,7 @@ void configToJson(const Settings& cfg, JsonObject out, bool redact_secrets) {
     radios["espnow_enabled"] = cfg.radios.espnow_enabled;
     radios["lora_enabled"] = cfg.radios.lora_enabled;
     radios["lora_power_dbm"] = cfg.radios.lora_power_dbm;
+    radios["lora_band"] = cfg.radios.lora_band;
 
     JsonObject wifi = out.createNestedObject("wifi");
     wifi["ap"] = cfg.wifi.ap;
@@ -196,6 +199,19 @@ bool configValidate(const Settings& cfg, const char** err) {
         *err = "radios.lora_power_dbm must be 0 (target default) or 1-30";
         return false;
     }
+    {
+        // Only that the band exists. Whether this node's chip can run it is
+        // the firmware's call at boot, where a band the chip cannot reach is
+        // treated as no band at all.
+        bool known = cfg.radios.lora_band == 0;
+        for (uint16_t band : kLoraBands) {
+            known = known || cfg.radios.lora_band == band;
+        }
+        if (!known) {
+            *err = "radios.lora_band must be 0 (flashed default), 433, 868, 915 or 2400";
+            return false;
+        }
+    }
     if (cfg.wifi.channel < 1 || cfg.wifi.channel > 13) {
         *err = "wifi.channel must be 1-13";
         return false;
@@ -255,6 +271,7 @@ bool configMergeJson(JsonObjectConst in, Settings& cfg, const char** err) {
         mergeVal(radios, "espnow_enabled", next.radios.espnow_enabled);
         mergeVal(radios, "lora_enabled", next.radios.lora_enabled);
         mergeVal(radios, "lora_power_dbm", next.radios.lora_power_dbm);
+        mergeVal(radios, "lora_band", next.radios.lora_band);
     }
     if (in.containsKey("wifi")) {
         JsonObjectConst wifi = in["wifi"];
@@ -273,6 +290,25 @@ bool configMergeJson(JsonObjectConst in, Settings& cfg, const char** err) {
 
     if (!configValidate(next, err)) {
         return false;  // cfg untouched
+    }
+    cfg = next;
+    return true;
+}
+
+bool configSeedFlashed(Settings& cfg, const char* name, const char* passphrase) {
+    Settings next = cfg;
+    bool changed = false;
+    if (name != nullptr && name[0] != '\0') {
+        std::snprintf(next.node.name, sizeof(next.node.name), "%s", name);
+        changed = true;
+    }
+    if (passphrase != nullptr && passphrase[0] != '\0') {
+        std::snprintf(next.security.passphrase, sizeof(next.security.passphrase), "%s",
+                      passphrase);
+        changed = true;
+    }
+    if (!changed || !configValidate(next, nullptr)) {
+        return false;
     }
     cfg = next;
     return true;

@@ -201,7 +201,7 @@ class DefaultConfigTest(unittest.TestCase):
         self.assertEqual(cfg["msp"], {"radar_interval_ms": 100})
         self.assertEqual(cfg["gnss"], {"rate_hz": 10})
         self.assertEqual(cfg["radios"], {"espnow_enabled": True, "lora_enabled": True,
-                                         "lora_power_dbm": 0})
+                                         "lora_power_dbm": 0, "lora_band": 0})
         self.assertEqual(cfg["wifi"], {"ap": True, "ssid": "", "psk": "", "ap_psk": "",
                                        "channel": 1})
         self.assertEqual(cfg["sim"], {"enabled": False})
@@ -595,9 +595,10 @@ class StatusShapeTest(ApiTestCase):
         self.assertEqual(mod["bandwidth_khz"], 500.0)
         self.assertEqual(mod["spreading_factor"], 8)
         self.assertEqual(mod["coding_rate"], 7)   # a denominator: 4/7
-        self.assertEqual(mod, LORA_MODULATION)
-        # power_dbm is the driver's own setting (the LORA_POWER build flag), not
-        # radios.lora_power_dbm, and may legitimately differ from the config.
+        self.assertEqual({k: v for k, v in mod.items() if k != "power_dbm"},
+                         {k: v for k, v in LORA_MODULATION.items() if k != "power_dbm"})
+        # power_dbm is what the driver settled on, which is the board's level
+        # for radios.lora_power_dbm, not the number itself; see the test below.
         self.assertIsInstance(mod["power_dbm"], int)
 
         self.assertNotIn("modulation", radios["ESPNOW"])
@@ -606,6 +607,46 @@ class StatusShapeTest(ApiTestCase):
         self.assertNotIn("last_snr_db", radios["ESPNOW"])
         if "last_snr_db" in radios["LORA"]:
             self.assertIsInstance(radios["LORA"]["last_snr_db"], float)
+
+    def test_lora_power_follows_the_setting_in_board_levels(self):
+        """radios.lora_power_dbm reaches the driver, live, and comes back as the
+        board's power level at or below it: the mock board has 10, 25 and 50 mW
+        (RX/Generic 900.json), and 0 means FormationFlight's 10 mW."""
+        def power():
+            radios = {r["name"]: r for r in self.get_json("/api/status")["radios"]}
+            return radios["LORA"]["modulation"]["power_dbm"]
+
+        try:
+            for requested, expected in ((0, 10), (15, 14), (14, 14), (1, 10), (30, 17)):
+                status, body, _ = self.request(
+                    "POST", "/api/config", {"radios": {"lora_power_dbm": requested}})
+                self.assertEqual(status, 200, body)
+                self.assertEqual(power(), expected, f"lora_power_dbm={requested}")
+        finally:
+            status, body, _ = self.request(
+                "POST", "/api/config", {"radios": {"lora_power_dbm": 0}})
+            self.assertEqual(status, 200, body)
+
+    def test_lora_band_is_reported_and_needs_a_reboot(self):
+        """The mock is ELRS 900 hardware flashed for 915: it offers 868 and 915
+        and never 433, and a band change only takes effect after a reboot."""
+        node = self.get_json("/api/status")["node"]
+        self.assertEqual(node["lora_bands"], [868, 915])
+        self.assertNotIn(433, node["lora_bands"])
+        self.assertEqual(node["lora_band"], 915)
+        try:
+            status, body, _ = self.request(
+                "POST", "/api/config", {"radios": {"lora_band": 868}})
+            self.assertEqual(status, 200, body)
+            doc = self.get_json("/api/status")
+            self.assertEqual(doc["node"]["lora_band"], 915)
+            self.assertTrue(doc["reboot_required"])
+            status, _, _ = self.request("POST", "/api/config", {"radios": {"lora_band": 900}})
+            self.assertEqual(status, 400)
+        finally:
+            status, body, _ = self.request(
+                "POST", "/api/config", {"radios": {"lora_band": 0}})
+            self.assertEqual(status, 200, body)
 
     def test_system_block(self):
         sys_doc = self.get_json("/api/status")["system"]

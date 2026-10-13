@@ -1,0 +1,3 @@
+[submodule "hardware"]
+	path = hardware
+	url = https://github.com/ExpressLRS/targets.git

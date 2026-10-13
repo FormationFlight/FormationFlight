@@ -33,6 +33,8 @@ jobs:
 
     - name: Checkout
       uses: actions/checkout@v3
+      with:
+        submodules: true
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -57,36 +59,44 @@ jobs:
         path: ~/.platformio
         key: ${{ runner.os }}-platformio
 
+    # Each env leaves exactly what the web installer needs in
+    # $BUILD_DIR/release (package_release() in scripts/env_setup.py): the
+    # image, and on the ESP32 family its own bootloader and partition table,
+    # named per env so an ESP32, a C3 and an S3 never overwrite each other's.
     - name: Run PlatformIO
       run: |
-        mkdir -p ~/artifacts/firmware
         platformio pkg install --platform native
         platformio pkg update
         pio run -e ${{ matrix.target }}
+        mkdir -p ~/artifacts
+        cp .pio/build/${{ matrix.target }}/release/* ~/artifacts/
         OUTNAME=`echo ${{ matrix.target }} | sed s/_via.*//`
-        mkdir -p ~/artifacts/
-        mv .pio/build/${{ matrix.target }}/firmware.bin ~/artifacts/$OUTNAME.bin >& /dev/null || :
-        # also copy the .bin.gz if it exists
-        mv .pio/build/${{ matrix.target }}/firmware.bin.gz ~/artifacts/$OUTNAME.bin.gz >& /dev/null || :
-        # copy the common ESP32 files
-        if [[ ${{matrix.target}} == *esp32* ]] ; then
-         cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin ~/artifacts/firmware/
-         mv .pio/build/${{ matrix.target }}/partitions.bin ~/artifacts/firmware/
-         mv .pio/build/${{ matrix.target }}/bootloader.bin ~/artifacts/firmware/bootloader_dio_40m.bin
-        fi
+        # The ESP8266 OTA image, for the node's own update page.
+        cp .pio/build/${{ matrix.target }}/firmware.bin.gz ~/artifacts/$OUTNAME.bin.gz >& /dev/null || :
 
     - name: Store Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: firmware-${{ strategy.job-index }}
         path: ~/artifacts/**
-      continue-on-error: true
 
-  release:
-    runs-on: ubuntu-latest
+  # One index.json for the whole build: every board the installer can flash
+  # from it, and what to append to the image for each. Needs every env, so it
+  # runs once, after all of them.
+  index:
     needs: [build]
-    if: startsWith(github.event.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
     steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
     - name: Download Artifacts
       id: download
       uses: actions/download-artifact@v4
@@ -94,14 +104,60 @@ jobs:
         path: ~/artifacts/
         pattern: firmware-*
         merge-multiple: true
+
+    - name: Build installer index
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then VERSION="${{ github.ref_name }}"; else VERSION=development; fi
+        python scripts/flasher_manifest.py ~/artifacts --version "$VERSION" --commit "${GITHUB_SHA::7}"
+
+    - name: Store Release
+      uses: actions/upload-artifact@v4
+      with:
+        name: release
+        path: ~/artifacts/**
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [index]
+    if: startsWith(github.event.ref, 'refs/tags/v')
+    steps:
+    - name: Download Release
+      id: download
+      uses: actions/download-artifact@v4
+      with:
+        path: ~/artifacts/
+        name: release
     - name: Create Release
-      id: create_release
       uses: softprops/action-gh-release@v1
       with:
         name: ${{ github.ref_name }}
         draft: false
         prerelease: false
         generate_release_notes: true
-        files: |
-          ${{ steps.download.outputs.download-path }}/*
-          ${{ steps.download.outputs.download-path }}/firmware/*
+        files: ${{ steps.download.outputs.download-path }}/*
+
+  # Every push to master refreshes one rolling prerelease, tagged
+  # `development`, which the web installer offers as its development channel.
+  # Deleted and recreated rather than edited, so its assets are never a mix of
+  # two builds.
+  development:
+    runs-on: ubuntu-latest
+    needs: [index]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+    - name: Download Release
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+        name: release
+    - name: Publish development prerelease
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release delete development --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+        gh release create development artifacts/* \
+          --repo "$GITHUB_REPOSITORY" \
+          --target "$GITHUB_SHA" \
+          --prerelease \
+          --title "Development build" \
+          --notes "Built from ${GITHUB_SHA::7} on master. Not a release: for testing, and flashable from the web installer's development channel."

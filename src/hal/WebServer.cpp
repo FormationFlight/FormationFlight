@@ -245,6 +245,20 @@ void fillStatus(WebDeps& d, JsonObject root) {
     node["uptime_ms"] = millis();
     node["free_heap"] = ESP.getFreeHeap();
     node["listen_only"] = d.cfg->node.listen_only;
+    if (d.hardware != nullptr) {
+        // Which board the node thinks it is, and where it got that from. A
+        // unified image that reports "none" was flashed without its layout.
+        node["board"] = d.hardware->product_name;
+        node["layout"] = layoutSourceName(d.hardware->source);
+    }
+    // Which band LoRa is on, and which it could be switched to. 0 with LoRa
+    // enabled means no band has been chosen on a board that can run several,
+    // and the UI asks for one.
+    node["lora_band"] = d.lora_band;
+    JsonArray bands = node.createNestedArray("lora_bands");
+    for (size_t i = 0; i < d.lora_band_count; ++i) {
+        bands.add(d.lora_bands[i]);
+    }
 
     NodeLocation self{};
     if (d.location != nullptr) {

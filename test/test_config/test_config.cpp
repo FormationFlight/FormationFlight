@@ -122,6 +122,7 @@ static void assertSettingsEqual(const Settings& a, const Settings& b) {
     expectSame("radios.espnow_enabled", a.radios.espnow_enabled, b.radios.espnow_enabled);
     expectSame("radios.lora_enabled", a.radios.lora_enabled, b.radios.lora_enabled);
     expectSame("radios.lora_power_dbm", a.radios.lora_power_dbm, b.radios.lora_power_dbm);
+    expectSame("radios.lora_band", a.radios.lora_band, b.radios.lora_band);
 
     expectSame("wifi.ap", a.wifi.ap, b.wifi.ap);
     expectSame("wifi.ssid", a.wifi.ssid, b.wifi.ssid);
@@ -155,6 +156,7 @@ static Settings makePopulatedConfig() {
     cfg.radios.espnow_enabled = false;
     cfg.radios.lora_enabled = true;
     cfg.radios.lora_power_dbm = 17;
+    cfg.radios.lora_band = 868;
 
     cfg.wifi.ap = false;
     std::strcpy(cfg.wifi.ssid, "FormationNet");
@@ -312,6 +314,7 @@ void test_a_partial_post_into_each_section_leaves_the_rest_alone() {
         {R"({"gnss":{"rate_hz":8}})", [](Settings& c) { c.gnss_rate_hz = 8; }},
         {R"({"radios":{"lora_power_dbm":20}})",
          [](Settings& c) { c.radios.lora_power_dbm = 20; }},
+        {R"({"radios":{"lora_band":2400}})", [](Settings& c) { c.radios.lora_band = 2400; }},
         {R"({"wifi":{"ssid":"OtherNet"}})",
          [](Settings& c) { std::strcpy(c.wifi.ssid, "OtherNet"); }},
         {R"({"sim":{"enabled":false}})", [](Settings& c) { c.sim.enabled = false; }},
@@ -564,6 +567,16 @@ void test_validation_rules() {
          [](Settings& c) { c.radios.lora_power_dbm = 30; }, true},
         {"lora_power_dbm 31", [](Settings& c) { c.radios.lora_power_dbm = 31; }, false},
 
+        // radios.lora_band: 0 (flashed default) or a band there is a preset
+        // for. Whether this board can run it is the firmware's call at boot.
+        {"lora_band 0 (flashed default)", [](Settings& c) { c.radios.lora_band = 0; }, true},
+        {"lora_band 433", [](Settings& c) { c.radios.lora_band = 433; }, true},
+        {"lora_band 868", [](Settings& c) { c.radios.lora_band = 868; }, true},
+        {"lora_band 915", [](Settings& c) { c.radios.lora_band = 915; }, true},
+        {"lora_band 2400", [](Settings& c) { c.radios.lora_band = 2400; }, true},
+        {"lora_band 900", [](Settings& c) { c.radios.lora_band = 900; }, false},
+        {"lora_band 2450", [](Settings& c) { c.radios.lora_band = 2450; }, false},
+
         // Station mode needs somewhere to go.
         {"station mode with no ssid",
          [](Settings& c) {
@@ -774,8 +787,26 @@ void test_target_uid_still_accepts_a_number() {
     TEST_ASSERT_EQUAL_UINT32(0x12345678u, cfg.follow.targetUid);
 }
 
+void test_seed_flashed_applies_name_and_passphrase() {
+    Settings cfg;
+    TEST_ASSERT_TRUE(configSeedFlashed(cfg, "LEAD", "squadron seven"));
+    TEST_ASSERT_EQUAL_STRING("LEAD", cfg.node.name);
+    TEST_ASSERT_EQUAL_STRING("squadron seven", cfg.security.passphrase);
+}
+
+void test_seed_flashed_leaves_empty_fields_alone() {
+    Settings cfg;
+    std::strcpy(cfg.node.name, "KEEP");
+    TEST_ASSERT_FALSE(configSeedFlashed(cfg, "", ""));
+    TEST_ASSERT_TRUE(configSeedFlashed(cfg, "", "group"));
+    TEST_ASSERT_EQUAL_STRING("KEEP", cfg.node.name);
+    TEST_ASSERT_EQUAL_STRING("group", cfg.security.passphrase);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_seed_flashed_applies_name_and_passphrase);
+    RUN_TEST(test_seed_flashed_leaves_empty_fields_alone);
 
     RUN_TEST(test_defaults_are_valid);
     RUN_TEST(test_defaults_round_trip_through_json);
