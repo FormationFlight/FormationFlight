@@ -143,7 +143,9 @@ The `build.yml` workflow:
 - Dynamically discovers targets by grepping `targets/*.ini` for `[env:...UART]` entries (excluding anything marked `DEPRECATED`).
 - Installs PlatformIO fresh and caches `~/.platformio` and pip between runs.
 - Runs `pio run -e <target>` per target as a matrix job.
-- Collects `firmware.bin` (and `.bin.gz` if present) per target, plus `bootloader_dio_40m.bin`/`partitions.bin`/`boot_app0.bin` for ESP32 targets, into `~/artifacts/`.
+- Collects each target's `release/` folder (written by `package_release()` in `scripts/env_setup.py`): `<target>.bin`, `<target>.flash.json`, and for ESP32-family targets its own `<target>.bootloader.bin`/`<target>.partitions.bin` plus `boot_app0.bin`; and `<target>.bin.gz` for ESP8266 targets, the file their Update page needs.
+- Fails an ESP8266 target whose `.bin.gz` no longer fits the space an over-the-air update is received into. On a 1 MB ESP8285 that space is under half the flash, and PlatformIO's "Flash: N% used" figure does not show it. If this trips, shrink the image or the filesystem in `targets/esp8285_1m.ld`.
+- Builds `index.json` for the web installer (`scripts/flasher_manifest.py`) from all of them, and on master publishes the lot as the rolling `development` prerelease.
 - On a `v*` tag push, packages all artifacts into a GitHub Release automatically.
 
 You don't need to replicate this locally - it's mainly useful context if a CI build fails for a target you didn't test.

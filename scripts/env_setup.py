@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import sys
 
 from ota_upload import do_upload
 import elrs_targets
@@ -145,6 +146,53 @@ def package_release(source, target, env):
     with open(os.path.join(out, name + ".flash.json"), "w") as f:
         json.dump(info, f, indent=2)
     print(f'Release files for the web installer in {out}')
+
+    if platform == 'espressif8266':
+        check_ota_fits(app)
+
+
+def ldscript_fs_start():
+    """Flash offset where this env's filesystem starts, from its linker script,
+    or None if the script cannot be found or does not say."""
+    script = env.GetProjectOption('board_build.ldscript', '') or \
+        env.BoardConfig().get('build.arduino.ldscript', '')
+    candidates = [os.path.join(env.subst('$PROJECT_DIR'), script),
+                  os.path.join(env.PioPlatform().get_package_dir('framework-arduinoespressif8266'),
+                               'tools', 'sdk', 'ld', script)]
+    for path in candidates:
+        if os.path.isfile(path):
+            m = re.search(r'_FS_start\s*=\s*(0x[0-9a-fA-F]+)', open(path).read())
+            if m:
+                return int(m.group(1), 16) - 0x40200000
+    return None
+
+
+def check_ota_fits(app):
+    """Fail the build when this image can no longer be updated over WiFi.
+
+    The ESP8266 Updater stages an upload between the end of the running sketch
+    (rounded up to a 4 KB sector) and the start of the filesystem, and refuses
+    one that does not fit. On a 1 MB part only the .bin.gz ever fits, so that
+    is what is checked, at the larger of zlib level 9 (what this build writes)
+    and 6 (roughly what a browser's CompressionStream produces, which is how
+    the web installer makes one). It is the image installed now that needs the
+    room, and the next one that has to fit: checking one image against itself
+    assumes successive builds stay about the same size, which they do.
+    """
+    fs_start = ldscript_fs_start()
+    if fs_start is None:
+        print('OTA size check skipped: could not read _FS_start from the linker script')
+        return
+    data = open(app, 'rb').read()
+    room = fs_start - (len(data) + 0xFFF) // 0x1000 * 0x1000
+    gz = max(len(gzip.compress(data, 9)), len(gzip.compress(data, 6)))
+    if gz > room:
+        sys.stderr.write(
+            f'\n*** OTA no longer fits: the .bin.gz is {gz // 1024} KB and a node running '
+            f'this image has {room // 1024} KB to receive one in. WiFi updates would fail. '
+            f'Shrink the image, or the filesystem in the linker script.\n\n')
+        env.Exit(1)
+    print(f'OTA: .bin.gz {gz // 1024} KB of {room // 1024} KB available ({(room - gz) // 1024} KB spare)')
 
 
 platform = env.get('PIOPLATFORM', '')

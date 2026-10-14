@@ -5,8 +5,9 @@ git tag matching `v*` triggers `.github/workflows/build.yml`, which:
 
 1. Builds every non-deprecated `UART`/`STLINK` target across `targets/*.ini`.
 2. Publishes a GitHub Release named after the tag, with `generate_release_notes: true` and all
-   built `firmware.bin`/`firmware.bin.gz` files attached (plus ESP32 partition/bootloader files
-   where applicable).
+   built images attached: per target a `.bin`, a `.flash.json`, ESP32 bootloader/partition files
+   where applicable and a `.bin.gz` for ESP8266 targets, plus the `index.json` the web installer
+   reads (formationflight.org/installer/ picks a release up within about 6 hours).
 
 The release job only runs when the pushed ref is `refs/tags/v*` - regular branch pushes just build
 and stop. The tag does **not** need to be on `master`; tagging any branch tip and pushing that tag

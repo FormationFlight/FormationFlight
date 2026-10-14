@@ -232,7 +232,9 @@ aircraft on the bench and props off.
 
 Do this last, and over a wired-quality link.
 
-- **Update** page, upload a `.bin` (`.bin.gz` also works on ESP8266).
+- **Update** page, upload a `.bin` on ESP32, and the `.bin.gz` on an ESP8285:
+  on a 1 MB part the plain `.bin` never fits in the space an update is
+  received into (see `targets/esp8285_1m.ld`).
 - The radios deliberately stop while an upload is in flight: flash writes stall
   the CPU for milliseconds at a time, and beaconing through that produces
   corrupt transmissions and a starved web server.

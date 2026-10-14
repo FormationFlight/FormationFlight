@@ -734,7 +734,9 @@ makes it out.
 Firmware upload, multipart form, unchanged from v1. The response body is the
 result string; the node reboots on success. An ESP8266 image may be `.bin` or
 `.bin.gz`; an ESP32 image must be `.bin`. Anything else is rejected on the first
-chunk, before a single byte is written to flash.
+chunk, before a single byte is written to flash. On a 1 MB ESP8285 only the
+`.bin.gz` fits in the space the update is received into, so a `.bin` there is
+refused with the Updater's "not enough space" error.
 
 There is no progress endpoint. A browser client should read upload progress from
 `XMLHttpRequest.upload`, which is why the UI does not use `fetch` here.
