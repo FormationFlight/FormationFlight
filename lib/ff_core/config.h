@@ -63,9 +63,14 @@ struct SecuritySettings {
 struct RadioSettings {
     bool espnow_enabled = true;
     bool lora_enabled = true;
-    // Transmit power in dBm. Clamped by the driver to what the part supports;
-    // 0 means "leave the compiled-in target default alone".
+    // The most to put out of the antenna port, in dBm. 0 is FormationFlight's
+    // default, 10 mW. Rounded down to the board's power levels and capped by
+    // the band; applied live.
     int16_t lora_power_dbm = 0;
+    // 433, 868, 915 or 2400, or 0 for the default the image was flashed with
+    // (none, on a multi-band chip, and LoRa then stays off until one is set).
+    // Needs a reboot. See lora_band.h.
+    uint16_t lora_band = 0;
 };
 
 struct WifiSettings {
@@ -122,5 +127,10 @@ bool configMergeJson(JsonObjectConst in, Settings& cfg, const char** err = nullp
 
 // Validates a whole config. Shares every rule with configMergeJson.
 bool configValidate(const Settings& cfg, const char** err = nullptr);
+
+// Applies what the image was flashed with (the web installer's node name and
+// group passphrase) to a first-boot config. Empty strings are left alone. Only
+// applied if the result still validates; returns whether anything changed.
+bool configSeedFlashed(Settings& cfg, const char* name, const char* passphrase);
 
 }  // namespace ff

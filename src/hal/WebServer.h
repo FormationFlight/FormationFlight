@@ -10,6 +10,7 @@
 #include "log.h"
 #include "loop_stats.h"
 #include "ConfigStore.h"
+#include "hw_layout.h"
 #include "MspFcLink.h"
 #include "SimRadio.h"
 #include "config.h"
@@ -49,6 +50,11 @@ struct WebDeps {
     uint32_t uid = 0;
     uint8_t wifi_channel = 1;
     BoardPower* power = nullptr;  // null on boards with nothing to report
+    const HardwareLayout* hardware = nullptr;
+    // The LoRa band running (0 for none) and the bands this board offers.
+    uint16_t lora_band = 0;
+    const uint16_t* lora_bands = nullptr;
+    size_t lora_band_count = 0;
     LoopStats* loop_stats = nullptr;
     // Called after a successful config POST so the caller can push whatever can
     // be changed without a reboot into the live objects.

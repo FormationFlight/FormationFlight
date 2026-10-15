@@ -83,7 +83,8 @@ independently of RF, which is a much easier fault to chase than an RF one.
 
 ## 4b. Check the channel you are actually on
 
-The LoRa channel defaults were repicked; the old ones were wrong in ways worth
+The band is the `radios.lora_band` setting, and each band's channel lives in
+`lib/ff_core/lora_band.cpp`. The channel defaults were repicked; the old ones were wrong in ways worth
 knowing about if you have older notes or hardware programmed from them.
 
 | Band | Centre | BW | SF | CR | Airtime | Sensitivity | Duty floor |
@@ -91,7 +92,13 @@ knowing about if you have older notes or hardware programmed from them.
 | 433 | 434.400 MHz | 250 kHz | 7 | 4/5 | 36 ms | -121.5 dBm | 360 ms |
 | 868 | 869.525 MHz | 125 kHz | 7 | 4/5 | 72 ms | -124.5 dBm | 719 ms |
 | 915 | 920.000 MHz | 500 kHz | 8 | 4/7 | 43 ms | -121.0 dBm | none |
-| 2400 | 2476.000 MHz | 812.5 kHz | 8 | 4/7 | 27 ms | -118.4 dBm | none |
+| 2400 | 2476.000 MHz | 812.5 kHz | 8 | 4/8 LI | 30 ms | -118.4 dBm | none |
+
+2.4 GHz is 4/8 with long interleaving, which is what it has always been on the
+air: the old flags asked for "4/7 LI", a mode the SX1280 does not have, and
+RadioLib 5 wrote the 7 into the register, where it means LI 4/8. The flags now
+say so, which the RadioLib 7 upgrade needed, since it rejects the old request.
+The airtime is costed as plain 4/8.
 
 Sensitivity is the calculated demodulation floor, `-174 + 10log10(BW) + NF +
 SNR_limit`, with a 6 dB noise figure (6.5 at 2.4 GHz). It is a model, not a
@@ -225,7 +232,9 @@ aircraft on the bench and props off.
 
 Do this last, and over a wired-quality link.
 
-- **Update** page, upload a `.bin` (`.bin.gz` also works on ESP8266).
+- **Update** page, upload a `.bin` on ESP32, and the `.bin.gz` on an ESP8285:
+  on a 1 MB part the plain `.bin` never fits in the space an update is
+  received into (see `targets/esp8285_1m.ld`).
 - The radios deliberately stop while an upload is in flight: flash writes stall
   the CPU for milliseconds at a time, and beaconing through that produces
   corrupt transmissions and a starved web server.

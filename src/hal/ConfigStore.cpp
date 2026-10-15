@@ -43,6 +43,7 @@ bool ConfigStore::begin() {
 
 bool ConfigStore::load(Settings& cfg) {
     corrupt_ = false;
+    fresh_ = false;
     if (!mounted_) {
         return false;
     }
@@ -55,6 +56,7 @@ bool ConfigStore::load(Settings& cfg) {
         // Genuinely nothing saved: first boot. Writing the defaults out now
         // means the file exists and can be edited from the next boot onward.
         save(cfg, nullptr);
+        fresh_ = true;
         return false;
     }
 

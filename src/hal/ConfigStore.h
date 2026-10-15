@@ -44,10 +44,14 @@ public:
     // True when the last load() found a file it could not parse, so the UI can
     // warn that the running config is not the saved one.
     bool lastLoadCorrupt() const { return corrupt_; }
+    // True when the last load() found no config at all: a first boot, with the
+    // defaults just written out.
+    bool lastLoadFresh() const { return fresh_; }
 
 private:
     bool mounted_ = false;
     bool corrupt_ = false;
+    bool fresh_ = false;
 };
 
 }  // namespace ff

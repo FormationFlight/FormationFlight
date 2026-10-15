@@ -15,17 +15,22 @@ in the group.
 ## 1. Flash the firmware
 
 Pick the PlatformIO environment matching your board and radio, then build and
-upload over USB:
+upload over USB. For an ExpressLRS receiver, find the board and its environment
+with `python scripts/elrs_targets.py list`, then name the board, and the LoRa
+band to boot on, when you build. The band can be changed later in the web UI;
+every node in the group has to be on the same one:
 
 ```bash
-pio run -e expresslrs_rx_2400_via_UART -t upload
+ELRS_TARGET=happymodel.rx_900.es900 ELRS_BAND=915 pio run -e Unified_ESP8285_900_via_UART -t upload
 ```
 
 The environment names live in `targets/*.ini`. See
 [`explainers/building-the-firmware.md`](explainers/building-the-firmware.md)
 for the full list and for the OTA (`_via_WiFi`) variants. A node already
-running v2 can also be updated from its own web UI: the *Update* page takes a
-`firmware.bin` and reboots itself when the write completes.
+running v2 can also be updated from its own web UI: the *Update* page takes the
+firmware and reboots itself when the write completes. On an ESP8285 (every
+ExpressLRS 900 MHz or 2.4 GHz receiver) upload the `.bin.gz`, not the `.bin`:
+a 1 MB part only has room to receive the compressed image.
 
 You do not need to upload a filesystem image. The node mounts LittleFS at
 boot, formats it only if it cannot be mounted at all, and writes a default

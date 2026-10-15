@@ -372,7 +372,26 @@ function Radios({ status }) {
 
 const boolOptions = [[1, 'Yes'], [0, 'No']];
 
-function Settings() {
+// What each band is called in the band picker. Only the ones the node says its
+// board can run are offered (node.lora_bands): ExpressLRS hardware is matched for
+// 868/915 and 2.4 GHz and never lists 433.
+const LORA_BAND_NAMES = {
+  433: '433 MHz (Region 1 ISM, 10 mW)',
+  868: '868 MHz (EU, 869.4-869.65 sub-band)',
+  915: '915 MHz (US / AU)',
+  2400: '2.4 GHz',
+};
+
+function loraBandOptions(node, configured) {
+  const bands = (node && node.lora_bands) || [];
+  const opts = [[0, 'Flashed default']].concat(bands.map(b => [b, LORA_BAND_NAMES[b] || b + ' MHz']));
+  if (configured && !bands.includes(configured)) {
+    opts.push([configured, (LORA_BAND_NAMES[configured] || configured + ' MHz') + ' - not on this board']);
+  }
+  return opts;
+}
+
+function Settings({ status }) {
   const [cfg, setCfg] = useState(null);
   const [base, setBase] = useState(null);
   const [result, setResult] = useState(null);
@@ -438,8 +457,11 @@ function Settings() {
       tip="2.4 GHz, short range, almost no airtime per frame. This is what makes two nodes on a bench see each other instantly, and what carries the formation at close range." />
     <${Setting} title="LoRa" value=${radios.lora_enabled} setfn=${mk('radios', 'lora_enabled')} type="switch"
       tip="Long range, but each frame occupies the channel for milliseconds rather than microseconds, so the rate controller backs its beacon off much harder as the group grows." />
+    <${Setting} title="LoRa band" value=${radios.lora_band || 0} setfn=${mk('radios', 'lora_band')} type="select"
+      options=${loraBandOptions(status && status.node, radios.lora_band)}
+      tip="Which band LoRa runs on. Only the bands this board's RF front end is built for are listed. Flashed default is the band the firmware was configured with; on a board that can run several and was flashed without one, LoRa stays off until you pick here. Every node in the group has to be on the same band. Takes effect at the next boot." />
     <${Setting} title="LoRa TX power" value=${radios.lora_power_dbm} setfn=${mk('radios', 'lora_power_dbm')} type="number" addonRight="dBm"
-      tip="0 leaves the target's compiled-in default alone; 1-30 overrides it, clamped by the driver to what the part can actually do. Check your local limit before raising it." />
+      tip="The most you want out of the antenna port. 0 is the default, 10 mW: LoRa reaches kilometres on that, and it keeps out of your control link's way. On ExpressLRS hardware this rounds down to the board's nearest power level (10, 25, 50, 100, 250, 500 mW...), never below its lowest; the dashboard shows what it settled on. The band's legal ceiling caps it either way. Applies immediately, no reboot. Check your local limit before raising it." />
 
     <${SectionTitle} title="WiFi" note="Getting this wrong is how you lose the web UI. Apply it first, confirm the node is still reachable, and only then Save." />
     <${Setting} title="Run own AP" value=${wifi.ap} setfn=${mk('wifi', 'ap')} type="switch"
@@ -993,6 +1015,10 @@ const App = function () {
       The node is running compile-time defaults for this boot and has left the file alone so it can be recovered.
       Saving from here overwrites it.
     <//>`}
+    ${status && status.node && (status.node.lora_bands || []).length > 1 && !status.node.lora_band && html`
+    <${Banner} tone="warn" title="LoRa is off: no band chosen.">
+      This board can run more than one band and was flashed without one. <a href="#/settings" class="underline">Pick one under Settings, Radios<//>, then reboot.
+    <//>`}
     ${status && status.reboot_required && html`
     <${Banner} tone="warn" title="Reboot required.">
       A setting that only takes effect at boot has changed.
@@ -1007,7 +1033,7 @@ const App = function () {
       <${Dashboard} default=${true} status=${status} />
       <${Radios} path="/radios" status=${status} />
       <${FollowPage} path="/follow" status=${status} />
-      <${Settings} path="/settings" />
+      <${Settings} path="/settings" status=${status} />
       <${Simulator} path="/sim" status=${status} sim=${sim} refreshSim=${() => simRefresh.current()} />
       <${System} path="/system" status=${status} />
       <${Update} path="/update" />
