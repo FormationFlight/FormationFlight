@@ -28,14 +28,27 @@ uint8_t estimateRadarLq(const Peer& peer, uint32_t now_ms, uint32_t timeout_ms) 
 }
 
 size_t buildMspSetRadarPos(uint8_t slot_id, const Peer& peer, uint32_t now_ms,
-                          uint32_t timeout_ms, uint8_t* buf, size_t cap) {
-    if (cap < kMspRadarFrameSize) {
+                          uint32_t timeout_ms, uint8_t* buf, size_t cap,
+                          bool with_name) {
+    // Name extension length: 0 when disabled or when the peer has no name yet
+    // (see the header for why an empty name is not sent as an empty extension).
+    size_t name_len = 0;
+    if (with_name) {
+        while (name_len < kMaxNameLen && peer.name[name_len] != '\0') {
+            name_len++;
+        }
+    }
+    const uint16_t payload_len =
+        static_cast<uint16_t>(kPayloadLen + (name_len > 0 ? 1 + name_len : 0));
+    const size_t frame_len = kMspRadarFrameSize - kPayloadLen + payload_len;
+    if (cap < frame_len) {
         return 0;
     }
 
     // Payload, matching msp_radar_pos_t's field order/widths byte-for-byte:
     // id(u8) state(u8) lat(i32) lon(i32) alt(i32) heading(u16) speed(u16) lq(u8)
-    uint8_t payload[kPayloadLen];
+    // then, optionally: name_len(u8) name[name_len]
+    uint8_t payload[kPayloadLen + kMspRadarNameExtMaxSize];
     uint8_t* p = payload;
     wire::put_u8(p, slot_id);
     wire::put_u8(p, (peer.flags & POSITION_FLAG_ARMED) ? 1 : 0);
@@ -45,6 +58,12 @@ size_t buildMspSetRadarPos(uint8_t slot_id, const Peer& peer, uint32_t now_ms,
     wire::put_u16(p, static_cast<uint16_t>(peer.course_ddeg / 10));  // ddeg -> deg
     wire::put_u16(p, peer.speed_cms);
     wire::put_u8(p, estimateRadarLq(peer, now_ms, timeout_ms));
+    if (name_len > 0) {
+        wire::put_u8(p, static_cast<uint8_t>(name_len));
+        for (size_t i = 0; i < name_len; i++) {
+            wire::put_u8(p, static_cast<uint8_t>(peer.name[i]));
+        }
+    }
 
     uint8_t* out = buf;
     wire::put_u8(out, '$');
@@ -52,15 +71,15 @@ size_t buildMspSetRadarPos(uint8_t slot_id, const Peer& peer, uint32_t now_ms,
     wire::put_u8(out, '<');
     wire::put_u8(out, 0);  // flag
     wire::put_u16(out, kMspSetRadarPos);
-    wire::put_u16(out, kPayloadLen);
+    wire::put_u16(out, payload_len);
 
     uint8_t crc = 0;
     crc = mspCrc8DvbS2(crc, 0);  // flag
     crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kMspSetRadarPos & 0xFF));
     crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kMspSetRadarPos >> 8));
-    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kPayloadLen & 0xFF));
-    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(kPayloadLen >> 8));
-    for (uint16_t i = 0; i < kPayloadLen; i++) {
+    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(payload_len & 0xFF));
+    crc = mspCrc8DvbS2(crc, static_cast<uint8_t>(payload_len >> 8));
+    for (uint16_t i = 0; i < payload_len; i++) {
         wire::put_u8(out, payload[i]);
         crc = mspCrc8DvbS2(crc, payload[i]);
     }
