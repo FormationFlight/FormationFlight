@@ -143,6 +143,10 @@ void applyLiveConfig(const ff::Settings& cfg) {
     }
 #endif
 
+    // Only changes the shape of the next radar frame, so it can follow the
+    // config live.
+    g_msp_radar_output.setSendPeerName(cfg.msp_radar_peer_name);
+
     // The simulator is always constructed, precisely so it can be switched on
     // and off from the bench without a reboot.
     g_sim.setEnabled(cfg.sim.enabled);
@@ -421,6 +425,7 @@ void setup() {
     // MSP UART: always brought up (see g_msp_radar_output above).
     Stream& mspStream = beginMspUart();
     g_msp_radar_output.begin(mspStream, cfg.peer_timeout_ms);
+    g_msp_radar_output.setSendPeerName(g_settings.msp_radar_peer_name);
     g_fc.begin(mspStream);
 
 #ifdef GNSS_ENABLED

@@ -28,6 +28,15 @@ constexpr uint16_t kMspSetRadarPos = 0x100B;  // MSP2_COMMON_SET_RADAR_POS
 // Total frame size for one MSP2_COMMON_SET_RADAR_POS message (fixed payload).
 constexpr size_t kMspRadarFrameSize = 28;  // 9 header/crc bytes + 19 payload bytes
 
+// Optional peer-name extension, appended after the fixed payload: one length
+// byte followed by that many name characters, no terminator. Stock INAV reads
+// only the first 19 payload bytes and ignores anything after them, so a frame
+// carrying the extension is still accepted by an FC that knows nothing about
+// it; an FC that does can put the name on the OSD next to the radar target.
+constexpr size_t kMspRadarNameExtMaxSize = 1 + kMaxNameLen;
+// Largest frame buildMspSetRadarPos can produce, extension included.
+constexpr size_t kMspRadarFrameMaxSize = kMspRadarFrameSize + kMspRadarNameExtMaxSize;
+
 // Coarse link-quality estimate (0..4) from how recently the peer was heard,
 // relative to its own timeout window: peers heard within the last quarter of the
 // timeout score 4, progressively lower as they approach the timeout, 0 once
@@ -37,9 +46,16 @@ uint8_t estimateRadarLq(const Peer& peer, uint32_t now_ms, uint32_t timeout_ms);
 // Builds the full MSP2 frame for MSP2_COMMON_SET_RADAR_POS describing one peer.
 // slot_id is the small integer ID (1..255) this sink assigns the peer for MSP
 // purposes -- MSP radar consumers expect compact IDs, not our 32-bit UIDs.
-// Returns the frame length (always kMspRadarFrameSize on success), or 0 if cap is
-// too small.
+//
+// With with_name set, the peer-name extension is appended -- but only when the
+// peer actually has a name. A peer whose announce has not been heard yet has an
+// empty one, and sending that would blank whatever the FC is already showing;
+// leaving the extension off tells the FC to keep what it has.
+//
+// Returns the frame length -- kMspRadarFrameSize without the extension, up to
+// kMspRadarFrameMaxSize with it -- or 0 if cap is too small for the frame.
 size_t buildMspSetRadarPos(uint8_t slot_id, const Peer& peer, uint32_t now_ms,
-                          uint32_t timeout_ms, uint8_t* buf, size_t cap);
+                          uint32_t timeout_ms, uint8_t* buf, size_t cap,
+                          bool with_name = false);
 
 }  // namespace ff

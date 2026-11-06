@@ -423,6 +423,16 @@ beacon every 720 ms no matter what else is set.
 that should hear every other over ESP-NOW must agree on it. 1, 6 and 11 are the
 non-overlapping choices.
 
+`msp.radar_peer_name` (default `false`) appends the peer's name to every
+`MSP2_COMMON_SET_RADAR_POS` frame sent to the flight controller: after the fixed
+19-byte payload comes a length byte and that many name characters, no
+terminator. Stock INAV reads only the first 19 bytes and ignores the rest, so
+the switch is harmless there; a firmware built to read the extension can put the
+name on the OSD next to the radar target. A peer whose name is not yet known
+(its announce has not been heard) is sent without the extension, so the FC keeps
+whatever it was showing rather than blanking it. Takes effect on the next frame,
+no reboot.
+
 ## POST /api/config
 
 Body is a partial config. Only the keys present are applied, then the whole

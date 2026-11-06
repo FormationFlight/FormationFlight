@@ -23,11 +23,18 @@ class MspRadarOutput : public IMspRadarSink {
 public:
     void begin(Stream& stream, uint32_t peer_timeout_ms);
 
+    // Whether each frame carries the peer-name extension (Settings::
+    // msp_radar_peer_name). Safe to flip live: it only changes what the next
+    // frame looks like, and an FC that does not read the extension ignores it.
+    void setSendPeerName(bool enabled) { send_peer_name_ = enabled; }
+    bool sendPeerName() const { return send_peer_name_; }
+
     void sendRadarPosition(uint8_t slot_id, const Peer& peer) override;
 
 private:
     Stream* stream_ = nullptr;
     uint32_t peer_timeout_ms_ = 6000;
+    bool send_peer_name_ = false;
 };
 
 }  // namespace ff
