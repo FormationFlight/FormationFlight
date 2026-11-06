@@ -161,3 +161,36 @@ jobs:
           --prerelease \
           --title "Development build" \
           --notes "Built from ${GITHUB_SHA::7} on master. Not a release: for testing, and flashable from the web installer's development channel."
+
+  # The docs site copies firmware into its web installer at build time, so
+  # tell it to rebuild once a release (stable or development) is published.
+  # GITHUB_TOKEN cannot dispatch to another repository, so this uses a token
+  # from the ff-docs-dispatch GitHub App (Contents: write, installed on Docs).
+  # Without its secrets this is skipped, and the docs pick the release up on
+  # their daily run.
+  docs:
+    runs-on: ubuntu-latest
+    needs: [release, development]
+    if: always() && (needs.release.result == 'success' || needs.development.result == 'success')
+    env:
+      HAS_APP: ${{ secrets.DOCS_APP_ID != '' && secrets.DOCS_APP_PRIVATE_KEY != '' }}
+    steps:
+    - name: Check for the app's secrets
+      if: env.HAS_APP != 'true'
+      run: echo "::warning::DOCS_APP_ID / DOCS_APP_PRIVATE_KEY are not set; the docs will pick this release up on their daily rebuild"
+
+    - name: Get a token for the docs repo
+      id: token
+      if: env.HAS_APP == 'true'
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ secrets.DOCS_APP_ID }}
+        private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}
+        owner: FormationFlight
+        repositories: Docs
+
+    - name: Rebuild the docs site
+      if: env.HAS_APP == 'true'
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+      run: gh api repos/FormationFlight/Docs/dispatches -f event_type=firmware
