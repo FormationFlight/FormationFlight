@@ -161,3 +161,23 @@ jobs:
           --prerelease \
           --title "Development build" \
           --notes "Built from ${GITHUB_SHA::7} on master. Not a release: for testing, and flashable from the web installer's development channel."
+
+  # The docs site copies firmware into its web installer at build time, so
+  # tell it to rebuild once a release (stable or development) is published.
+  # GITHUB_TOKEN cannot dispatch to another repository: DOCS_DISPATCH_TOKEN is
+  # a fine-grained token with Contents: write on FormationFlight/Docs. Without
+  # it this is skipped, and the docs pick the release up on their daily run.
+  docs:
+    runs-on: ubuntu-latest
+    needs: [release, development]
+    if: always() && (needs.release.result == 'success' || needs.development.result == 'success')
+    steps:
+    - name: Rebuild the docs site
+      env:
+        GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+      run: |
+        if [ -z "$GH_TOKEN" ]; then
+          echo "::warning::DOCS_DISPATCH_TOKEN is not set; the docs will pick this release up on their daily rebuild"
+          exit 0
+        fi
+        gh api repos/FormationFlight/Docs/dispatches -f event_type=firmware
